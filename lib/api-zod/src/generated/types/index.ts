@@ -6,4 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./domainScores";
 export * from "./healthStatus";
+export * from "./questGenerationRequest";
+export * from "./questGenerationResponse";
+export * from "./questItem";
+export * from "./questItemType";
+export * from "./systemMessageRequest";
+export * from "./systemMessageRequestMessageType";
+export * from "./systemMessageRequestTrajectory";
+export * from "./systemMessageResponse";

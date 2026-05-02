@@ -5,18 +5,27 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
+  MutationFunction,
   QueryFunction,
   QueryKey,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { HealthStatus } from "./api.schemas";
+import type {
+  HealthStatus,
+  QuestGenerationRequest,
+  QuestGenerationResponse,
+  SystemMessageRequest,
+  SystemMessageResponse,
+} from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
-import type { ErrorType } from "../custom-fetch";
+import type { ErrorType, BodyType } from "../custom-fetch";
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
@@ -99,3 +108,177 @@ export function useHealthCheck<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Generates an AI-powered message from THE SYSTEM persona
+ * @summary Generate a SYSTEM message
+ */
+export const getGenerateSystemMessageUrl = () => {
+  return `/api/system/message`;
+};
+
+export const generateSystemMessage = async (
+  systemMessageRequest: SystemMessageRequest,
+  options?: RequestInit,
+): Promise<SystemMessageResponse> => {
+  return customFetch<SystemMessageResponse>(getGenerateSystemMessageUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(systemMessageRequest),
+  });
+};
+
+export const getGenerateSystemMessageMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSystemMessage>>,
+    TError,
+    { data: BodyType<SystemMessageRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateSystemMessage>>,
+  TError,
+  { data: BodyType<SystemMessageRequest> },
+  TContext
+> => {
+  const mutationKey = ["generateSystemMessage"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateSystemMessage>>,
+    { data: BodyType<SystemMessageRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return generateSystemMessage(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateSystemMessageMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateSystemMessage>>
+>;
+export type GenerateSystemMessageMutationBody = BodyType<SystemMessageRequest>;
+export type GenerateSystemMessageMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Generate a SYSTEM message
+ */
+export const useGenerateSystemMessage = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSystemMessage>>,
+    TError,
+    { data: BodyType<SystemMessageRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateSystemMessage>>,
+  TError,
+  { data: BodyType<SystemMessageRequest> },
+  TContext
+> => {
+  return useMutation(getGenerateSystemMessageMutationOptions(options));
+};
+
+/**
+ * Generates AI-powered daily quests for the user
+ * @summary Generate daily quests
+ */
+export const getGenerateQuestsUrl = () => {
+  return `/api/system/quests`;
+};
+
+export const generateQuests = async (
+  questGenerationRequest: QuestGenerationRequest,
+  options?: RequestInit,
+): Promise<QuestGenerationResponse> => {
+  return customFetch<QuestGenerationResponse>(getGenerateQuestsUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(questGenerationRequest),
+  });
+};
+
+export const getGenerateQuestsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateQuests>>,
+    TError,
+    { data: BodyType<QuestGenerationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateQuests>>,
+  TError,
+  { data: BodyType<QuestGenerationRequest> },
+  TContext
+> => {
+  const mutationKey = ["generateQuests"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateQuests>>,
+    { data: BodyType<QuestGenerationRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return generateQuests(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateQuestsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateQuests>>
+>;
+export type GenerateQuestsMutationBody = BodyType<QuestGenerationRequest>;
+export type GenerateQuestsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Generate daily quests
+ */
+export const useGenerateQuests = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateQuests>>,
+    TError,
+    { data: BodyType<QuestGenerationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateQuests>>,
+  TError,
+  { data: BodyType<QuestGenerationRequest> },
+  TContext
+> => {
+  return useMutation(getGenerateQuestsMutationOptions(options));
+};

@@ -8,3 +8,79 @@
 export interface HealthStatus {
   status: string;
 }
+
+export interface DomainScores {
+  BODY: number;
+  MIND: number;
+  WEALTH: number;
+  DISCIPLINE: number;
+}
+
+export type SystemMessageRequestMessageType =
+  (typeof SystemMessageRequestMessageType)[keyof typeof SystemMessageRequestMessageType];
+
+export const SystemMessageRequestMessageType = {
+  morning_briefing: "morning_briefing",
+  nightly_debrief: "nightly_debrief",
+  quest_assignment: "quest_assignment",
+  rank_change: "rank_change",
+  shadow_self: "shadow_self",
+  milestone: "milestone",
+  failure_response: "failure_response",
+} as const;
+
+export type SystemMessageRequestTrajectory =
+  (typeof SystemMessageRequestTrajectory)[keyof typeof SystemMessageRequestTrajectory];
+
+export const SystemMessageRequestTrajectory = {
+  up: "up",
+  stable: "stable",
+  down: "down",
+} as const;
+
+export interface SystemMessageRequest {
+  messageType: SystemMessageRequestMessageType;
+  username: string;
+  rank: string;
+  domainScores: DomainScores;
+  trajectory: SystemMessageRequestTrajectory;
+  shadowActive: boolean;
+  shadowGap: number;
+  questCount: number;
+  completedQuestCount: number;
+  primaryGoal: string;
+  dayNumber: number;
+  rivalMovement?: string | null;
+}
+
+export interface SystemMessageResponse {
+  message: string;
+  messageType: string;
+}
+
+export interface QuestGenerationRequest {
+  username: string;
+  rank: string;
+  domainScores: DomainScores;
+  primaryGoal: string;
+  weakestDomain: string;
+  recentLogs: string[];
+}
+
+export type QuestItemType = (typeof QuestItemType)[keyof typeof QuestItemType];
+
+export const QuestItemType = {
+  daily: "daily",
+  weekly: "weekly",
+} as const;
+
+export interface QuestItem {
+  title: string;
+  description: string;
+  domain: string;
+  type: QuestItemType;
+}
+
+export interface QuestGenerationResponse {
+  quests: QuestItem[];
+}

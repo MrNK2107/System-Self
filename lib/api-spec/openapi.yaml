@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: system
+    description: THE SYSTEM AI persona
 paths:
   /healthz:
     get:
@@ -24,6 +26,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /system/message:
+    post:
+      operationId: generateSystemMessage
+      tags: [system]
+      summary: Generate a SYSTEM message
+      description: Generates an AI-powered message from THE SYSTEM persona
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SystemMessageRequest"
+      responses:
+        "200":
+          description: Generated message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemMessageResponse"
+  /system/quests:
+    post:
+      operationId: generateQuests
+      tags: [system]
+      summary: Generate daily quests
+      description: Generates AI-powered daily quests for the user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestGenerationRequest"
+      responses:
+        "200":
+          description: Generated quests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestGenerationResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +73,113 @@ components:
           type: string
       required:
         - status
-
+    DomainScores:
+      type: object
+      properties:
+        BODY:
+          type: number
+        MIND:
+          type: number
+        WEALTH:
+          type: number
+        DISCIPLINE:
+          type: number
+      required: [BODY, MIND, WEALTH, DISCIPLINE]
+    SystemMessageRequest:
+      type: object
+      properties:
+        messageType:
+          type: string
+          enum: [morning_briefing, nightly_debrief, quest_assignment, rank_change, shadow_self, milestone, failure_response]
+        username:
+          type: string
+        rank:
+          type: string
+        domainScores:
+          $ref: "#/components/schemas/DomainScores"
+        trajectory:
+          type: string
+          enum: [up, stable, down]
+        shadowActive:
+          type: boolean
+        shadowGap:
+          type: number
+        questCount:
+          type: number
+        completedQuestCount:
+          type: number
+        primaryGoal:
+          type: string
+        dayNumber:
+          type: number
+        rivalMovement:
+          type: string
+          nullable: true
+      required:
+        - messageType
+        - username
+        - rank
+        - domainScores
+        - trajectory
+        - shadowActive
+        - shadowGap
+        - questCount
+        - completedQuestCount
+        - primaryGoal
+        - dayNumber
+    SystemMessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        messageType:
+          type: string
+      required:
+        - message
+        - messageType
+    QuestGenerationRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        rank:
+          type: string
+        domainScores:
+          $ref: "#/components/schemas/DomainScores"
+        primaryGoal:
+          type: string
+        weakestDomain:
+          type: string
+        recentLogs:
+          type: array
+          items:
+            type: string
+      required:
+        - username
+        - rank
+        - domainScores
+        - primaryGoal
+        - weakestDomain
+        - recentLogs
+    QuestItem:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        domain:
+          type: string
+        type:
+          type: string
+          enum: [daily, weekly]
+      required: [title, description, domain, type]
+    QuestGenerationResponse:
+      type: object
+      properties:
+        quests:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuestItem"
+      required:
+        - quests

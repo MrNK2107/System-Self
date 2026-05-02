@@ -14,3 +14,69 @@ import * as zod from "zod";
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * Generates an AI-powered message from THE SYSTEM persona
+ * @summary Generate a SYSTEM message
+ */
+export const GenerateSystemMessageBody = zod.object({
+  messageType: zod.enum([
+    "morning_briefing",
+    "nightly_debrief",
+    "quest_assignment",
+    "rank_change",
+    "shadow_self",
+    "milestone",
+    "failure_response",
+  ]),
+  username: zod.string(),
+  rank: zod.string(),
+  domainScores: zod.object({
+    BODY: zod.number(),
+    MIND: zod.number(),
+    WEALTH: zod.number(),
+    DISCIPLINE: zod.number(),
+  }),
+  trajectory: zod.enum(["up", "stable", "down"]),
+  shadowActive: zod.boolean(),
+  shadowGap: zod.number(),
+  questCount: zod.number(),
+  completedQuestCount: zod.number(),
+  primaryGoal: zod.string(),
+  dayNumber: zod.number(),
+  rivalMovement: zod.string().nullish(),
+});
+
+export const GenerateSystemMessageResponse = zod.object({
+  message: zod.string(),
+  messageType: zod.string(),
+});
+
+/**
+ * Generates AI-powered daily quests for the user
+ * @summary Generate daily quests
+ */
+export const GenerateQuestsBody = zod.object({
+  username: zod.string(),
+  rank: zod.string(),
+  domainScores: zod.object({
+    BODY: zod.number(),
+    MIND: zod.number(),
+    WEALTH: zod.number(),
+    DISCIPLINE: zod.number(),
+  }),
+  primaryGoal: zod.string(),
+  weakestDomain: zod.string(),
+  recentLogs: zod.array(zod.string()),
+});
+
+export const GenerateQuestsResponse = zod.object({
+  quests: zod.array(
+    zod.object({
+      title: zod.string(),
+      description: zod.string(),
+      domain: zod.string(),
+      type: zod.enum(["daily", "weekly"]),
+    }),
+  ),
+});

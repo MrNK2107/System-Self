@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "0_F9IuJxX-UThJKz5-yOi"
+uri = "file://artifacts/system-self/assets/images/icon.png"
+type = "image"
+title = "generated_image"
