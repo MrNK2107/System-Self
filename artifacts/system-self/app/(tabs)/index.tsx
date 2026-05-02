@@ -22,6 +22,7 @@ import { useSystemAI } from "@/hooks/useSystemAI";
 import { RankUpModal } from "@/components/RankUpModal";
 import { NightlyDebriefModal } from "@/components/NightlyDebriefModal";
 import { useNightlyDebrief } from "@/hooks/useNightlyDebrief";
+import { StreakBrokenModal } from "@/components/StreakBrokenModal";
 
 const DOMAIN_COLORS: Record<Domain, string> = {
   BODY: "#E05555",
@@ -125,7 +126,7 @@ const shadowStyles = StyleSheet.create({
 export default function Dashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank, getShadowScores, pendingRankUp, acknowledgeRankUp } = useApp();
+  const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank, getShadowScores, pendingRankUp, acknowledgeRankUp, pendingStreakBreak, acknowledgeStreakBreak } = useApp();
   const { generateMessage, loading: aiLoading } = useSystemAI();
   const { checkAndTriggerDebrief, pendingDebrief, acknowledgeDebrief } = useNightlyDebrief();
 
@@ -207,6 +208,13 @@ export default function Dashboard() {
           username={user.username}
           dayNumber={user.dayNumber}
           onAcknowledge={acknowledgeDebrief}
+        />
+      )}
+      {pendingStreakBreak && (
+        <StreakBrokenModal
+          visible={!!pendingStreakBreak}
+          data={pendingStreakBreak}
+          onAcknowledge={acknowledgeStreakBreak}
         />
       )}
       <ScrollView

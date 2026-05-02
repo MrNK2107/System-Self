@@ -15,7 +15,8 @@ type MessageType =
   | "rank_change"
   | "shadow_self"
   | "milestone"
-  | "failure_response";
+  | "failure_response"
+  | "streak_break";
 
 interface GeneratedQuest {
   title: string;
@@ -106,6 +107,7 @@ function getFallbackMessage(
     shadow_self: `Your Shadow Self has been initialized. It is already ahead of you. This is information.`,
     milestone: `Progress logged. Continue.`,
     failure_response: `Quest failure logged. The timestamp is permanent.`,
+    streak_break: `Streak data erased. The gap with your Shadow Self just widened. This is recorded.`,
   };
   return fallbacks[type];
 }

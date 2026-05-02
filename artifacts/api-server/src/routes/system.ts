@@ -86,6 +86,10 @@ ${rivalMovement ? `- Rival movement: ${rivalMovement}` : ""}`;
       instruction: `Generate a failure response for a missed quest. No anger. Just timestamp and updated verdict. 1-2 sentences.`,
       maxWords: 35,
     },
+    streak_break: {
+      instruction: `Generate a streak break notification. The user missed logging one or more domains. Cold, clinical, no sympathy. Reference the gap this creates with their Shadow Self. State the fact, nothing more. 2 sentences maximum.`,
+      maxWords: 45,
+    },
   };
 
   const config = typeConfigs[messageType] ?? typeConfigs["morning_briefing"];

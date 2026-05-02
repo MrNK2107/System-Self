@@ -89,6 +89,27 @@ export interface DebriefData {
   verdict: DebriefVerdict;
 }
 
+export interface StreakBreakData {
+  detectedAt: string;
+  brokenDomains: { domain: Domain; lostStreak: number }[];
+  penalty: number;
+  aiText: string;
+}
+
+// --- helpers ----------------------------------------------------------------
+
+export function getStreakMultiplier(streak: number): number {
+  return Math.min(2.0, 1.0 + streak * 0.1);
+}
+
+export function getStreakTier(streak: number): "none" | "low" | "mid" | "high" | "max" {
+  if (streak === 0) return "none";
+  if (streak <= 2) return "low";
+  if (streak <= 6) return "mid";
+  if (streak <= 9) return "high";
+  return "max";
+}
+
 const RANK_ORDER: Record<Rank, number> = { E: 0, D: 1, C: 2, B: 3, A: 4, S: 5 };
 const CODENAME_PREFIXES: Record<Rank, string> = {
   E: "GHOST",
@@ -105,6 +126,8 @@ function generateCodename(rank: Rank): string {
   return `${CODENAME_PREFIXES[rank]} // ${id}-${num}`;
 }
 
+// --- types ------------------------------------------------------------------
+
 interface AppState {
   user: User | null;
   domainScores: DomainScore[];
@@ -117,11 +140,12 @@ interface AppState {
   pendingRankUp: PendingRankUp | null;
   dailyBaseline: DailyBaseline | null;
   pendingDebrief: DebriefData | null;
+  pendingStreakBreak: StreakBreakData | null;
 }
 
 interface AppContextType extends AppState {
   setUser: (user: User) => Promise<void>;
-  updateDomainScore: (domain: Domain, delta: number) => Promise<void>;
+  updateDomainScore: (domain: Domain, delta: number, applyStreakBonus?: boolean) => Promise<void>;
   addLog: (entry: Omit<LogEntry, "id" | "timestamp">) => Promise<void>;
   setQuests: (quests: Quest[]) => Promise<void>;
   completeQuest: (questId: string) => Promise<void>;
@@ -136,8 +160,11 @@ interface AppContextType extends AppState {
   acknowledgeRankUp: () => Promise<void>;
   setPendingDebrief: (debrief: DebriefData) => Promise<void>;
   acknowledgeDebrief: () => Promise<void>;
+  acknowledgeStreakBreak: () => Promise<void>;
   resetAll: () => Promise<void>;
 }
+
+// --- storage ----------------------------------------------------------------
 
 const STORAGE_KEYS = {
   USER: "@system_self:user",
@@ -150,18 +177,28 @@ const STORAGE_KEYS = {
   BASELINE: "@system_self:baseline",
   DEBRIEF: "@system_self:debrief",
   LAST_DEBRIEF: "@system_self:last_debrief",
+  STREAK_BREAK: "@system_self:streak_break",
 };
 
 export { STORAGE_KEYS };
 
+// --- constants --------------------------------------------------------------
+
 const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
 
-const DEFAULT_SCORES: DomainScore[] = [
-  { domain: "BODY", score: 50, streak: 0, lastLog: null },
-  { domain: "MIND", score: 50, streak: 0, lastLog: null },
-  { domain: "WEALTH", score: 50, streak: 0, lastLog: null },
-  { domain: "DISCIPLINE", score: 50, streak: 0, lastLog: null },
-];
+const BASE_SCORE_DELTAS: Record<Domain, number> = {
+  BODY: 2.5,
+  MIND: 2.5,
+  WEALTH: 2.0,
+  DISCIPLINE: 3.0,
+};
+
+const DEFAULT_SCORES: DomainScore[] = DOMAINS.map(d => ({
+  domain: d,
+  score: 50,
+  streak: 0,
+  lastLog: null,
+}));
 
 const DEFAULT_RIVALS: Rival[] = [
   {
@@ -195,11 +232,7 @@ const DEFAULT_SHADOW: ShadowSelf = {
   gap: 0,
 };
 
-const AppContext = createContext<AppContextType | null>(null);
-
-function generateId(): string {
-  return Date.now().toString() + Math.random().toString(36).substr(2, 9);
-}
+// --- pure helpers -----------------------------------------------------------
 
 function computeRankFromScore(score: number): Rank {
   if (score >= 86) return "S";
@@ -254,6 +287,27 @@ function makeBaseline(scores: DomainScore[]): DailyBaseline {
   };
 }
 
+/** Detect domains whose streaks were broken (lastLog < yesterday and streak > 0) */
+function detectStreakBreaks(scores: DomainScore[]): { domain: Domain; lostStreak: number }[] {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split("T")[0]!;
+
+  return scores
+    .filter(s => s.streak > 0 && s.lastLog !== null && s.lastLog < yesterdayStr)
+    .map(s => ({ domain: s.domain, lostStreak: s.streak }));
+}
+
+// --- context ----------------------------------------------------------------
+
+const AppContext = createContext<AppContextType | null>(null);
+
+function generateId(): string {
+  return Date.now().toString() + Math.random().toString(36).substr(2, 9);
+}
+
+// --- provider ---------------------------------------------------------------
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>({
     user: null,
@@ -267,6 +321,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     pendingRankUp: null,
     dailyBaseline: null,
     pendingDebrief: null,
+    pendingStreakBreak: null,
   });
 
   useEffect(() => {
@@ -277,7 +332,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const [
         userStr, scoresStr, logsStr, questsStr, rivalsStr, shadowStr,
-        rankUpStr, baselineStr, debriefStr,
+        rankUpStr, baselineStr, debriefStr, streakBreakStr,
       ] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.USER),
         AsyncStorage.getItem(STORAGE_KEYS.SCORES),
@@ -288,10 +343,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.getItem(STORAGE_KEYS.RANK_UP),
         AsyncStorage.getItem(STORAGE_KEYS.BASELINE),
         AsyncStorage.getItem(STORAGE_KEYS.DEBRIEF),
+        AsyncStorage.getItem(STORAGE_KEYS.STREAK_BREAK),
       ]);
 
       const user = userStr ? JSON.parse(userStr) as User : null;
-      const domainScores = scoresStr ? JSON.parse(scoresStr) as DomainScore[] : DEFAULT_SCORES;
+      let domainScores = scoresStr ? JSON.parse(scoresStr) as DomainScore[] : DEFAULT_SCORES;
       const logs = logsStr ? JSON.parse(logsStr) as LogEntry[] : [];
       const quests = questsStr ? JSON.parse(questsStr) as Quest[] : [];
       const rivals = rivalsStr ? JSON.parse(rivalsStr) as Rival[] : DEFAULT_RIVALS;
@@ -299,7 +355,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const pendingRankUp = rankUpStr ? JSON.parse(rankUpStr) as PendingRankUp : null;
       const pendingDebrief = debriefStr ? JSON.parse(debriefStr) as DebriefData : null;
 
-      // Ensure daily baseline is fresh for today
+      // --- Streak break detection ---
+      let pendingStreakBreak: StreakBreakData | null = streakBreakStr
+        ? JSON.parse(streakBreakStr) as StreakBreakData
+        : null;
+
+      if (!pendingStreakBreak) {
+        const broken = detectStreakBreaks(domainScores);
+        if (broken.length > 0) {
+          // Penalty: 2 pts per domain broken, capped at 6
+          const penalty = Math.min(6.0, broken.length * 2.0);
+
+          // Reset streaks for broken domains + apply DISCIPLINE penalty
+          domainScores = domainScores.map(s => {
+            if (broken.find(b => b.domain === s.domain)) {
+              return { ...s, streak: 0 };
+            }
+            if (s.domain === "DISCIPLINE") {
+              return { ...s, score: Math.max(0, s.score - penalty) };
+            }
+            return s;
+          });
+
+          await AsyncStorage.setItem(STORAGE_KEYS.SCORES, JSON.stringify(domainScores));
+
+          pendingStreakBreak = {
+            detectedAt: new Date().toISOString(),
+            brokenDomains: broken,
+            penalty,
+            aiText: "",
+          };
+          await AsyncStorage.setItem(STORAGE_KEYS.STREAK_BREAK, JSON.stringify(pendingStreakBreak));
+        }
+      }
+
+      // --- Daily baseline ---
       const today = new Date().toISOString().split("T")[0]!;
       let dailyBaseline: DailyBaseline | null = baselineStr
         ? JSON.parse(baselineStr) as DailyBaseline
@@ -325,6 +415,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         pendingRankUp,
         dailyBaseline,
         pendingDebrief,
+        pendingStreakBreak,
       }));
     } catch {
       setState(prev => ({ ...prev, loading: false }));
@@ -336,13 +427,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({ ...prev, user }));
   }, []);
 
-  const updateDomainScore = useCallback(async (domain: Domain, delta: number) => {
+  const updateDomainScore = useCallback(async (
+    domain: Domain,
+    delta: number,
+    applyStreakBonus = true,
+  ) => {
     setState(prev => {
       if (!prev.user) return prev;
 
+      const currentStreak = prev.domainScores.find(s => s.domain === domain)?.streak ?? 0;
+      const multiplier = applyStreakBonus && delta > 0
+        ? getStreakMultiplier(currentStreak)
+        : 1.0;
+      const actualDelta = Math.round(delta * multiplier * 10) / 10;
+
       const updated = prev.domainScores.map(s => {
         if (s.domain !== domain) return s;
-        const newScore = Math.min(100, Math.max(0, s.score + delta));
+        const newScore = Math.min(100, Math.max(0, s.score + actualDelta));
         const today = new Date().toISOString().split("T")[0]!;
         const wasToday = s.lastLog === today;
         return {
@@ -360,10 +461,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const trajectory = computeTrajectory(updated);
 
       let pendingRankUp = prev.pendingRankUp;
-      if (
-        RANK_ORDER[newRank] > RANK_ORDER[currentRank] &&
-        !prev.pendingRankUp
-      ) {
+      if (RANK_ORDER[newRank] > RANK_ORDER[currentRank] && !prev.pendingRankUp) {
         pendingRankUp = {
           fromRank: currentRank,
           toRank: newRank,
@@ -389,19 +487,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       id: generateId(),
       timestamp: new Date().toISOString(),
     };
-    const domainDeltas: Record<Domain, number> = {
-      BODY: 2.5,
-      MIND: 2.5,
-      WEALTH: 2.0,
-      DISCIPLINE: 3.0,
-    };
     setState(prev => {
       const updated = [...prev.logs, newEntry];
       if (updated.length > 200) updated.splice(0, updated.length - 200);
       AsyncStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(updated));
       return { ...prev, logs: updated };
     });
-    await updateDomainScore(entry.domain, domainDeltas[entry.domain]);
+    await updateDomainScore(entry.domain, BASE_SCORE_DELTAS[entry.domain], true);
   }, [updateDomainScore]);
 
   const setQuests = useCallback(async (quests: Quest[]) => {
@@ -417,7 +509,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.setItem(STORAGE_KEYS.QUESTS, JSON.stringify(updated));
       return { ...prev, quests: updated };
     });
-    await updateDomainScore("DISCIPLINE", 3.0);
+    await updateDomainScore("DISCIPLINE", 3.0, true);
   }, [updateDomainScore]);
 
   const refuseQuest = useCallback(async (questId: string) => {
@@ -428,7 +520,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.setItem(STORAGE_KEYS.QUESTS, JSON.stringify(updated));
       return { ...prev, quests: updated };
     });
-    await updateDomainScore("DISCIPLINE", -1.5);
+    await updateDomainScore("DISCIPLINE", -1.5, false);
   }, [updateDomainScore]);
 
   const acknowledgeRankUp = useCallback(async () => {
@@ -450,12 +542,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const today = new Date().toISOString().split("T")[0]!;
     await AsyncStorage.setItem(STORAGE_KEYS.LAST_DEBRIEF, today);
     await AsyncStorage.removeItem(STORAGE_KEYS.DEBRIEF);
-    // Reset baseline for next day
     setState(prev => {
       const newBaseline = makeBaseline(prev.domainScores);
       AsyncStorage.setItem(STORAGE_KEYS.BASELINE, JSON.stringify(newBaseline));
       return { ...prev, pendingDebrief: null, dailyBaseline: newBaseline };
     });
+  }, []);
+
+  const acknowledgeStreakBreak = useCallback(async () => {
+    await AsyncStorage.removeItem(STORAGE_KEYS.STREAK_BREAK);
+    setState(prev => ({ ...prev, pendingStreakBreak: null }));
   }, []);
 
   const getDomainScore = useCallback((domain: Domain): number => {
@@ -521,6 +617,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       pendingRankUp: null,
       dailyBaseline: null,
       pendingDebrief: null,
+      pendingStreakBreak: null,
     });
   }, []);
 
@@ -543,6 +640,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       acknowledgeRankUp,
       setPendingDebrief,
       acknowledgeDebrief,
+      acknowledgeStreakBreak,
       resetAll,
     }}>
       {children}
