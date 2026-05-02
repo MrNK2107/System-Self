@@ -61,13 +61,32 @@ export interface Rival {
 export interface ShadowSelf {
   active: boolean;
   codename: string;
-  /** Initial domain scores set at activation (user scores + head start) */
   initialScores: Record<Domain, number>;
-  /** Points gained per day per domain — relentless, silent accumulation */
   dailyGainRate: Record<Domain, number>;
   activatedAt: string | null;
-  /** Precomputed overall gap: shadow avg - user avg (positive = shadow is ahead) */
   gap: number;
+}
+
+export interface PendingRankUp {
+  fromRank: Rank;
+  toRank: Rank;
+  newCodename: string;
+}
+
+const RANK_ORDER: Record<Rank, number> = { E: 0, D: 1, C: 2, B: 3, A: 4, S: 5 };
+const CODENAME_PREFIXES: Record<Rank, string> = {
+  E: "GHOST",
+  D: "VECTOR",
+  C: "CIPHER",
+  B: "PHANTOM",
+  A: "WRAITH",
+  S: "ORACLE",
+};
+
+function generateCodename(rank: Rank): string {
+  const id = Math.random().toString(36).substr(2, 3).toUpperCase();
+  const num = Math.floor(Math.random() * 9) + 1;
+  return `${CODENAME_PREFIXES[rank]} // ${id}-${num}`;
 }
 
 interface AppState {
@@ -79,6 +98,7 @@ interface AppState {
   shadowSelf: ShadowSelf;
   trajectory: Trajectory;
   loading: boolean;
+  pendingRankUp: PendingRankUp | null;
 }
 
 interface AppContextType extends AppState {
@@ -95,6 +115,7 @@ interface AppContextType extends AppState {
   getShadowScores: () => Record<Domain, number>;
   getShadowRank: () => Rank;
   initializeShadowSelf: (userScores: Record<Domain, number>, username: string) => Promise<void>;
+  acknowledgeRankUp: () => Promise<void>;
   resetAll: () => Promise<void>;
 }
 
@@ -105,6 +126,7 @@ const STORAGE_KEYS = {
   QUESTS: "@system_self:quests",
   RIVALS: "@system_self:rivals",
   SHADOW: "@system_self:shadow",
+  RANK_UP: "@system_self:rank_up",
 };
 
 const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
@@ -179,25 +201,17 @@ function computeHiddenScore(scores: DomainScore[]): number {
   return (body * 0.2 + mind * 0.2 + wealth * 0.15 + discipline * 0.45) * multiplier;
 }
 
-/** Compute current shadow domain scores based on time elapsed since activation */
 function computeShadowScores(shadow: ShadowSelf): Record<Domain, number> {
-  if (!shadow.active || !shadow.activatedAt) {
-    return shadow.initialScores;
-  }
+  if (!shadow.active || !shadow.activatedAt) return shadow.initialScores;
   const msPerDay = 1000 * 60 * 60 * 24;
   const daysElapsed = (Date.now() - new Date(shadow.activatedAt).getTime()) / msPerDay;
-
   return DOMAINS.reduce((acc, d) => {
-    const gained = daysElapsed * (shadow.dailyGainRate[d] ?? 1.5);
-    acc[d] = Math.min(100, (shadow.initialScores[d] ?? 60) + gained);
+    acc[d] = Math.min(100, (shadow.initialScores[d] ?? 60) + daysElapsed * (shadow.dailyGainRate[d] ?? 1.5));
     return acc;
   }, {} as Record<Domain, number>);
 }
 
-function computeShadowGap(
-  shadow: ShadowSelf,
-  userScores: DomainScore[]
-): number {
+function computeShadowGap(shadow: ShadowSelf, userScores: DomainScore[]): number {
   const shadowScores = computeShadowScores(shadow);
   const shadowAvg = DOMAINS.reduce((s, d) => s + shadowScores[d], 0) / DOMAINS.length;
   const userAvg = userScores.reduce((s, d) => s + d.score, 0) / userScores.length;
@@ -214,6 +228,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     shadowSelf: DEFAULT_SHADOW,
     trajectory: "stable",
     loading: true,
+    pendingRankUp: null,
   });
 
   useEffect(() => {
@@ -222,14 +237,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const loadFromStorage = async () => {
     try {
-      const [userStr, scoresStr, logsStr, questsStr, rivalsStr, shadowStr] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.USER),
-        AsyncStorage.getItem(STORAGE_KEYS.SCORES),
-        AsyncStorage.getItem(STORAGE_KEYS.LOGS),
-        AsyncStorage.getItem(STORAGE_KEYS.QUESTS),
-        AsyncStorage.getItem(STORAGE_KEYS.RIVALS),
-        AsyncStorage.getItem(STORAGE_KEYS.SHADOW),
-      ]);
+      const [userStr, scoresStr, logsStr, questsStr, rivalsStr, shadowStr, rankUpStr] =
+        await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEYS.USER),
+          AsyncStorage.getItem(STORAGE_KEYS.SCORES),
+          AsyncStorage.getItem(STORAGE_KEYS.LOGS),
+          AsyncStorage.getItem(STORAGE_KEYS.QUESTS),
+          AsyncStorage.getItem(STORAGE_KEYS.RIVALS),
+          AsyncStorage.getItem(STORAGE_KEYS.SHADOW),
+          AsyncStorage.getItem(STORAGE_KEYS.RANK_UP),
+        ]);
 
       const user = userStr ? JSON.parse(userStr) as User : null;
       const domainScores = scoresStr ? JSON.parse(scoresStr) as DomainScore[] : DEFAULT_SCORES;
@@ -237,10 +254,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const quests = questsStr ? JSON.parse(questsStr) as Quest[] : [];
       const rivals = rivalsStr ? JSON.parse(rivalsStr) as Rival[] : DEFAULT_RIVALS;
       const shadow = shadowStr ? JSON.parse(shadowStr) as ShadowSelf : DEFAULT_SHADOW;
+      const pendingRankUp = rankUpStr ? JSON.parse(rankUpStr) as PendingRankUp : null;
 
-      // Recompute gap on load (shadow has been accumulating while app was closed)
       const gap = shadow.active ? computeShadowGap(shadow, domainScores) : 0;
-      const shadowSelf = { ...shadow, gap };
       const trajectory = computeTrajectory(domainScores);
 
       setState(prev => ({
@@ -250,9 +266,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         logs,
         quests,
         rivals,
-        shadowSelf,
+        shadowSelf: { ...shadow, gap },
         trajectory,
         loading: false,
+        pendingRankUp,
       }));
     } catch {
       setState(prev => ({ ...prev, loading: false }));
@@ -266,6 +283,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const updateDomainScore = useCallback(async (domain: Domain, delta: number) => {
     setState(prev => {
+      if (!prev.user) return prev;
+
       const updated = prev.domainScores.map(s => {
         if (s.domain !== domain) return s;
         const newScore = Math.min(100, Math.max(0, s.score + delta));
@@ -278,17 +297,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           lastLog: today,
         };
       });
-      // Recompute shadow gap after user score changes
-      const gap = prev.shadowSelf.active
-        ? computeShadowGap(prev.shadowSelf, updated)
-        : 0;
+
+      const newHiddenScore = computeHiddenScore(updated);
+      const newRank = computeRankFromScore(newHiddenScore);
+      const currentRank = prev.user.rank;
+      const gap = prev.shadowSelf.active ? computeShadowGap(prev.shadowSelf, updated) : 0;
       const trajectory = computeTrajectory(updated);
+
+      // Detect rank promotion
+      let pendingRankUp = prev.pendingRankUp;
+      if (
+        RANK_ORDER[newRank] > RANK_ORDER[currentRank] &&
+        !prev.pendingRankUp // don't overwrite an unacknowledged promotion
+      ) {
+        pendingRankUp = {
+          fromRank: currentRank,
+          toRank: newRank,
+          newCodename: generateCodename(newRank),
+        };
+        AsyncStorage.setItem(STORAGE_KEYS.RANK_UP, JSON.stringify(pendingRankUp));
+      }
+
       AsyncStorage.setItem(STORAGE_KEYS.SCORES, JSON.stringify(updated));
       return {
         ...prev,
         domainScores: updated,
         trajectory,
         shadowSelf: { ...prev.shadowSelf, gap },
+        pendingRankUp,
       };
     });
   }, []);
@@ -341,6 +377,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await updateDomainScore("DISCIPLINE", -1.5);
   }, [updateDomainScore]);
 
+  /** Acknowledge pending rank up: update user.rank, clear pending event */
+  const acknowledgeRankUp = useCallback(async () => {
+    setState(prev => {
+      if (!prev.pendingRankUp || !prev.user) return prev;
+      const newUser = { ...prev.user, rank: prev.pendingRankUp.toRank };
+      AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(newUser));
+      AsyncStorage.removeItem(STORAGE_KEYS.RANK_UP);
+      return { ...prev, user: newUser, pendingRankUp: null };
+    });
+  }, []);
+
   const getDomainScore = useCallback((domain: Domain): number => {
     return state.domainScores.find(s => s.domain === domain)?.score ?? 50;
   }, [state.domainScores]);
@@ -357,26 +404,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return computeRankFromScore(score);
   }, []);
 
-  /** Returns current shadow domain scores (time-adjusted) */
   const getShadowScores = useCallback((): Record<Domain, number> => {
     return computeShadowScores(state.shadowSelf);
   }, [state.shadowSelf]);
 
-  /** Returns shadow self's current rank based on time-adjusted scores */
   const getShadowRank = useCallback((): Rank => {
     const scores = computeShadowScores(state.shadowSelf);
     const avg = DOMAINS.reduce((s, d) => s + scores[d], 0) / DOMAINS.length;
     return computeRankFromScore(avg);
   }, [state.shadowSelf]);
 
-  /**
-   * Initialize the shadow self at onboarding completion.
-   * Shadow starts 10–15 pts above the user's initial scores, gains ~1.5 pts/day.
-   * The user can beat it by logging consistently (2.5 pts/log).
-   */
   const initializeShadowSelf = useCallback(
     async (userScores: Record<Domain, number>, username: string) => {
-      const headStart = 12; // points ahead of user from day 1
+      const headStart = 12;
       const initialScores: Record<Domain, number> = {
         BODY: Math.min(100, (userScores.BODY ?? 50) + headStart),
         MIND: Math.min(100, (userScores.MIND ?? 50) + headStart),
@@ -387,14 +427,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         active: true,
         codename: `SHADOW // ${username.toUpperCase()}`,
         initialScores,
-        dailyGainRate: {
-          BODY: 1.4,
-          MIND: 1.2,
-          WEALTH: 1.0,
-          DISCIPLINE: 1.8,
-        },
+        dailyGainRate: { BODY: 1.4, MIND: 1.2, WEALTH: 1.0, DISCIPLINE: 1.8 },
         activatedAt: new Date().toISOString(),
-        gap: headStart, // starts 12 points ahead
+        gap: headStart,
       };
       await AsyncStorage.setItem(STORAGE_KEYS.SHADOW, JSON.stringify(shadow));
       setState(prev => ({ ...prev, shadowSelf: shadow }));
@@ -413,6 +448,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       shadowSelf: DEFAULT_SHADOW,
       trajectory: "stable",
       loading: false,
+      pendingRankUp: null,
     });
   }, []);
 
@@ -432,6 +468,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getShadowScores,
       getShadowRank,
       initializeShadowSelf,
+      acknowledgeRankUp,
       resetAll,
     }}>
       {children}

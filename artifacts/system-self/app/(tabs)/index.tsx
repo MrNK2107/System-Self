@@ -18,6 +18,7 @@ import { RankBadge } from "@/components/RankBadge";
 import { SystemMessage } from "@/components/SystemMessage";
 import { LogModal } from "@/components/LogModal";
 import { useSystemAI } from "@/hooks/useSystemAI";
+import { RankUpModal } from "@/components/RankUpModal";
 
 const DOMAIN_COLORS: Record<Domain, string> = {
   BODY: "#E05555",
@@ -121,7 +122,7 @@ const shadowStyles = StyleSheet.create({
 export default function Dashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank, getShadowScores } = useApp();
+  const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank, getShadowScores, pendingRankUp, acknowledgeRankUp } = useApp();
   const { generateMessage, loading: aiLoading } = useSystemAI();
 
   const [briefing, setBriefing] = useState<string>("");
@@ -176,6 +177,15 @@ export default function Dashboard() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {pendingRankUp && (
+        <RankUpModal
+          visible={!!pendingRankUp}
+          fromRank={pendingRankUp.fromRank}
+          toRank={pendingRankUp.toRank}
+          newCodename={pendingRankUp.newCodename}
+          onAcknowledge={acknowledgeRankUp}
+        />
+      )}
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16, paddingBottom: insets.bottom + 80 }]}
         showsVerticalScrollIndicator={false}

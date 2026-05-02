@@ -96,6 +96,58 @@ ${rivalMovement ? `- Rival movement: ${rivalMovement}` : ""}`;
   };
 }
 
+// Rank-based quest difficulty profiles
+const RANK_QUEST_PROFILES: Record<string, {
+  label: string;
+  dailyCount: number;
+  weeklyCount: number;
+  arcCount: number;
+  intensityNote: string;
+}> = {
+  E: {
+    label: "E (Unranked)",
+    dailyCount: 3,
+    weeklyCount: 1,
+    arcCount: 0,
+    intensityNote: "Keep quests achievable and foundational — build the habit, not the limit.",
+  },
+  D: {
+    label: "D (Aware)",
+    dailyCount: 3,
+    weeklyCount: 1,
+    arcCount: 0,
+    intensityNote: "Increase specificity. Quests should require more precision and consistency than rank E.",
+  },
+  C: {
+    label: "C (Consistent)",
+    dailyCount: 3,
+    weeklyCount: 1,
+    arcCount: 1,
+    intensityNote: "Include one multi-week arc quest. Daily quests should require real effort and sacrifice. No easy wins.",
+  },
+  B: {
+    label: "B (Disciplined)",
+    dailyCount: 3,
+    weeklyCount: 1,
+    arcCount: 1,
+    intensityNote: "Quests must be hard. Arc quest should span 2-3 weeks. Daily quests demand measurable output — not effort, output.",
+  },
+  A: {
+    label: "A (Elite)",
+    dailyCount: 3,
+    weeklyCount: 1,
+    arcCount: 1,
+    intensityNote: "Only elite-tier operations. No warm-up quests. Every quest must create real discomfort or cost. Arc quest should be transformation-level.",
+  },
+  S: {
+    label: "S (System-Level)",
+    dailyCount: 3,
+    weeklyCount: 1,
+    arcCount: 1,
+    intensityNote: "System-level operations only. These are the things most people never attempt. The quests should feel like a mission, not a task.",
+  },
+};
+
 router.post("/system/message", async (req, res) => {
   try {
     const { prompt } = buildUserPrompt(req.body);
@@ -131,22 +183,29 @@ router.post("/system/quests", async (req, res) => {
       recentLogs,
     } = req.body;
 
+    const profile = RANK_QUEST_PROFILES[rank as string] ?? RANK_QUEST_PROFILES["E"];
+    const includeArc = profile.arcCount > 0;
+
     const prompt = `USER CONTEXT:
 - Username: ${username}
-- Rank: ${rank}
+- Rank: ${rank} — ${profile.label}
 - Domain scores: BODY ${domainScores.BODY?.toFixed(1)}, MIND ${domainScores.MIND?.toFixed(1)}, WEALTH ${domainScores.WEALTH?.toFixed(1)}, DISCIPLINE ${domainScores.DISCIPLINE?.toFixed(1)}
 - Primary goal: ${primaryGoal}
 - Weakest domain: ${weakestDomain}
 - Recent activity: ${recentLogs?.join(", ") || "no recent logs"}
 
-Generate exactly 3 daily quests and 1 weekly quest for this user. Focus on the weakest domain but vary the domains.
+DIFFICULTY CALIBRATION FOR RANK ${rank}:
+${profile.intensityNote}
+
+Generate exactly ${profile.dailyCount} daily quests, ${profile.weeklyCount} weekly quest${includeArc ? `, and 1 arc quest (multi-week operation)` : ""} for this user.
+Focus on the weakest domain but vary the domains across all quests.
 
 Rules:
 - Each quest title is under 10 words
-- Each description is 1 sentence, specific, actionable
-- Reference their actual weak domain data
-- Do NOT use encouraging language
-- Quests must be completable (daily = 1 day, weekly = 7 days)
+- Each description is 1 sentence, specific, actionable, referencing real domain data
+- Do NOT use encouraging language — this is operational, not motivational
+- Quests must be completable in their timeframe (daily = 1 day, weekly = 7 days, arc = 14-21 days)
+- At rank ${rank}, the difficulty is: ${profile.intensityNote}
 
 Return ONLY valid JSON in this exact format:
 {
@@ -154,13 +213,14 @@ Return ONLY valid JSON in this exact format:
     {"title": "...", "description": "...", "domain": "BODY|MIND|WEALTH|DISCIPLINE", "type": "daily"},
     {"title": "...", "description": "...", "domain": "BODY|MIND|WEALTH|DISCIPLINE", "type": "daily"},
     {"title": "...", "description": "...", "domain": "BODY|MIND|WEALTH|DISCIPLINE", "type": "daily"},
-    {"title": "...", "description": "...", "domain": "BODY|MIND|WEALTH|DISCIPLINE", "type": "weekly"}
+    {"title": "...", "description": "...", "domain": "BODY|MIND|WEALTH|DISCIPLINE", "type": "weekly"}${includeArc ? `,
+    {"title": "...", "description": "...", "domain": "BODY|MIND|WEALTH|DISCIPLINE", "type": "arc"}` : ""}
   ]
 }`;
 
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 1000,
+      max_tokens: 1200,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: prompt }],
     });
@@ -169,12 +229,9 @@ Return ONLY valid JSON in this exact format:
     const text = content.type === "text" ? content.text : "{}";
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("No JSON in response");
-    }
+    if (!jsonMatch) throw new Error("No JSON in response");
 
     const parsed = JSON.parse(jsonMatch[0]);
-
     res.json(parsed);
   } catch (error) {
     req.log.error({ error }, "Failed to generate quests");
