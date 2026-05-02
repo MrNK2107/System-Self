@@ -23,6 +23,7 @@ import { RankUpModal } from "@/components/RankUpModal";
 import { NightlyDebriefModal } from "@/components/NightlyDebriefModal";
 import { useNightlyDebrief } from "@/hooks/useNightlyDebrief";
 import { StreakBrokenModal } from "@/components/StreakBrokenModal";
+import { ShadowConfrontationModal } from "@/components/ShadowConfrontationModal";
 
 const DOMAIN_COLORS: Record<Domain, string> = {
   BODY: "#E05555",
@@ -32,7 +33,7 @@ const DOMAIN_COLORS: Record<Domain, string> = {
 };
 const ALL_DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
 
-function ShadowAlertBanner() {
+function ShadowAlertBanner({ onConfront }: { onConfront: () => void }) {
   const colors = useColors();
   const { shadowSelf, domainScores, getShadowScores } = useApp();
   const pulseAnim = React.useRef(new Animated.Value(0.4)).current;
@@ -96,11 +97,37 @@ function ShadowAlertBanner() {
           })}
         </View>
       )}
+      <TouchableOpacity
+        style={[shadowStyles.confrontBtn, { borderColor: isLosing ? "#E0555540" : "#4B8B6F40" }]}
+        onPress={onConfront}
+        activeOpacity={0.7}
+      >
+        <Feather name="eye" size={10} color={isLosing ? "#E05555" : "#4B8B6F"} />
+        <Text style={[shadowStyles.confrontText, { color: isLosing ? "#E05555" : "#4B8B6F" }]}>
+          CONFRONT SHADOW
+        </Text>
+        <Feather name="chevron-right" size={10} color={isLosing ? "#E05555" : "#4B8B6F"} />
+      </TouchableOpacity>
     </View>
   );
 }
 
 const shadowStyles = StyleSheet.create({
+  confrontBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    borderWidth: 1,
+    borderRadius: 2,
+    paddingVertical: 8,
+    marginTop: 4,
+  },
+  confrontText: {
+    fontSize: 9,
+    fontWeight: "700" as const,
+    letterSpacing: 3,
+  },
   container: {
     borderWidth: 1,
     borderRadius: 6,
@@ -134,6 +161,7 @@ export default function Dashboard() {
   const [briefingLoaded, setBriefingLoaded] = useState(false);
   const [logVisible, setLogVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [confrontVisible, setConfrontVisible] = useState(false);
 
   const hiddenScore = getHiddenScore();
   const rank = user?.rank ?? computeRank(hiddenScore);
@@ -217,6 +245,10 @@ export default function Dashboard() {
           onAcknowledge={acknowledgeStreakBreak}
         />
       )}
+      <ShadowConfrontationModal
+        visible={confrontVisible}
+        onClose={() => setConfrontVisible(false)}
+      />
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16, paddingBottom: insets.bottom + 80 }]}
         showsVerticalScrollIndicator={false}
@@ -317,7 +349,7 @@ export default function Dashboard() {
         </View>
 
         {/* Shadow Self Alert */}
-        {shadowSelf.active && <ShadowAlertBanner />}
+        {shadowSelf.active && <ShadowAlertBanner onConfront={() => setConfrontVisible(true)} />}
       </ScrollView>
 
       {/* Log FAB */}

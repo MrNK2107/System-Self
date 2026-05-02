@@ -90,6 +90,12 @@ ${rivalMovement ? `- Rival movement: ${rivalMovement}` : ""}`;
       instruction: `Generate a streak break notification. The user missed logging one or more domains. Cold, clinical, no sympathy. Reference the gap this creates with their Shadow Self. State the fact, nothing more. 2 sentences maximum.`,
       maxWords: 45,
     },
+    shadow_confrontation: {
+      instruction: shadowGap > 0
+        ? `Speak AS the Shadow Self directly — first person, cold, taunting. You are ${Math.abs(shadowGap).toFixed(1)} points ahead of the user. You do not tire. You do not skip days. You are them without excuses. 2-3 sentences. No quotation marks.`
+        : `Speak as THE SYSTEM observing the confrontation. The user leads their Shadow Self by ${Math.abs(shadowGap).toFixed(1)} points. Deliver a cold, minimal acknowledgment — warn them the shadow accelerates. 2 sentences.`,
+      maxWords: 55,
+    },
   };
 
   const config = typeConfigs[messageType] ?? typeConfigs["morning_briefing"];
