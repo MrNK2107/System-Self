@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   ActivityIndicator,
+  AppState,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -19,6 +20,8 @@ import { SystemMessage } from "@/components/SystemMessage";
 import { LogModal } from "@/components/LogModal";
 import { useSystemAI } from "@/hooks/useSystemAI";
 import { RankUpModal } from "@/components/RankUpModal";
+import { NightlyDebriefModal } from "@/components/NightlyDebriefModal";
+import { useNightlyDebrief } from "@/hooks/useNightlyDebrief";
 
 const DOMAIN_COLORS: Record<Domain, string> = {
   BODY: "#E05555",
@@ -124,6 +127,7 @@ export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank, getShadowScores, pendingRankUp, acknowledgeRankUp } = useApp();
   const { generateMessage, loading: aiLoading } = useSystemAI();
+  const { checkAndTriggerDebrief, pendingDebrief, acknowledgeDebrief } = useNightlyDebrief();
 
   const [briefing, setBriefing] = useState<string>("");
   const [briefingLoaded, setBriefingLoaded] = useState(false);
@@ -134,6 +138,16 @@ export default function Dashboard() {
   const rank = user?.rank ?? computeRank(hiddenScore);
   const activeQuests = quests.filter(q => q.status === "active");
   const completedToday = quests.filter(q => q.status === "complete").length;
+
+  // Check for nightly debrief on mount and when app foregrounds
+  useEffect(() => {
+    if (!user) return;
+    checkAndTriggerDebrief();
+    const sub = AppState.addEventListener("change", state => {
+      if (state === "active") checkAndTriggerDebrief();
+    });
+    return () => sub.remove();
+  }, [user, checkAndTriggerDebrief]);
 
   const loadBriefing = useCallback(async () => {
     if (!user || briefingLoaded) return;
@@ -184,6 +198,15 @@ export default function Dashboard() {
           toRank={pendingRankUp.toRank}
           newCodename={pendingRankUp.newCodename}
           onAcknowledge={acknowledgeRankUp}
+        />
+      )}
+      {pendingDebrief && (
+        <NightlyDebriefModal
+          visible={!!pendingDebrief}
+          debrief={pendingDebrief}
+          username={user.username}
+          dayNumber={user.dayNumber}
+          onAcknowledge={acknowledgeDebrief}
         />
       )}
       <ScrollView

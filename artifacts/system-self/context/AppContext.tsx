@@ -6,6 +6,7 @@ export type Rank = "E" | "D" | "C" | "B" | "A" | "S";
 export type QuestType = "daily" | "weekly" | "arc";
 export type QuestStatus = "active" | "complete" | "failed" | "refused";
 export type Trajectory = "up" | "stable" | "down";
+export type DebriefVerdict = "ACCEPTABLE" | "INSUFFICIENT" | "PATHETIC";
 
 export interface User {
   id: string;
@@ -73,6 +74,21 @@ export interface PendingRankUp {
   newCodename: string;
 }
 
+export interface DailyBaseline {
+  date: string;
+  scores: Record<Domain, number>;
+}
+
+export interface DebriefData {
+  date: string;
+  domainDeltas: Record<Domain, number>;
+  questCompleted: number;
+  questTotal: number;
+  shadowGap: number;
+  aiText: string;
+  verdict: DebriefVerdict;
+}
+
 const RANK_ORDER: Record<Rank, number> = { E: 0, D: 1, C: 2, B: 3, A: 4, S: 5 };
 const CODENAME_PREFIXES: Record<Rank, string> = {
   E: "GHOST",
@@ -99,6 +115,8 @@ interface AppState {
   trajectory: Trajectory;
   loading: boolean;
   pendingRankUp: PendingRankUp | null;
+  dailyBaseline: DailyBaseline | null;
+  pendingDebrief: DebriefData | null;
 }
 
 interface AppContextType extends AppState {
@@ -116,6 +134,8 @@ interface AppContextType extends AppState {
   getShadowRank: () => Rank;
   initializeShadowSelf: (userScores: Record<Domain, number>, username: string) => Promise<void>;
   acknowledgeRankUp: () => Promise<void>;
+  setPendingDebrief: (debrief: DebriefData) => Promise<void>;
+  acknowledgeDebrief: () => Promise<void>;
   resetAll: () => Promise<void>;
 }
 
@@ -127,7 +147,12 @@ const STORAGE_KEYS = {
   RIVALS: "@system_self:rivals",
   SHADOW: "@system_self:shadow",
   RANK_UP: "@system_self:rank_up",
+  BASELINE: "@system_self:baseline",
+  DEBRIEF: "@system_self:debrief",
+  LAST_DEBRIEF: "@system_self:last_debrief",
 };
+
+export { STORAGE_KEYS };
 
 const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
 
@@ -218,6 +243,17 @@ function computeShadowGap(shadow: ShadowSelf, userScores: DomainScore[]): number
   return shadowAvg - userAvg;
 }
 
+function makeBaseline(scores: DomainScore[]): DailyBaseline {
+  const today = new Date().toISOString().split("T")[0]!;
+  return {
+    date: today,
+    scores: DOMAINS.reduce((acc, d) => {
+      acc[d] = scores.find(s => s.domain === d)?.score ?? 50;
+      return acc;
+    }, {} as Record<Domain, number>),
+  };
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>({
     user: null,
@@ -229,6 +265,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     trajectory: "stable",
     loading: true,
     pendingRankUp: null,
+    dailyBaseline: null,
+    pendingDebrief: null,
   });
 
   useEffect(() => {
@@ -237,16 +275,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const loadFromStorage = async () => {
     try {
-      const [userStr, scoresStr, logsStr, questsStr, rivalsStr, shadowStr, rankUpStr] =
-        await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.USER),
-          AsyncStorage.getItem(STORAGE_KEYS.SCORES),
-          AsyncStorage.getItem(STORAGE_KEYS.LOGS),
-          AsyncStorage.getItem(STORAGE_KEYS.QUESTS),
-          AsyncStorage.getItem(STORAGE_KEYS.RIVALS),
-          AsyncStorage.getItem(STORAGE_KEYS.SHADOW),
-          AsyncStorage.getItem(STORAGE_KEYS.RANK_UP),
-        ]);
+      const [
+        userStr, scoresStr, logsStr, questsStr, rivalsStr, shadowStr,
+        rankUpStr, baselineStr, debriefStr,
+      ] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.USER),
+        AsyncStorage.getItem(STORAGE_KEYS.SCORES),
+        AsyncStorage.getItem(STORAGE_KEYS.LOGS),
+        AsyncStorage.getItem(STORAGE_KEYS.QUESTS),
+        AsyncStorage.getItem(STORAGE_KEYS.RIVALS),
+        AsyncStorage.getItem(STORAGE_KEYS.SHADOW),
+        AsyncStorage.getItem(STORAGE_KEYS.RANK_UP),
+        AsyncStorage.getItem(STORAGE_KEYS.BASELINE),
+        AsyncStorage.getItem(STORAGE_KEYS.DEBRIEF),
+      ]);
 
       const user = userStr ? JSON.parse(userStr) as User : null;
       const domainScores = scoresStr ? JSON.parse(scoresStr) as DomainScore[] : DEFAULT_SCORES;
@@ -255,6 +297,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const rivals = rivalsStr ? JSON.parse(rivalsStr) as Rival[] : DEFAULT_RIVALS;
       const shadow = shadowStr ? JSON.parse(shadowStr) as ShadowSelf : DEFAULT_SHADOW;
       const pendingRankUp = rankUpStr ? JSON.parse(rankUpStr) as PendingRankUp : null;
+      const pendingDebrief = debriefStr ? JSON.parse(debriefStr) as DebriefData : null;
+
+      // Ensure daily baseline is fresh for today
+      const today = new Date().toISOString().split("T")[0]!;
+      let dailyBaseline: DailyBaseline | null = baselineStr
+        ? JSON.parse(baselineStr) as DailyBaseline
+        : null;
+      if (!dailyBaseline || dailyBaseline.date !== today) {
+        dailyBaseline = makeBaseline(domainScores);
+        await AsyncStorage.setItem(STORAGE_KEYS.BASELINE, JSON.stringify(dailyBaseline));
+      }
 
       const gap = shadow.active ? computeShadowGap(shadow, domainScores) : 0;
       const trajectory = computeTrajectory(domainScores);
@@ -270,6 +323,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         trajectory,
         loading: false,
         pendingRankUp,
+        dailyBaseline,
+        pendingDebrief,
       }));
     } catch {
       setState(prev => ({ ...prev, loading: false }));
@@ -288,7 +343,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const updated = prev.domainScores.map(s => {
         if (s.domain !== domain) return s;
         const newScore = Math.min(100, Math.max(0, s.score + delta));
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T")[0]!;
         const wasToday = s.lastLog === today;
         return {
           ...s,
@@ -304,11 +359,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const gap = prev.shadowSelf.active ? computeShadowGap(prev.shadowSelf, updated) : 0;
       const trajectory = computeTrajectory(updated);
 
-      // Detect rank promotion
       let pendingRankUp = prev.pendingRankUp;
       if (
         RANK_ORDER[newRank] > RANK_ORDER[currentRank] &&
-        !prev.pendingRankUp // don't overwrite an unacknowledged promotion
+        !prev.pendingRankUp
       ) {
         pendingRankUp = {
           fromRank: currentRank,
@@ -377,7 +431,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await updateDomainScore("DISCIPLINE", -1.5);
   }, [updateDomainScore]);
 
-  /** Acknowledge pending rank up: update user.rank, clear pending event */
   const acknowledgeRankUp = useCallback(async () => {
     setState(prev => {
       if (!prev.pendingRankUp || !prev.user) return prev;
@@ -385,6 +438,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(newUser));
       AsyncStorage.removeItem(STORAGE_KEYS.RANK_UP);
       return { ...prev, user: newUser, pendingRankUp: null };
+    });
+  }, []);
+
+  const setPendingDebrief = useCallback(async (debrief: DebriefData) => {
+    await AsyncStorage.setItem(STORAGE_KEYS.DEBRIEF, JSON.stringify(debrief));
+    setState(prev => ({ ...prev, pendingDebrief: debrief }));
+  }, []);
+
+  const acknowledgeDebrief = useCallback(async () => {
+    const today = new Date().toISOString().split("T")[0]!;
+    await AsyncStorage.setItem(STORAGE_KEYS.LAST_DEBRIEF, today);
+    await AsyncStorage.removeItem(STORAGE_KEYS.DEBRIEF);
+    // Reset baseline for next day
+    setState(prev => {
+      const newBaseline = makeBaseline(prev.domainScores);
+      AsyncStorage.setItem(STORAGE_KEYS.BASELINE, JSON.stringify(newBaseline));
+      return { ...prev, pendingDebrief: null, dailyBaseline: newBaseline };
     });
   }, []);
 
@@ -449,6 +519,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       trajectory: "stable",
       loading: false,
       pendingRankUp: null,
+      dailyBaseline: null,
+      pendingDebrief: null,
     });
   }, []);
 
@@ -469,6 +541,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getShadowRank,
       initializeShadowSelf,
       acknowledgeRankUp,
+      setPendingDebrief,
+      acknowledgeDebrief,
       resetAll,
     }}>
       {children}
