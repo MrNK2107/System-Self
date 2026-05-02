@@ -156,6 +156,7 @@ interface AppContextType extends AppState {
   computeRank: (hiddenScore: number) => Rank;
   getShadowScores: () => Record<Domain, number>;
   getShadowRank: () => Rank;
+  updateRivals: (rivals: Rival[]) => Promise<void>;
   initializeShadowSelf: (userScores: Record<Domain, number>, username: string) => Promise<void>;
   acknowledgeRankUp: () => Promise<void>;
   setPendingDebrief: (debrief: DebriefData) => Promise<void>;
@@ -580,6 +581,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return computeRankFromScore(avg);
   }, [state.shadowSelf]);
 
+  const updateRivals = useCallback(async (rivals: Rival[]) => {
+    await AsyncStorage.setItem(STORAGE_KEYS.RIVALS, JSON.stringify(rivals));
+    setState(prev => ({ ...prev, rivals }));
+  }, []);
+
   const initializeShadowSelf = useCallback(
     async (userScores: Record<Domain, number>, username: string) => {
       const headStart = 12;
@@ -636,6 +642,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       computeRank,
       getShadowScores,
       getShadowRank,
+      updateRivals,
       initializeShadowSelf,
       acknowledgeRankUp,
       setPendingDebrief,
