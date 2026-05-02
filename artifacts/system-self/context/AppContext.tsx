@@ -96,6 +96,29 @@ export interface StreakBreakData {
   aiText: string;
 }
 
+export type ChallengeOutcome = "win" | "loss" | "draw";
+
+export interface Challenge {
+  id: string;
+  rivalCodename: string;
+  rivalRank: Rank;
+  domain: Domain;
+  startDate: string;
+  endDate: string;
+  userStartScore: number;
+  rivalStartScore: number;
+  userCurrentScore: number;
+  rivalCurrentScore: number;
+  outcome: ChallengeOutcome | null;
+  acknowledged: boolean;
+}
+
+export interface ChallengeRecord {
+  wins: number;
+  losses: number;
+  draws: number;
+}
+
 // --- helpers ----------------------------------------------------------------
 
 export function getStreakMultiplier(streak: number): number {
@@ -141,6 +164,8 @@ interface AppState {
   dailyBaseline: DailyBaseline | null;
   pendingDebrief: DebriefData | null;
   pendingStreakBreak: StreakBreakData | null;
+  challenges: Challenge[];
+  challengeRecord: ChallengeRecord;
 }
 
 interface AppContextType extends AppState {
@@ -157,6 +182,10 @@ interface AppContextType extends AppState {
   getShadowScores: () => Record<Domain, number>;
   getShadowRank: () => Rank;
   updateRivals: (rivals: Rival[]) => Promise<void>;
+  declareChallenge: (rivalCodename: string, rivalRank: Rank, domain: Domain) => Promise<void>;
+  updateChallengeScores: (challenges: Challenge[]) => Promise<void>;
+  acknowledgeChallenge: (challengeId: string) => Promise<void>;
+  resolveExpiredChallenges: () => void;
   initializeShadowSelf: (userScores: Record<Domain, number>, username: string) => Promise<void>;
   acknowledgeRankUp: () => Promise<void>;
   setPendingDebrief: (debrief: DebriefData) => Promise<void>;
@@ -179,6 +208,8 @@ const STORAGE_KEYS = {
   DEBRIEF: "@system_self:debrief",
   LAST_DEBRIEF: "@system_self:last_debrief",
   STREAK_BREAK: "@system_self:streak_break",
+  CHALLENGES: "@system_self:challenges",
+  CHALLENGE_RECORD: "@system_self:challenge_record",
 };
 
 export { STORAGE_KEYS };
@@ -309,6 +340,8 @@ function generateId(): string {
 
 // --- provider ---------------------------------------------------------------
 
+const DEFAULT_CHALLENGE_RECORD: ChallengeRecord = { wins: 0, losses: 0, draws: 0 };
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>({
     user: null,
@@ -323,6 +356,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     dailyBaseline: null,
     pendingDebrief: null,
     pendingStreakBreak: null,
+    challenges: [],
+    challengeRecord: DEFAULT_CHALLENGE_RECORD,
   });
 
   useEffect(() => {
@@ -334,6 +369,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const [
         userStr, scoresStr, logsStr, questsStr, rivalsStr, shadowStr,
         rankUpStr, baselineStr, debriefStr, streakBreakStr,
+        challengesStr, challengeRecordStr,
       ] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.USER),
         AsyncStorage.getItem(STORAGE_KEYS.SCORES),
@@ -345,6 +381,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.getItem(STORAGE_KEYS.BASELINE),
         AsyncStorage.getItem(STORAGE_KEYS.DEBRIEF),
         AsyncStorage.getItem(STORAGE_KEYS.STREAK_BREAK),
+        AsyncStorage.getItem(STORAGE_KEYS.CHALLENGES),
+        AsyncStorage.getItem(STORAGE_KEYS.CHALLENGE_RECORD),
       ]);
 
       const user = userStr ? JSON.parse(userStr) as User : null;
@@ -403,6 +441,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const gap = shadow.active ? computeShadowGap(shadow, domainScores) : 0;
       const trajectory = computeTrajectory(domainScores);
 
+      // --- Challenges ---
+      let challenges: Challenge[] = challengesStr ? JSON.parse(challengesStr) as Challenge[] : [];
+      let challengeRecord: ChallengeRecord = challengeRecordStr
+        ? JSON.parse(challengeRecordStr) as ChallengeRecord
+        : DEFAULT_CHALLENGE_RECORD;
+
+      // Resolve any expired challenges
+      const todayStr = new Date().toISOString().split("T")[0]!;
+      let anyResolved = false;
+      challenges = challenges.map(c => {
+        if (c.outcome !== null || c.endDate >= todayStr) return c;
+        const userGain = c.userCurrentScore - c.userStartScore;
+        const rivalGain = c.rivalCurrentScore - c.rivalStartScore;
+        const outcome: ChallengeOutcome =
+          userGain > rivalGain ? "win" :
+          userGain < rivalGain ? "loss" : "draw";
+        challengeRecord = {
+          wins: challengeRecord.wins + (outcome === "win" ? 1 : 0),
+          losses: challengeRecord.losses + (outcome === "loss" ? 1 : 0),
+          draws: challengeRecord.draws + (outcome === "draw" ? 1 : 0),
+        };
+        anyResolved = true;
+        return { ...c, outcome };
+      });
+      if (anyResolved) {
+        await AsyncStorage.setItem(STORAGE_KEYS.CHALLENGES, JSON.stringify(challenges));
+        await AsyncStorage.setItem(STORAGE_KEYS.CHALLENGE_RECORD, JSON.stringify(challengeRecord));
+      }
+
       setState(prev => ({
         ...prev,
         user,
@@ -417,6 +484,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         dailyBaseline,
         pendingDebrief,
         pendingStreakBreak,
+        challenges,
+        challengeRecord,
       }));
     } catch {
       setState(prev => ({ ...prev, loading: false }));
@@ -471,10 +540,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.setItem(STORAGE_KEYS.RANK_UP, JSON.stringify(pendingRankUp));
       }
 
+      // Sync active challenge user scores for this domain
+      const updatedChallenges = prev.challenges.map(c => {
+        if (c.domain !== domain || c.outcome !== null) return c;
+        const newScore = updated.find(s => s.domain === domain)?.score ?? c.userCurrentScore;
+        return { ...c, userCurrentScore: newScore };
+      });
       AsyncStorage.setItem(STORAGE_KEYS.SCORES, JSON.stringify(updated));
+      AsyncStorage.setItem(STORAGE_KEYS.CHALLENGES, JSON.stringify(updatedChallenges));
       return {
         ...prev,
         domainScores: updated,
+        challenges: updatedChallenges,
         trajectory,
         shadowSelf: { ...prev.shadowSelf, gap },
         pendingRankUp,
@@ -583,7 +660,99 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const updateRivals = useCallback(async (rivals: Rival[]) => {
     await AsyncStorage.setItem(STORAGE_KEYS.RIVALS, JSON.stringify(rivals));
-    setState(prev => ({ ...prev, rivals }));
+    // Also update any active challenges' rival scores from the new drift values
+    setState(prev => {
+      const updatedChallenges = prev.challenges.map(c => {
+        if (c.outcome !== null) return c;
+        const rival = rivals.find(r => r.codename === c.rivalCodename);
+        if (!rival) return c;
+        const rivalScore =
+          c.domain === "BODY" ? rival.bodyScore :
+          c.domain === "MIND" ? rival.mindScore :
+          c.domain === "WEALTH" ? rival.wealthScore :
+          rival.disciplineScore;
+        return { ...c, rivalCurrentScore: rivalScore };
+      });
+      AsyncStorage.setItem(STORAGE_KEYS.CHALLENGES, JSON.stringify(updatedChallenges));
+      return { ...prev, rivals, challenges: updatedChallenges };
+    });
+  }, []);
+
+  const declareChallenge = useCallback(async (
+    rivalCodename: string,
+    rivalRank: Rank,
+    domain: Domain,
+  ) => {
+    setState(prev => {
+      const rival = prev.rivals.find(r => r.codename === rivalCodename);
+      if (!rival) return prev;
+      const userScore = prev.domainScores.find(s => s.domain === domain)?.score ?? 50;
+      const rivalScore =
+        domain === "BODY" ? rival.bodyScore :
+        domain === "MIND" ? rival.mindScore :
+        domain === "WEALTH" ? rival.wealthScore :
+        rival.disciplineScore;
+      const startDate = new Date().toISOString().split("T")[0]!;
+      const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]!;
+      const challenge: Challenge = {
+        id: generateId(),
+        rivalCodename,
+        rivalRank,
+        domain,
+        startDate,
+        endDate,
+        userStartScore: userScore,
+        rivalStartScore: rivalScore,
+        userCurrentScore: userScore,
+        rivalCurrentScore: rivalScore,
+        outcome: null,
+        acknowledged: false,
+      };
+      const updated = [...prev.challenges, challenge];
+      AsyncStorage.setItem(STORAGE_KEYS.CHALLENGES, JSON.stringify(updated));
+      return { ...prev, challenges: updated };
+    });
+  }, []);
+
+  const updateChallengeScores = useCallback(async (challenges: Challenge[]) => {
+    await AsyncStorage.setItem(STORAGE_KEYS.CHALLENGES, JSON.stringify(challenges));
+    setState(prev => ({ ...prev, challenges }));
+  }, []);
+
+  const acknowledgeChallenge = useCallback(async (challengeId: string) => {
+    setState(prev => {
+      const updated = prev.challenges.map(c =>
+        c.id === challengeId ? { ...c, acknowledged: true } : c
+      );
+      AsyncStorage.setItem(STORAGE_KEYS.CHALLENGES, JSON.stringify(updated));
+      return { ...prev, challenges: updated };
+    });
+  }, []);
+
+  const resolveExpiredChallenges = useCallback(() => {
+    const today = new Date().toISOString().split("T")[0]!;
+    setState(prev => {
+      const hasPending = prev.challenges.some(c => c.outcome === null && c.endDate < today);
+      if (!hasPending) return prev;
+      let record = { ...prev.challengeRecord };
+      const resolved = prev.challenges.map(c => {
+        if (c.outcome !== null || c.endDate >= today) return c;
+        const userGain = c.userCurrentScore - c.userStartScore;
+        const rivalGain = c.rivalCurrentScore - c.rivalStartScore;
+        const outcome: ChallengeOutcome =
+          userGain > rivalGain ? "win" :
+          userGain < rivalGain ? "loss" : "draw";
+        record = {
+          wins: record.wins + (outcome === "win" ? 1 : 0),
+          losses: record.losses + (outcome === "loss" ? 1 : 0),
+          draws: record.draws + (outcome === "draw" ? 1 : 0),
+        };
+        return { ...c, outcome };
+      });
+      AsyncStorage.setItem(STORAGE_KEYS.CHALLENGES, JSON.stringify(resolved));
+      AsyncStorage.setItem(STORAGE_KEYS.CHALLENGE_RECORD, JSON.stringify(record));
+      return { ...prev, challenges: resolved, challengeRecord: record };
+    });
   }, []);
 
   const initializeShadowSelf = useCallback(
@@ -624,6 +793,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       dailyBaseline: null,
       pendingDebrief: null,
       pendingStreakBreak: null,
+      challenges: [],
+      challengeRecord: DEFAULT_CHALLENGE_RECORD,
     });
   }, []);
 
@@ -643,6 +814,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getShadowScores,
       getShadowRank,
       updateRivals,
+      declareChallenge,
+      updateChallengeScores,
+      acknowledgeChallenge,
+      resolveExpiredChallenges,
       initializeShadowSelf,
       acknowledgeRankUp,
       setPendingDebrief,
