@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,9 +13,18 @@ import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp, type Domain, type Rank, type Rival, type Trajectory } from "@/context/AppContext";
+import {
+  useApp,
+  type Challenge,
+  type Domain,
+  type Rank,
+  type Rival,
+  type Trajectory,
+} from "@/context/AppContext";
 import { ShadowSelfCard } from "@/components/ShadowSelfCard";
 import { RankBadge } from "@/components/RankBadge";
+import { ChallengeModal } from "@/components/ChallengeModal";
+import { ChallengeOutcomeModal } from "@/components/ChallengeOutcomeModal";
 
 const DRIFT_KEY = "@system_self:rivals_last_drift";
 const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
@@ -381,14 +391,108 @@ const posStyles = StyleSheet.create({
   statDivider: { width: StyleSheet.hairlineWidth, height: 32 },
 });
 
+// --- Active challenge progress card ----------------------------------------
+
+function ActiveChallengeCard({ challenge }: { challenge: Challenge }) {
+  const colors = useColors();
+  const domColor = DOMAIN_COLORS[challenge.domain];
+  const domIcon = DOMAIN_ICONS[challenge.domain];
+
+  const today = new Date().toISOString().split("T")[0]!;
+  const start = new Date(challenge.startDate).getTime();
+  const end = new Date(challenge.endDate).getTime();
+  const now = Date.now();
+  const totalMs = end - start;
+  const elapsedMs = Math.min(now - start, totalMs);
+  const pct = Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100));
+  const daysLeft = Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
+
+  const userGain = challenge.userCurrentScore - challenge.userStartScore;
+  const rivalGain = challenge.rivalCurrentScore - challenge.rivalStartScore;
+  const userLeading = userGain >= rivalGain;
+
+  return (
+    <View style={[acStyles.card, { borderColor: domColor + "40", backgroundColor: domColor + "06" }]}>
+      <View style={acStyles.header}>
+        <View style={acStyles.domainTag}>
+          <Text style={[acStyles.domainIcon, { color: domColor }]}>{domIcon}</Text>
+          <Text style={[acStyles.domainName, { color: domColor }]}>{challenge.domain}</Text>
+          <Text style={[acStyles.vs, { color: colors.mutedForeground }]}>vs</Text>
+          <Text style={[acStyles.rivalName, { color: colors.foreground }]} numberOfLines={1}>
+            {challenge.rivalCodename.split(" // ")[1] ?? challenge.rivalCodename}
+          </Text>
+        </View>
+        <View style={[acStyles.daysTag, { borderColor: colors.border }]}>
+          <Text style={[acStyles.daysNum, { color: colors.foreground }]}>{daysLeft}</Text>
+          <Text style={[acStyles.daysLabel, { color: colors.mutedForeground }]}>DAYS</Text>
+        </View>
+      </View>
+
+      {/* Progress bar */}
+      <View style={[acStyles.progressTrack, { backgroundColor: colors.muted }]}>
+        <View style={[acStyles.progressFill, { width: `${pct}%` as `${number}%`, backgroundColor: domColor + "60" }]} />
+      </View>
+
+      {/* Gain comparison */}
+      <View style={acStyles.gainRow}>
+        <View style={acStyles.gainCol}>
+          <Text style={[acStyles.gainLabel, { color: colors.mutedForeground }]}>YOUR GAIN</Text>
+          <Text style={[acStyles.gainVal, { color: userLeading ? "#4B8B6F" : "#E05555" }]}>
+            {userGain >= 0 ? `+${userGain.toFixed(1)}` : userGain.toFixed(1)}
+          </Text>
+        </View>
+        <View style={acStyles.gainDivider} />
+        <View style={acStyles.gainCol}>
+          <Text style={[acStyles.gainLabel, { color: colors.mutedForeground }]}>RIVAL GAIN</Text>
+          <Text style={[acStyles.gainVal, { color: !userLeading ? "#E05555" : colors.mutedForeground }]}>
+            {rivalGain >= 0 ? `+${rivalGain.toFixed(1)}` : rivalGain.toFixed(1)}
+          </Text>
+        </View>
+        <View style={acStyles.gainDivider} />
+        <View style={acStyles.gainCol}>
+          <Text style={[acStyles.gainLabel, { color: colors.mutedForeground }]}>STATUS</Text>
+          <Text style={[acStyles.gainVal, { color: userLeading ? "#4B8B6F" : "#E05555", fontSize: 10 }]}>
+            {userLeading ? "LEADING" : "TRAILING"}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const acStyles = StyleSheet.create({
+  card: { borderWidth: 1, borderRadius: 6, padding: 14, gap: 10 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  domainTag: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
+  domainIcon: { fontSize: 12 },
+  domainName: { fontSize: 10, fontWeight: "800" as const, letterSpacing: 2 },
+  vs: { fontSize: 8, letterSpacing: 1 },
+  rivalName: { fontSize: 10, fontWeight: "600" as const, flex: 1 },
+  daysTag: {
+    borderWidth: 1, borderRadius: 3, paddingHorizontal: 8, paddingVertical: 4,
+    alignItems: "center",
+  },
+  daysNum: { fontSize: 14, fontWeight: "800" as const, lineHeight: 18 },
+  daysLabel: { fontSize: 6, letterSpacing: 2, fontWeight: "700" as const },
+  progressTrack: { height: 3, borderRadius: 2, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 2 },
+  gainRow: { flexDirection: "row", alignItems: "center" },
+  gainCol: { flex: 1, alignItems: "center", gap: 3 },
+  gainLabel: { fontSize: 7, letterSpacing: 2, fontWeight: "600" as const },
+  gainVal: { fontSize: 14, fontWeight: "800" as const },
+  gainDivider: { width: StyleSheet.hairlineWidth, height: 28, backgroundColor: "#2A2D38" },
+});
+
 // --- Rival detail card ------------------------------------------------------
 
 function RivalDetailCard({
-  rival, userScores, userComposite,
+  rival, userScores, userComposite, activeChallenge, onChallenge,
 }: {
   rival: Rival;
   userScores: Record<Domain, number>;
   userComposite: number;
+  activeChallenge: Challenge | null;
+  onChallenge: (rival: Rival) => void;
 }) {
   const colors = useColors();
   const rivalComposite = computeRivalComposite(rival);
@@ -408,16 +512,28 @@ function RivalDetailCard({
     rival.trajectory === "down" ? "#4B8B6F" :
     colors.mutedForeground;
 
+  const activeDomColor = activeChallenge ? DOMAIN_COLORS[activeChallenge.domain] : null;
+
   return (
     <View style={[detailStyles.card, { borderColor: colors.border, backgroundColor: colors.card }]}>
       <View style={detailStyles.header}>
         <View style={detailStyles.headerLeft}>
           <Text style={[detailStyles.codename, { color: colors.foreground }]}>{rival.codename}</Text>
-          {rival.shadowActive && (
-            <View style={[detailStyles.shadowTag, { borderColor: "#E0555550" }]}>
-              <Text style={[detailStyles.shadowTagText, { color: "#E05555" }]}>SHADOW ACTIVE</Text>
-            </View>
-          )}
+          <View style={detailStyles.tagRow}>
+            {rival.shadowActive && (
+              <View style={[detailStyles.shadowTag, { borderColor: "#E0555550" }]}>
+                <Text style={[detailStyles.shadowTagText, { color: "#E05555" }]}>SHADOW ACTIVE</Text>
+              </View>
+            )}
+            {activeChallenge && activeDomColor && (
+              <View style={[detailStyles.challengeTag, { borderColor: activeDomColor + "60", backgroundColor: activeDomColor + "10" }]}>
+                <Feather name="zap" size={8} color={activeDomColor} />
+                <Text style={[detailStyles.challengeTagText, { color: activeDomColor }]}>
+                  CHALLENGED · {activeChallenge.domain}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
         <View style={detailStyles.headerRight}>
           <Text style={[detailStyles.traj, { color: trajectoryColor }]}>{trajectoryIcon}</Text>
@@ -472,6 +588,30 @@ function RivalDetailCard({
           );
         })}
       </View>
+
+      {/* Challenge button */}
+      {!activeChallenge ? (
+        <Pressable
+          style={({ pressed }) => [detailStyles.challengeBtn, {
+            borderColor: colors.primary + "50",
+            backgroundColor: colors.primary + "08",
+            opacity: pressed ? 0.6 : 1,
+          }]}
+          onPress={() => onChallenge(rival)}
+        >
+          <Feather name="zap" size={11} color={colors.primary} />
+          <Text style={[detailStyles.challengeBtnText, { color: colors.primary }]}>
+            DECLARE 7-DAY CHALLENGE
+          </Text>
+        </Pressable>
+      ) : (
+        <View style={[detailStyles.challengeActiveNote, { borderColor: activeDomColor + "30" }]}>
+          <Feather name="clock" size={10} color={activeDomColor ?? "#3A3D48"} />
+          <Text style={[detailStyles.challengeActiveText, { color: activeDomColor ?? "#3A3D48" }]}>
+            Challenge active · {activeChallenge.domain} · ends {activeChallenge.endDate}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -481,8 +621,14 @@ const detailStyles = StyleSheet.create({
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   headerLeft: { gap: 5, flex: 1 },
   codename: { fontSize: 13, fontWeight: "700" as const, letterSpacing: 0.3 },
-  shadowTag: { borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 3, alignSelf: "flex-start" },
+  tagRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  shadowTag: { borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 3 },
   shadowTagText: { fontSize: 7, fontWeight: "800" as const, letterSpacing: 2 },
+  challengeTag: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 3,
+  },
+  challengeTagText: { fontSize: 7, fontWeight: "800" as const, letterSpacing: 1.5 },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
   traj: { fontSize: 18, fontWeight: "700" as const },
   compositeRow: {
@@ -502,6 +648,16 @@ const detailStyles = StyleSheet.create({
   scoreWrap: { width: 72, flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 5 },
   rivalScore: { fontSize: 12, fontWeight: "700" as const },
   diffText: { fontSize: 10, fontWeight: "700" as const },
+  challengeBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 7, borderWidth: 1, borderRadius: 4, paddingVertical: 11,
+  },
+  challengeBtnText: { fontSize: 10, fontWeight: "800" as const, letterSpacing: 2.5 },
+  challengeActiveNote: {
+    flexDirection: "row", alignItems: "center", gap: 7,
+    borderWidth: 1, borderRadius: 4, paddingVertical: 9, paddingHorizontal: 12,
+  },
+  challengeActiveText: { fontSize: 9, fontWeight: "600" as const, letterSpacing: 1, flex: 1 },
 });
 
 // --- Main screen ------------------------------------------------------------
@@ -512,10 +668,13 @@ export default function RivalsScreen() {
   const {
     rivals, domainScores, shadowSelf, user,
     getShadowScores, getShadowRank, getHiddenScore, computeRank,
-    updateRivals,
+    updateRivals, challenges, challengeRecord,
+    declareChallenge, acknowledgeChallenge,
   } = useApp();
 
   const [refreshing, setRefreshing] = useState(false);
+  const [challengeTarget, setChallengeTarget] = useState<Rival | null>(null);
+  const [pendingOutcome, setPendingOutcome] = useState<Challenge | null>(null);
   const pulseAnim = useRef(new Animated.Value(0.4)).current;
 
   useEffect(() => {
@@ -633,6 +792,35 @@ export default function RivalsScreen() {
   const losingTo = sorted.filter(e => !e.isUser && e.composite > userComposite).length;
   const surpassing = sorted.filter(e => !e.isUser && e.composite < userComposite).length;
 
+  // Challenge helpers
+  const activeChallenges = challenges.filter(c => c.outcome === null);
+  const pendingAcknowledge = challenges.find(
+    c => c.outcome !== null && !c.acknowledged
+  ) ?? null;
+
+  const getActiveChallenge = (rivalCodename: string): Challenge | null =>
+    activeChallenges.find(c => c.rivalCodename === rivalCodename) ?? null;
+
+  const handleDeclare = async (domain: Domain) => {
+    if (!challengeTarget) return;
+    await declareChallenge(challengeTarget.codename, challengeTarget.rank, domain);
+    setChallengeTarget(null);
+  };
+
+  const handleAcknowledge = async () => {
+    if (!pendingAcknowledge) return;
+    await acknowledgeChallenge(pendingAcknowledge.id);
+    setPendingOutcome(null);
+  };
+
+  // Show outcome modal when a new unacknowledged result appears
+  useEffect(() => {
+    if (pendingAcknowledge && !pendingOutcome) {
+      setPendingOutcome(pendingAcknowledge);
+    }
+  }, [pendingAcknowledge]);
+
+  const totalRecord = challengeRecord.wins + challengeRecord.losses + challengeRecord.draws;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   return (
@@ -658,6 +846,29 @@ export default function RivalsScreen() {
           </View>
         </View>
 
+        {/* Challenge record strip */}
+        {totalRecord > 0 && (
+          <View style={[styles.recordStrip, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <Text style={[styles.recordTitle, { color: colors.mutedForeground }]}>CHALLENGE RECORD</Text>
+            <View style={styles.recordCols}>
+              <View style={styles.recordCol}>
+                <Text style={[styles.recordNum, { color: "#4B8B6F" }]}>{challengeRecord.wins}</Text>
+                <Text style={[styles.recordLabel, { color: colors.mutedForeground }]}>WIN</Text>
+              </View>
+              <View style={[styles.recordDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.recordCol}>
+                <Text style={[styles.recordNum, { color: "#E05555" }]}>{challengeRecord.losses}</Text>
+                <Text style={[styles.recordLabel, { color: colors.mutedForeground }]}>LOSS</Text>
+              </View>
+              <View style={[styles.recordDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.recordCol}>
+                <Text style={[styles.recordNum, { color: "#C4873A" }]}>{challengeRecord.draws}</Text>
+                <Text style={[styles.recordLabel, { color: colors.mutedForeground }]}>DRAW</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Your rank position */}
         <RankPositionCard
           position={userPosition}
@@ -667,6 +878,16 @@ export default function RivalsScreen() {
           surpassing={surpassing}
           losingTo={losingTo}
         />
+
+        {/* Active challenges */}
+        {activeChallenges.length > 0 && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>ACTIVE CHALLENGES</Text>
+            {activeChallenges.map(c => (
+              <ActiveChallengeCard key={c.id} challenge={c} />
+            ))}
+          </View>
+        )}
 
         {/* Leaderboard */}
         <View style={styles.section}>
@@ -707,6 +928,8 @@ export default function RivalsScreen() {
               rival={rival}
               userScores={userScores}
               userComposite={userComposite}
+              activeChallenge={getActiveChallenge(rival.codename)}
+              onChallenge={setChallengeTarget}
             />
           ))}
         </View>
@@ -714,10 +937,25 @@ export default function RivalsScreen() {
         <View style={[styles.noticeCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Feather name="eye-off" size={12} color={colors.mutedForeground} />
           <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>
-            Rivals are anonymous. Scores drift daily based on trajectory. Pull down to force a sync.
+            Rivals are anonymous. Scores drift daily. Pull to sync. Challenges track 7-day domain gains.
           </Text>
         </View>
       </ScrollView>
+
+      {/* Challenge declaration modal */}
+      <ChallengeModal
+        visible={challengeTarget !== null}
+        rival={challengeTarget}
+        onClose={() => setChallengeTarget(null)}
+        onDeclare={handleDeclare}
+      />
+
+      {/* Challenge outcome modal */}
+      <ChallengeOutcomeModal
+        visible={pendingOutcome !== null}
+        challenge={pendingOutcome}
+        onAcknowledge={handleAcknowledge}
+      />
     </View>
   );
 }
@@ -734,6 +972,16 @@ const styles = StyleSheet.create({
   },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
   liveText: { fontSize: 9, fontWeight: "700" as const, letterSpacing: 2 },
+  recordStrip: {
+    borderWidth: 1, borderRadius: 6,
+    paddingVertical: 12, paddingHorizontal: 16, gap: 8,
+  },
+  recordTitle: { fontSize: 8, letterSpacing: 3, fontWeight: "700" as const },
+  recordCols: { flexDirection: "row", alignItems: "center" },
+  recordCol: { flex: 1, alignItems: "center", gap: 3 },
+  recordNum: { fontSize: 22, fontWeight: "800" as const },
+  recordLabel: { fontSize: 7, letterSpacing: 2, fontWeight: "700" as const },
+  recordDivider: { width: StyleSheet.hairlineWidth, height: 28 },
   section: { gap: 8 },
   sectionLabel: { fontSize: 9, letterSpacing: 3, fontWeight: "700" as const, marginBottom: 2 },
   noticeCard: {
