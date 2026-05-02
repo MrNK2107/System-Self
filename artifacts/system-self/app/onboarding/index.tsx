@@ -1,126 +1,382 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  Dimensions,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColors } from "@/hooks/useColors";
+
+const { width: SW, height: SH } = Dimensions.get("window");
+
+const DOMAIN_BARS = [
+  { label: "BODY", color: "#E05555", pct: 23 },
+  { label: "MIND", color: "#3A7BD5", pct: 31 },
+  { label: "WEALTH", color: "#4B8B6F", pct: 18 },
+  { label: "DISCIPLINE", color: "#C4873A", pct: 27 },
+];
 
 const LINES = [
-  "You opened this app for a reason.",
-  "We're going to find out if you're serious about it.",
-  "Answer honestly.",
-  "These answers determine your baseline.",
-  "You cannot game this.",
+  "You opened this for a reason.",
+  "We don't ask why.",
+  "We build from where you actually are.",
+  "No lies. No shortcuts. No mercy.",
 ];
 
 export default function OnboardingIntro() {
-  const colors = useColors();
   const insets = useSafeAreaInsets();
+
+  // Typewriter state
+  const [lineIdx, setLineIdx] = useState(0);
+  const [charIdx, setCharIdx] = useState(0);
   const [displayedLines, setDisplayedLines] = useState<string[]>([]);
-  const [currentLine, setCurrentLine] = useState(0);
-  const [currentChar, setCurrentChar] = useState(0);
-  const [done, setDone] = useState(false);
-  const fadeAnim = new Animated.Value(0);
+  const [allDone, setAllDone] = useState(false);
+
+  // Decorative animations
+  const scanY = useRef(new Animated.Value(0)).current;
+  const glowAnim = useRef(new Animated.Value(0.2)).current;
+  const barWidths = useRef(DOMAIN_BARS.map(() => new Animated.Value(0))).current;
 
   useEffect(() => {
-    if (currentLine >= LINES.length) {
-      setDone(true);
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }).start();
+    // Scan line loop
+    const scanLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanY, { toValue: SH, duration: 2800, useNativeDriver: false }),
+        Animated.timing(scanY, { toValue: 0, duration: 0, useNativeDriver: false }),
+        Animated.delay(600),
+      ])
+    );
+    scanLoop.start();
+
+    // Glow pulse
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, { toValue: 0.5, duration: 1600, useNativeDriver: false }),
+        Animated.timing(glowAnim, { toValue: 0.2, duration: 1600, useNativeDriver: false }),
+      ])
+    );
+    glowLoop.start();
+
+    // Bar widths — staggered fill
+    const barAnims = Animated.stagger(
+      100,
+      barWidths.map((w, i) =>
+        Animated.timing(w, {
+          toValue: DOMAIN_BARS[i].pct,
+          duration: 800,
+          delay: 200,
+          useNativeDriver: false,
+        })
+      )
+    );
+    barAnims.start();
+
+    return () => {
+      scanLoop.stop();
+      glowLoop.stop();
+    };
+  }, []);
+
+  // Typewriter effect
+  useEffect(() => {
+    if (allDone) return;
+    if (lineIdx >= LINES.length) {
+      setAllDone(true);
       return;
     }
-
-    const line = LINES[currentLine];
-    if (currentChar < line.length) {
-      const timeout = setTimeout(() => {
+    const line = LINES[lineIdx];
+    if (charIdx < line.length) {
+      const t = setTimeout(() => {
         setDisplayedLines(prev => {
-          const updated = [...prev];
-          updated[currentLine] = line.slice(0, currentChar + 1);
-          return updated;
+          const u = [...prev];
+          u[lineIdx] = line.slice(0, charIdx + 1);
+          return u;
         });
-        setCurrentChar(c => c + 1);
+        setCharIdx(c => c + 1);
       }, 30);
-      return () => clearTimeout(timeout);
+      return () => clearTimeout(t);
     } else {
-      const timeout = setTimeout(() => {
-        setCurrentLine(l => l + 1);
-        setCurrentChar(0);
-      }, 400);
-      return () => clearTimeout(timeout);
+      const t = setTimeout(() => {
+        setLineIdx(l => l + 1);
+        setCharIdx(0);
+      }, 380);
+      return () => clearTimeout(t);
     }
-  }, [currentLine, currentChar]);
-
-  const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  }, [lineIdx, charIdx, allDone]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad + 40, paddingBottom: insets.bottom + 40 }]}>
-      <Text style={[styles.tag, { color: colors.mutedForeground }]}>SYSTEM // SELF</Text>
+    <View style={styles.root}>
+      {/* Background gradient */}
+      <LinearGradient
+        colors={["#060810", "#0C0F18", "#111318"]}
+        style={StyleSheet.absoluteFill}
+      />
+      <LinearGradient
+        colors={["#1E3D7220", "transparent"]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 0.55 }}
+        style={StyleSheet.absoluteFill}
+      />
 
-      <View style={styles.textContainer}>
-        {displayedLines.map((line, i) => (
-          <Text key={i} style={[styles.line, { color: i < displayedLines.length - 1 ? colors.mutedForeground : colors.foreground }]}>
-            {line}
-            {i === currentLine && currentChar < LINES[i]?.length && (
-              <Text style={{ color: colors.primary }}>▊</Text>
-            )}
-          </Text>
+      {/* Grid overlay */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        {Array.from({ length: Math.ceil(SW / 44) + 1 }).map((_, i) => (
+          <View key={`v${i}`} style={[styles.gridV, { left: i * 44 }]} />
+        ))}
+        {Array.from({ length: Math.ceil(SH / 56) + 1 }).map((_, i) => (
+          <View key={`h${i}`} style={[styles.gridH, { top: i * 56 }]} />
         ))}
       </View>
 
-      {done && (
-        <Animated.View style={{ opacity: fadeAnim }}>
-          <TouchableOpacity
-            style={[styles.btn, { borderColor: colors.primary }]}
-            onPress={() => router.push("/onboarding/assessment")}
-            activeOpacity={0.8}
+      {/* Scan line */}
+      <Animated.View
+        style={[styles.scanLine, { top: scanY }]}
+        pointerEvents="none"
+      />
+
+      {/* Header brand */}
+      <View style={[styles.header, { paddingTop: insets.top + (Platform.OS === "web" ? 0 : 16) }]}>
+        <View style={styles.brandDot} />
+        <Text style={styles.brandText}>SYSTEM // SELF</Text>
+        <View style={styles.brandDot} />
+      </View>
+
+      {/* CENTER HERO */}
+      <View style={styles.hero}>
+        {/* Rank badge with glow */}
+        <View style={styles.rankSection}>
+          <Animated.View style={[styles.rankGlow, { opacity: glowAnim }]} />
+          <View style={styles.rankBadge}>
+            <Text style={styles.rankLetter}>E</Text>
+          </View>
+          <View style={styles.rankMeta}>
+            <Text style={styles.rankTitle}>RANK E</Text>
+            <Text style={styles.rankSub}>This is where everyone starts.</Text>
+          </View>
+        </View>
+
+        {/* Divider */}
+        <View style={styles.heroDivider} />
+
+        {/* Domain bars preview */}
+        <View style={styles.barsBlock}>
+          <Text style={styles.barsTitle}>STAT DOMAINS</Text>
+          {DOMAIN_BARS.map((bar, i) => (
+            <View key={bar.label} style={styles.barRow}>
+              <Text style={[styles.barLabel, { color: bar.color }]}>{bar.label}</Text>
+              <View style={styles.barTrack}>
+                <Animated.View
+                  style={[
+                    styles.barFill,
+                    {
+                      width: barWidths[i].interpolate({
+                        inputRange: [0, 100],
+                        outputRange: ["0%", "100%"],
+                      }),
+                      backgroundColor: bar.color,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* BOTTOM TEXT + CTA */}
+      <View style={[styles.bottom, { paddingBottom: insets.bottom + 24 }]}>
+        <View style={styles.bottomDivider} />
+
+        {/* Typewriter lines */}
+        <View style={styles.typeBlock}>
+          {displayedLines.map((line, i) => (
+            <Text
+              key={i}
+              style={[
+                styles.typeLine,
+                { color: i < displayedLines.length - 1 ? "#383B47" : "#C0C3CF" },
+              ]}
+            >
+              {line}
+              {i === lineIdx && !allDone && charIdx < LINES[lineIdx]?.length && (
+                <Text style={{ color: "#3A7BD5" }}>▊</Text>
+              )}
+            </Text>
+          ))}
+        </View>
+
+        {/* CTA */}
+        <Pressable
+          style={({ pressed }) => [styles.ctaOuter, pressed && { opacity: 0.85 }]}
+          onPress={() => router.push("/onboarding/assessment")}
+        >
+          <LinearGradient
+            colors={["#2F6FD4", "#1E4FA0"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.ctaInner}
           >
-            <Text style={[styles.btnText, { color: colors.primary }]}>BEGIN ASSESSMENT</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      )}
+            <Text style={styles.ctaText}>BEGIN ASSESSMENT</Text>
+            <Feather name="arrow-right" size={16} color="#fff" />
+          </LinearGradient>
+        </Pressable>
+        <Text style={styles.ctaNote}>
+          Honest answers only. Your baseline is permanent.
+        </Text>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingHorizontal: 32,
-    justifyContent: "space-between",
-  },
-  tag: {
-    fontSize: 9,
-    letterSpacing: 4,
-    fontWeight: "600" as const,
-  },
-  textContainer: {
-    flex: 1,
+  root: { flex: 1, backgroundColor: "#060810", justifyContent: "space-between" },
+
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "center",
+    gap: 8,
+    paddingBottom: 8,
+    paddingHorizontal: 24,
+  },
+  brandDot: { width: 4, height: 4, borderRadius: 1, backgroundColor: "#3A7BD5", opacity: 0.7 },
+  brandText: { fontSize: 9, letterSpacing: 5, color: "#333646", fontWeight: "700" as const },
+
+  hero: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    gap: 24,
+  },
+  rankSection: {
+    alignItems: "center",
+    gap: 12,
+  },
+  rankGlow: {
+    position: "absolute",
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: "#3A7BD5",
+    top: -54,
+    alignSelf: "center",
+  },
+  rankBadge: {
+    width: 100,
+    height: 100,
+    borderWidth: 1,
+    borderColor: "#3A7BD545",
+    backgroundColor: "#0A0D16",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#3A7BD5",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 32,
+    elevation: 16,
+  },
+  rankLetter: {
+    fontSize: 56,
+    fontWeight: "900" as const,
+    color: "#3A7BD5",
+    letterSpacing: 6,
+    lineHeight: 64,
+  },
+  rankMeta: { alignItems: "center", gap: 4 },
+  rankTitle: {
+    fontSize: 10,
+    letterSpacing: 4,
+    color: "#3A7BD560",
+    fontWeight: "700" as const,
+  },
+  rankSub: { fontSize: 12, color: "#282B38", letterSpacing: 0.3 },
+
+  heroDivider: {
+    width: "100%",
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#14171F",
+  },
+
+  barsBlock: { width: "100%", gap: 11 },
+  barsTitle: {
+    fontSize: 8,
+    letterSpacing: 3.5,
+    color: "#262930",
+    fontWeight: "700" as const,
+    marginBottom: 2,
+  },
+  barRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  barLabel: {
+    width: 74,
+    fontSize: 9,
+    fontWeight: "700" as const,
+    letterSpacing: 2,
+    textAlign: "right",
+  },
+  barTrack: {
+    flex: 1,
+    height: 3,
+    backgroundColor: "#12151E",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  barFill: { height: "100%", borderRadius: 2 },
+
+  bottom: {
+    paddingHorizontal: 24,
     gap: 16,
   },
-  line: {
-    fontSize: 22,
-    lineHeight: 32,
+  bottomDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#141720",
+  },
+  typeBlock: { minHeight: 96, gap: 8 },
+  typeLine: {
+    fontSize: 18,
+    lineHeight: 28,
     fontWeight: "400" as const,
+    letterSpacing: -0.2,
   },
-  btn: {
-    borderWidth: 1,
-    padding: 16,
+  ctaOuter: { borderRadius: 2, overflow: "hidden" },
+  ctaInner: {
+    flexDirection: "row",
     alignItems: "center",
-    borderRadius: 2,
+    justifyContent: "center",
+    paddingVertical: 16,
+    gap: 10,
   },
-  btnText: {
-    fontSize: 11,
-    fontWeight: "700" as const,
-    letterSpacing: 3,
+  ctaText: { color: "#fff", fontSize: 12, fontWeight: "700" as const, letterSpacing: 3 },
+  ctaNote: { textAlign: "center", color: "#222430", fontSize: 10 },
+
+  scanLine: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: "#3A7BD5",
+    opacity: 0.09,
+  },
+  gridV: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: "#fff",
+    opacity: 0.025,
+  },
+  gridH: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#fff",
+    opacity: 0.025,
   },
 });
