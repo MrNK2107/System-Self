@@ -191,18 +191,38 @@ router.post("/system/quests", async (req, res) => {
       primaryGoal,
       weakestDomain,
       recentLogs,
+      shadowGap,
+      dayNumber,
     } = req.body;
 
     const profile = RANK_QUEST_PROFILES[rank as string] ?? RANK_QUEST_PROFILES["E"];
     const includeArc = profile.arcCount > 0;
+    const gap = Number(shadowGap ?? 0);
+    const day = Number(dayNumber ?? 1);
+
+    const shadowPressureNote = gap > 20
+      ? `SHADOW SELF is critically ahead by ${gap.toFixed(1)} pts. Bias at least 2 quests toward DISCIPLINE and ${weakestDomain}. Escalate difficulty.`
+      : gap > 10
+      ? `SHADOW SELF leads by ${gap.toFixed(1)} pts. Include one DISCIPLINE-focused quest. Moderate escalation.`
+      : gap > 0
+      ? `SHADOW SELF is ${gap.toFixed(1)} pts ahead. Balanced board — cover weakest domain.`
+      : `User leads Shadow Self by ${Math.abs(gap).toFixed(1)} pts. Prevent complacency — maintain pressure.`;
+
+    const phaseNote = day <= 7
+      ? "Early phase (day 1-7): focus on habit formation and baseline establishment."
+      : day <= 30
+      ? "Development phase (day 8-30): increase specificity and output expectations."
+      : "Advanced phase (day 30+): quests must reflect compounding discipline. No beginner tasks.";
 
     const prompt = `USER CONTEXT:
 - Username: ${username}
 - Rank: ${rank} — ${profile.label}
+- Day: ${day} (${phaseNote})
 - Domain scores: BODY ${domainScores.BODY?.toFixed(1)}, MIND ${domainScores.MIND?.toFixed(1)}, WEALTH ${domainScores.WEALTH?.toFixed(1)}, DISCIPLINE ${domainScores.DISCIPLINE?.toFixed(1)}
 - Primary goal: ${primaryGoal}
 - Weakest domain: ${weakestDomain}
 - Recent activity: ${recentLogs?.join(", ") || "no recent logs"}
+- Shadow pressure: ${shadowPressureNote}
 
 DIFFICULTY CALIBRATION FOR RANK ${rank}:
 ${profile.intensityNote}

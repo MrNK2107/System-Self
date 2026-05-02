@@ -23,7 +23,7 @@ interface GeneratedQuest {
   title: string;
   description: string;
   domain: Domain;
-  type: "daily" | "weekly";
+  type: "daily" | "weekly" | "arc";
 }
 
 async function fetchApi<T>(path: string, body: unknown): Promise<T> {
@@ -78,6 +78,8 @@ export function useSystemAI() {
     primaryGoal: string;
     weakestDomain: string;
     recentLogs: string[];
+    shadowGap?: number;
+    dayNumber?: number;
   }): Promise<GeneratedQuest[]> => {
     setLoading(true);
     setError(null);
