@@ -9,30 +9,35 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp, type Rival } from "@/context/AppContext";
+import { useApp, type Domain, type Rival } from "@/context/AppContext";
 import { DomainBar } from "@/components/DomainBar";
 import { RankBadge } from "@/components/RankBadge";
+import { ShadowSelfCard } from "@/components/ShadowSelfCard";
 
 function RivalCard({ rival, userScores }: {
   rival: Rival;
-  userScores: { BODY: number; MIND: number; WEALTH: number; DISCIPLINE: number };
+  userScores: Record<Domain, number>;
 }) {
   const colors = useColors();
+  const trajectoryColor =
+    rival.trajectory === "up" ? colors.primary :
+    rival.trajectory === "down" ? colors.destructive :
+    colors.mutedForeground;
+  const trajectoryIcon =
+    rival.trajectory === "up" ? "↑" :
+    rival.trajectory === "down" ? "↓" : "→";
 
-  const trajectoryIcon = rival.trajectory === "up" ? "↑" : rival.trajectory === "down" ? "↓" : "→";
-  const trajectoryColor = rival.trajectory === "up" ? colors.primary : rival.trajectory === "down" ? colors.destructive : colors.mutedForeground;
-
-  const rivalDomains = [
-    { domain: "BODY" as const, score: rival.bodyScore, userScore: userScores.BODY },
-    { domain: "MIND" as const, score: rival.mindScore, userScore: userScores.MIND },
-    { domain: "WEALTH" as const, score: rival.wealthScore, userScore: userScores.WEALTH },
-    { domain: "DISCIPLINE" as const, score: rival.disciplineScore, userScore: userScores.DISCIPLINE },
+  const rivalDomains: { domain: Domain; score: number }[] = [
+    { domain: "BODY", score: rival.bodyScore },
+    { domain: "MIND", score: rival.mindScore },
+    { domain: "WEALTH", score: rival.wealthScore },
+    { domain: "DISCIPLINE", score: rival.disciplineScore },
   ];
 
   return (
     <View style={[styles.rivalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={styles.rivalHeader}>
-        <View>
+        <View style={{ gap: 4 }}>
           <Text style={[styles.codename, { color: colors.foreground }]}>{rival.codename}</Text>
           {rival.shadowActive && (
             <View style={[styles.shadowTag, { borderColor: colors.destructive + "60" }]}>
@@ -49,15 +54,19 @@ function RivalCard({ rival, userScores }: {
       <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
       <View style={styles.domainsGrid}>
-        {rivalDomains.map(({ domain, score, userScore }) => {
+        {rivalDomains.map(({ domain, score }) => {
+          const userScore = userScores[domain] ?? 50;
           const diff = score - userScore;
-          const diffColor = diff > 0 ? colors.destructive : diff < 0 ? colors.primary : colors.mutedForeground;
+          const diffColor =
+            diff > 0 ? colors.destructive :
+            diff < 0 ? colors.primary :
+            colors.mutedForeground;
           return (
             <View key={domain} style={styles.domainCompare}>
               <View style={styles.domainCompareHeader}>
                 <Text style={[styles.domainLabel, { color: colors.mutedForeground }]}>{domain}</Text>
                 <View style={styles.diffRow}>
-                  <Text style={[styles.rivalScore, { color: colors.foreground, fontFamily: "SpaceMono" }]}>
+                  <Text style={[styles.rivalScore, { color: colors.foreground }]}>
                     {score.toFixed(1)}
                   </Text>
                   <Text style={[styles.diffBadge, { color: diffColor }]}>
@@ -67,11 +76,11 @@ function RivalCard({ rival, userScores }: {
               </View>
               <View style={[styles.compareTrack, { backgroundColor: colors.muted }]}>
                 <View style={[styles.rivalFill, {
-                  width: `${score}%` as any,
-                  backgroundColor: colors.domain[domain] + "60",
+                  width: `${score}%` as `${number}%`,
+                  backgroundColor: colors.domain[domain as keyof typeof colors.domain] + "50",
                 }]} />
                 <View style={[styles.userMarker, {
-                  left: `${userScore}%` as any,
+                  left: `${userScore}%` as `${number}%`,
                   backgroundColor: colors.primary,
                 }]} />
               </View>
@@ -86,15 +95,17 @@ function RivalCard({ rival, userScores }: {
 export default function RivalsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { rivals, domainScores, user } = useApp();
+  const { rivals, domainScores, shadowSelf, getShadowScores, getShadowRank } = useApp();
 
-  const userScores = {
+  const userScores: Record<Domain, number> = {
     BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
     MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
     WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
     DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
   };
 
+  const shadowScores = getShadowScores();
+  const shadowRank = getShadowRank();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   return (
@@ -103,22 +114,44 @@ export default function RivalsScreen() {
         contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16, paddingBottom: insets.bottom + 80 }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.foreground }]}>RIVALS</Text>
-          <Text style={[styles.count, { color: colors.mutedForeground }]}>{rivals.length} ASSIGNED</Text>
+        {/* Header */}
+        <View style={styles.pageHeader}>
+          <View>
+            <Text style={[styles.title, { color: colors.foreground }]}>RIVALS</Text>
+            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
+              {rivals.length + (shadowSelf.active ? 1 : 0)} entities tracking you
+            </Text>
+          </View>
+          <View style={[styles.statusPill, { borderColor: colors.destructive + "40", backgroundColor: colors.destructive + "10" }]}>
+            <View style={[styles.statusDot, { backgroundColor: colors.destructive }]} />
+            <Text style={[styles.statusText, { color: colors.destructive }]}>LIVE</Text>
+          </View>
         </View>
 
-        <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Feather name="eye-off" size={14} color={colors.mutedForeground} />
-          <Text style={[styles.infoText, { color: colors.mutedForeground }]}>
-            Rivals are anonymous. You see their scores, not their identity. They can see yours.
+        {/* Shadow self — always at top if active */}
+        {shadowSelf.active && (
+          <ShadowSelfCard
+            shadow={shadowSelf}
+            shadowScores={shadowScores}
+            shadowRank={shadowRank}
+            userScores={userScores}
+          />
+        )}
+
+        {/* System notice */}
+        <View style={[styles.noticeCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Feather name="eye-off" size={13} color={colors.mutedForeground} />
+          <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>
+            Rivals are anonymous. You see their scores. They see yours. Your shadow self is permanent.
           </Text>
         </View>
 
+        {/* Regular rivals */}
         {rivals.map(rival => (
           <RivalCard key={rival.codename} rival={rival} userScores={userScores} />
         ))}
 
+        {/* Your position */}
         <View style={[styles.yourStats, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>YOUR POSITION</Text>
           {domainScores.map(ds => (
@@ -126,6 +159,7 @@ export default function RivalsScreen() {
           ))}
         </View>
 
+        {/* Pro upgrade teaser */}
         <View style={[styles.upgradeCard, { borderColor: colors.primary + "40", backgroundColor: colors.primary + "08" }]}>
           <Text style={[styles.upgradeTitle, { color: colors.primary }]}>NAMED CHALLENGES</Text>
           <Text style={[styles.upgradeText, { color: colors.mutedForeground }]}>
@@ -139,38 +173,37 @@ export default function RivalsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scroll: { paddingHorizontal: 20, gap: 12 },
-  header: {
+  scroll: { paddingHorizontal: 16, gap: 12 },
+  pageHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  title: {
-    fontSize: 14,
-    fontWeight: "700" as const,
-    letterSpacing: 3,
+  title: { fontSize: 14, fontWeight: "800" as const, letterSpacing: 3 },
+  subtitle: { fontSize: 10, letterSpacing: 1, marginTop: 3 },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderRadius: 20,
   },
-  count: {
-    fontSize: 9,
-    letterSpacing: 2,
-    fontWeight: "600" as const,
-  },
-  infoCard: {
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { fontSize: 9, fontWeight: "700" as const, letterSpacing: 2 },
+  noticeCard: {
     flexDirection: "row",
     gap: 10,
     padding: 12,
-    borderRadius: 4,
+    borderRadius: 6,
     borderWidth: 1,
     alignItems: "flex-start",
   },
-  infoText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 18,
-  },
+  noticeText: { flex: 1, fontSize: 11, lineHeight: 17 },
   rivalCard: {
     padding: 16,
-    borderRadius: 4,
+    borderRadius: 6,
     borderWidth: 1,
     gap: 12,
   },
@@ -179,65 +212,29 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
   },
-  codename: {
-    fontSize: 14,
-    fontWeight: "700" as const,
-    letterSpacing: 1,
-  },
+  codename: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 0.5 },
   shadowTag: {
     borderWidth: 1,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 2,
-    marginTop: 4,
+    borderRadius: 3,
     alignSelf: "flex-start",
   },
-  shadowTagText: {
-    fontSize: 8,
-    fontWeight: "700" as const,
-    letterSpacing: 2,
-  },
-  rivalRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  trajectory: {
-    fontSize: 18,
-    fontWeight: "700" as const,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-  },
-  domainsGrid: {
-    gap: 10,
-  },
-  domainCompare: {
-    gap: 5,
-  },
+  shadowTagText: { fontSize: 8, fontWeight: "700" as const, letterSpacing: 2 },
+  rivalRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+  trajectory: { fontSize: 18, fontWeight: "700" as const },
+  divider: { height: StyleSheet.hairlineWidth },
+  domainsGrid: { gap: 10 },
+  domainCompare: { gap: 5 },
   domainCompareHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  domainLabel: {
-    fontSize: 9,
-    letterSpacing: 2,
-    fontWeight: "600" as const,
-  },
-  diffRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  rivalScore: {
-    fontSize: 12,
-    fontWeight: "700" as const,
-  },
-  diffBadge: {
-    fontSize: 10,
-    fontWeight: "700" as const,
-  },
+  domainLabel: { fontSize: 9, letterSpacing: 2, fontWeight: "600" as const },
+  diffRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  rivalScore: { fontSize: 12, fontWeight: "700" as const },
+  diffBadge: { fontSize: 10, fontWeight: "700" as const },
   compareTrack: {
     height: 4,
     borderRadius: 2,
@@ -261,28 +258,17 @@ const styles = StyleSheet.create({
   },
   yourStats: {
     padding: 16,
-    borderRadius: 4,
+    borderRadius: 6,
     borderWidth: 1,
     gap: 12,
   },
-  sectionLabel: {
-    fontSize: 9,
-    letterSpacing: 3,
-    fontWeight: "600" as const,
-  },
+  sectionLabel: { fontSize: 9, letterSpacing: 3, fontWeight: "600" as const },
   upgradeCard: {
     padding: 14,
-    borderRadius: 4,
+    borderRadius: 6,
     borderWidth: 1,
     gap: 6,
   },
-  upgradeTitle: {
-    fontSize: 10,
-    fontWeight: "700" as const,
-    letterSpacing: 2,
-  },
-  upgradeText: {
-    fontSize: 12,
-    lineHeight: 18,
-  },
+  upgradeTitle: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 2 },
+  upgradeText: { fontSize: 12, lineHeight: 18 },
 });

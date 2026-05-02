@@ -13,6 +13,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp, type Domain } from "@/context/AppContext";
 
+
 const { width: SW } = Dimensions.get("window");
 
 const DOMAIN_COLORS: Record<Domain, string> = {
@@ -33,7 +34,7 @@ const STEPS = [
 export default function CalibratingScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
-  const { setUser, updateDomainScore } = useApp();
+  const { setUser, updateDomainScore, initializeShadowSelf } = useApp();
 
   const [stepIndex, setStepIndex] = useState(0);
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -108,6 +109,19 @@ export default function CalibratingScreen() {
         const rating = ratings[domain] ?? 5;
         await updateDomainScore(domain, rating * 4 - 50);
       }
+      // Compute the actual starting scores for shadow initialization
+      const startScores: Record<Domain, number> = {
+        BODY: 50 + (ratings.BODY ?? 5) * 4 - 50,
+        MIND: 50 + (ratings.MIND ?? 5) * 4 - 50,
+        WEALTH: 50 + (ratings.WEALTH ?? 5) * 4 - 50,
+        DISCIPLINE: 50 + (ratings.DISCIPLINE ?? 5) * 4 - 50,
+      };
+      await initializeShadowSelf(startScores, username);
+    } else {
+      await initializeShadowSelf(
+        { BODY: 50, MIND: 50, WEALTH: 50, DISCIPLINE: 50 },
+        username
+      );
     }
   };
 

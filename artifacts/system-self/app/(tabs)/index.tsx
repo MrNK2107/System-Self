@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Animated,
   ActivityIndicator,
   RefreshControl,
   ScrollView,
@@ -11,17 +12,116 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp } from "@/context/AppContext";
+import { useApp, type Domain } from "@/context/AppContext";
 import { DomainBar } from "@/components/DomainBar";
 import { RankBadge } from "@/components/RankBadge";
 import { SystemMessage } from "@/components/SystemMessage";
 import { LogModal } from "@/components/LogModal";
 import { useSystemAI } from "@/hooks/useSystemAI";
 
+const DOMAIN_COLORS: Record<Domain, string> = {
+  BODY: "#E05555",
+  MIND: "#3A7BD5",
+  WEALTH: "#4B8B6F",
+  DISCIPLINE: "#C4873A",
+};
+const ALL_DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
+
+function ShadowAlertBanner() {
+  const colors = useColors();
+  const { shadowSelf, domainScores, getShadowScores } = useApp();
+  const pulseAnim = React.useRef(new Animated.Value(0.4)).current;
+
+  React.useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1600, useNativeDriver: false }),
+        Animated.timing(pulseAnim, { toValue: 0.4, duration: 1600, useNativeDriver: false }),
+      ])
+    ).start();
+  }, []);
+
+  const shadowScores = getShadowScores();
+  const losingDomains = ALL_DOMAINS.filter(d => {
+    const user = domainScores.find(s => s.domain === d)?.score ?? 50;
+    return shadowScores[d] > user;
+  });
+  const isLosing = losingDomains.length > 0;
+  const gap = shadowSelf.gap;
+
+  return (
+    <View style={[
+      shadowStyles.container,
+      {
+        borderColor: isLosing ? "#E0555550" : "#4B8B6F40",
+        backgroundColor: isLosing ? "#E0555508" : "#4B8B6F08",
+      },
+    ]}>
+      <View style={shadowStyles.topRow}>
+        <View style={shadowStyles.left}>
+          <Animated.View style={[shadowStyles.dot, { opacity: pulseAnim, backgroundColor: isLosing ? "#E05555" : "#4B8B6F" }]} />
+          <Text style={[shadowStyles.label, { color: isLosing ? "#E05555" : "#4B8B6F" }]}>
+            SHADOW SELF
+          </Text>
+        </View>
+        <Text style={[shadowStyles.codename, { color: colors.mutedForeground }]}>
+          {shadowSelf.codename}
+        </Text>
+      </View>
+      <Text style={[shadowStyles.status, { color: isLosing ? "#E05555" : "#4B8B6F" }]}>
+        {isLosing
+          ? `${Math.abs(gap).toFixed(1)} pts ahead. ${losingDomains.length} domain${losingDomains.length > 1 ? "s" : ""} compromised: ${losingDomains.join(" · ")}`
+          : `You are ${Math.abs(gap).toFixed(1)} pts ahead. Stay consistent.`}
+      </Text>
+      {isLosing && (
+        <View style={shadowStyles.domainRow}>
+          {ALL_DOMAINS.map(d => {
+            const user = domainScores.find(s => s.domain === d)?.score ?? 50;
+            const shadow = shadowScores[d];
+            const losing = shadow > user;
+            const color = DOMAIN_COLORS[d];
+            return (
+              <View key={d} style={shadowStyles.domainCell}>
+                <Text style={[shadowStyles.dLabel, { color: losing ? color : "#2A2D38" }]}>{d.slice(0, 4)}</Text>
+                <Text style={[shadowStyles.dDiff, { color: losing ? "#E05555" : "#4B8B6F" }]}>
+                  {losing ? `−${(shadow - user).toFixed(1)}` : `+${(user - shadow).toFixed(1)}`}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
+
+const shadowStyles = StyleSheet.create({
+  container: {
+    borderWidth: 1,
+    borderRadius: 6,
+    padding: 12,
+    gap: 8,
+  },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  left: { flexDirection: "row", alignItems: "center", gap: 7 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  label: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 3 },
+  codename: { fontSize: 9, letterSpacing: 1 },
+  status: { fontSize: 11, lineHeight: 17, fontWeight: "600" as const },
+  domainRow: { flexDirection: "row", gap: 8, marginTop: 2 },
+  domainCell: { flex: 1, alignItems: "center", gap: 2 },
+  dLabel: { fontSize: 8, fontWeight: "700" as const, letterSpacing: 1.5 },
+  dDiff: { fontSize: 11, fontWeight: "800" as const },
+});
+
 export default function Dashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank } = useApp();
+  const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank, getShadowScores } = useApp();
   const { generateMessage, loading: aiLoading } = useSystemAI();
 
   const [briefing, setBriefing] = useState<string>("");
@@ -175,15 +275,8 @@ export default function Dashboard() {
           )}
         </View>
 
-        {/* Shadow Self */}
-        {shadowSelf.active && (
-          <View style={[styles.shadowCard, { borderColor: colors.destructive + "60", backgroundColor: colors.destructive + "10" }]}>
-            <Text style={[styles.shadowTitle, { color: colors.destructive }]}>SHADOW SELF — ACTIVE</Text>
-            <Text style={[styles.shadowText, { color: colors.mutedForeground }]}>
-              Divergence: {shadowSelf.gap.toFixed(1)} points. It will not wait for you.
-            </Text>
-          </View>
-        )}
+        {/* Shadow Self Alert */}
+        {shadowSelf.active && <ShadowAlertBanner />}
       </ScrollView>
 
       {/* Log FAB */}
@@ -316,21 +409,6 @@ const styles = StyleSheet.create({
   placeholder: {
     fontSize: 12,
     fontStyle: "italic",
-  },
-  shadowCard: {
-    padding: 14,
-    borderRadius: 4,
-    borderWidth: 1,
-    gap: 6,
-  },
-  shadowTitle: {
-    fontSize: 10,
-    fontWeight: "700" as const,
-    letterSpacing: 2,
-  },
-  shadowText: {
-    fontSize: 12,
-    lineHeight: 18,
   },
   fab: {
     position: "absolute",
