@@ -35,9 +35,13 @@ async function fetchApi<T>(path: string, body: unknown): Promise<T> {
   const baseUrl = process.env.EXPO_PUBLIC_DOMAIN
     ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
     : "";
+  const token = process.env.EXPO_PUBLIC_API_TOKEN;
   const res = await fetch(`${baseUrl}/api${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);

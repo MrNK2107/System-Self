@@ -3,6 +3,7 @@ import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages } from "@workspace/db";
 import { generateWithFallback } from "../lib/ai";
+import { requireOwnership } from "../middlewares/auth";
 
 const router = Router();
 
@@ -25,10 +26,16 @@ const questHistoryQuerySchema = z.object({
   to: z.string().datetime().optional(),
 });
 
+const completionSummaryQuerySchema = z.object({
+  username: z.string().min(1),
+  days: z.coerce.number().int().min(1).max(90).default(14),
+});
+
 router.get("/system/messages", async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
     const query = messageQuerySchema.parse(req.query);
+    if (!requireOwnership(req, res, query.username)) return;
 
     const whereClauses = [eq(systemMessages.username, query.username)];
     if (query.cursor) whereClauses.push(lt(systemMessages.id, query.cursor));
@@ -59,6 +66,7 @@ router.get("/system/quests/history", async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
     const query = questHistoryQuerySchema.parse(req.query);
+    if (!requireOwnership(req, res, query.username)) return;
 
     const whereClauses = [eq(generatedQuestBatches.username, query.username)];
     if (query.cursor) whereClauses.push(lt(generatedQuestBatches.id, query.cursor));
@@ -109,6 +117,7 @@ router.get("/system/recap/weekly", async (req, res) => {
     if (!username) {
       return res.status(400).json({ error: "username query param is required" });
     }
+    if (!requireOwnership(req, res, username)) return;
 
     const from = new Date();
     from.setDate(from.getDate() - 7);
@@ -173,6 +182,7 @@ router.get("/system/recap/weekly/debrief", async (req, res) => {
     if (!username) {
       return res.status(400).json({ error: "username query param is required" });
     }
+    if (!requireOwnership(req, res, username)) return;
 
     const from = new Date();
     from.setDate(from.getDate() - 7);
@@ -245,6 +255,65 @@ Style:
   } catch (error) {
     req.log.error({ error }, "Failed to generate weekly debrief");
     return res.status(500).json({ error: "Failed to generate weekly debrief" });
+  }
+});
+
+router.get("/system/completions/summary", async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ error: "Database is not configured" });
+    const query = completionSummaryQuerySchema.parse(req.query);
+    if (!requireOwnership(req, res, query.username)) return;
+    const from = new Date();
+    from.setDate(from.getDate() - query.days);
+
+    const totals = await db
+      .select({
+        status: questCompletionEvents.status,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(questCompletionEvents)
+      .where(and(eq(questCompletionEvents.username, query.username), gte(questCompletionEvents.completedAt, from)))
+      .groupBy(questCompletionEvents.status);
+
+    const byDomain = await db
+      .select({
+        domain: questCompletionEvents.domain,
+        status: questCompletionEvents.status,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(questCompletionEvents)
+      .where(and(eq(questCompletionEvents.username, query.username), gte(questCompletionEvents.completedAt, from)))
+      .groupBy(questCompletionEvents.domain, questCompletionEvents.status);
+
+    const daily = await db
+      .select({
+        day: sql<string>`to_char(${questCompletionEvents.completedAt}, 'YYYY-MM-DD')`,
+        status: questCompletionEvents.status,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(questCompletionEvents)
+      .where(and(eq(questCompletionEvents.username, query.username), gte(questCompletionEvents.completedAt, from)))
+      .groupBy(sql`to_char(${questCompletionEvents.completedAt}, 'YYYY-MM-DD')`, questCompletionEvents.status)
+      .orderBy(sql`to_char(${questCompletionEvents.completedAt}, 'YYYY-MM-DD') asc`);
+
+    const attempts = totals.reduce((sum, row) => sum + row.count, 0);
+    const completed = totals.find((r) => r.status === "complete")?.count ?? 0;
+
+    return res.json({
+      username: query.username,
+      windowDays: query.days,
+      from: from.toISOString(),
+      to: new Date().toISOString(),
+      attempts,
+      completed,
+      completionRate: attempts > 0 ? Math.round((completed / attempts) * 100) : 0,
+      totals,
+      byDomain,
+      daily,
+    });
+  } catch (error) {
+    req.log.error({ error }, "Failed to fetch completion summary");
+    return res.status(500).json({ error: "Failed to fetch completion summary" });
   }
 });
 

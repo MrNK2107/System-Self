@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { validateBody } from "../middlewares/validate";
 import {
   generateQuestsBodySchema,
@@ -10,6 +10,7 @@ import {
   questCompletionEventBodySchema,
 } from "../lib/schemas";
 import { generateWithFallback } from "../lib/ai";
+import { requireOwnership } from "../middlewares/auth";
 
 const router = Router();
 const MESSAGE_PROMPT_VERSION = "system-message-v2";
@@ -181,6 +182,7 @@ const RANK_QUEST_PROFILES: Record<string, {
 
 router.post("/system/message", validateBody(generateSystemMessageBodySchema), async (req, res) => {
   try {
+    if (!requireOwnership(req, res, req.body.username)) return;
     const { prompt } = buildUserPrompt(req.body);
     const ai = await generateWithFallback({
       systemInstruction: SYSTEM_PROMPT,
@@ -242,6 +244,7 @@ router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req
       shadowGap,
       dayNumber,
     } = req.body;
+    if (!requireOwnership(req, res, username)) return;
 
     const profile = RANK_QUEST_PROFILES[rank as string] ?? RANK_QUEST_PROFILES["E"];
     const includeArc = profile.arcCount > 0;
@@ -413,6 +416,23 @@ Return ONLY valid JSON in this exact format:
 router.post("/system/quest-completion", validateBody(questCompletionEventBodySchema), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
+    if (!requireOwnership(req, res, req.body.username)) return;
+    const already = await db
+      .select({ id: questCompletionEvents.id })
+      .from(questCompletionEvents)
+      .where(
+        and(
+          eq(questCompletionEvents.username, req.body.username),
+          eq(questCompletionEvents.questId, req.body.questId),
+          eq(questCompletionEvents.status, req.body.status),
+          eq(questCompletionEvents.domain, req.body.domain),
+          eq(questCompletionEvents.questType, req.body.questType),
+        ),
+      )
+      .limit(1);
+    if (already.length > 0) {
+      return res.status(200).json({ status: "ok", deduplicated: true });
+    }
     await db.insert(questCompletionEvents).values({
       username: req.body.username,
       questId: req.body.questId,

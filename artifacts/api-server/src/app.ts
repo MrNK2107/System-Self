@@ -7,6 +7,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { env, resolveCorsOrigins } from "./lib/env";
 import { errorHandler, notFoundHandler } from "./middlewares/errors";
+import { authMiddleware } from "./middlewares/auth";
 
 const app: Express = express();
 
@@ -46,6 +47,7 @@ app.use(
 );
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(authMiddleware);
 
 app.use("/api", router);
 app.use(notFoundHandler);

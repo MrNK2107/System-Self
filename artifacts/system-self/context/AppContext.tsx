@@ -433,9 +433,13 @@ async function postQuestCompletionEvent(params: {
     const baseUrl = process.env.EXPO_PUBLIC_DOMAIN
       ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
       : "";
+    const token = process.env.EXPO_PUBLIC_API_TOKEN;
     await fetch(`${baseUrl}/api/system/quest-completion`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({
         ...params,
         completedAt: new Date().toISOString(),

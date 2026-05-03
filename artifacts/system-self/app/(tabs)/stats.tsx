@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Platform,
   ScrollView,
@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
 import { useApp, ACHIEVEMENT_DEFS, MILESTONE_TITLES, type Domain, type MilestoneTier } from "@/context/AppContext";
 import { DomainBar } from "@/components/DomainBar";
@@ -24,6 +25,7 @@ const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
 const MILESTONE_TIERS: MilestoneTier[] = [60, 70, 80, 90, 100];
 
 export default function StatsScreen() {
+  const router = useRouter();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
@@ -38,6 +40,15 @@ export default function StatsScreen() {
   const [showAchievements, setShowAchievements] = useState(false);
   const [showMilestones, setShowMilestones] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [perfLoading, setPerfLoading] = useState(false);
+  const [perfError, setPerfError] = useState<string | null>(null);
+  const [perfSummary, setPerfSummary] = useState<{
+    attempts: number;
+    completed: number;
+    completionRate: number;
+    byDomain: { domain: Domain; status: string; count: number }[];
+    daily: { day: string; status: string; count: number }[];
+  } | null>(null);
 
   const hiddenScore = getHiddenScore();
   const rank = user?.rank ?? computeRank(hiddenScore);
@@ -88,6 +99,85 @@ export default function StatsScreen() {
 
   const unlockedAchievements = achievements.filter(a => a.unlockedAt !== null);
   const unlockedMilestones = milestones.filter(m => m.unlockedAt !== null);
+
+  const fetchPerformance = async () => {
+    if (!user) return;
+    setPerfLoading(true);
+    setPerfError(null);
+    try {
+      const baseUrl = process.env.EXPO_PUBLIC_DOMAIN
+        ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
+        : "";
+      const token = process.env.EXPO_PUBLIC_API_TOKEN;
+      const res = await fetch(
+        `${baseUrl}/api/system/completions/summary?username=${encodeURIComponent(user.username)}&days=14`,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      );
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const data = await res.json();
+      setPerfSummary({
+        attempts: Number(data.attempts ?? 0),
+        completed: Number(data.completed ?? 0),
+        completionRate: Number(data.completionRate ?? 0),
+        byDomain: Array.isArray(data.byDomain) ? data.byDomain : [],
+        daily: Array.isArray(data.daily) ? data.daily : [],
+      });
+    } catch {
+      setPerfError("Performance feed unavailable");
+    } finally {
+      setPerfLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchPerformance();
+  }, [user?.username]);
+
+  const weakestExecutionDomain = useMemo(() => {
+    if (!perfSummary || perfSummary.byDomain.length === 0) return null;
+    const totals: Record<Domain, { attempts: number; completed: number }> = {
+      BODY: { attempts: 0, completed: 0 },
+      MIND: { attempts: 0, completed: 0 },
+      WEALTH: { attempts: 0, completed: 0 },
+      DISCIPLINE: { attempts: 0, completed: 0 },
+    };
+    for (const row of perfSummary.byDomain) {
+      if (!(row.domain in totals)) continue;
+      const key = row.domain as Domain;
+      totals[key].attempts += row.count;
+      if (row.status === "complete") totals[key].completed += row.count;
+    }
+    const ranked = DOMAINS.map((d) => ({
+      domain: d,
+      rate: totals[d].attempts > 0 ? totals[d].completed / totals[d].attempts : 1,
+      attempts: totals[d].attempts,
+    })).filter((x) => x.attempts > 0);
+    if (ranked.length === 0) return null;
+    ranked.sort((a, b) => a.rate - b.rate);
+    return ranked[0]?.domain ?? null;
+  }, [perfSummary]);
+
+  const sparkline = useMemo(() => {
+    if (!perfSummary || perfSummary.daily.length === 0) return "";
+    const levels = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+    const dayMap = new Map<string, { attempts: number; completed: number }>();
+    for (const row of perfSummary.daily) {
+      const rec = dayMap.get(row.day) ?? { attempts: 0, completed: 0 };
+      rec.attempts += row.count;
+      if (row.status === "complete") rec.completed += row.count;
+      dayMap.set(row.day, rec);
+    }
+    const points = Array.from(dayMap.entries())
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .slice(-14)
+      .map(([, v]) => (v.attempts > 0 ? v.completed / v.attempts : 0));
+    if (points.length === 0) return "";
+    return points
+      .map((p) => levels[Math.max(0, Math.min(levels.length - 1, Math.round(p * (levels.length - 1))))] ?? "▁")
+      .join("");
+  }, [perfSummary]);
 
   const shadowPhaseColors: Record<string, string> = {
     DORMANT: colors.mutedForeground, AWAKENED: "#C4873A",
@@ -205,6 +295,66 @@ export default function StatsScreen() {
               </View>
             </View>
           ))}
+        </View>
+
+        {/* Performance */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.expandHeader}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>PERFORMANCE (14D)</Text>
+            <TouchableOpacity onPress={fetchPerformance} disabled={perfLoading} activeOpacity={0.7}>
+              <Text style={[styles.refreshMini, { color: colors.primary }]}>
+                {perfLoading ? "SYNCING..." : "REFRESH"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          {perfError ? (
+            <Text style={[styles.calendarTeaser, { color: colors.destructive }]}>{perfError}</Text>
+          ) : perfSummary ? (
+            <>
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "SpaceMono" }]}>
+                    {perfSummary.completionRate}%
+                  </Text>
+                  <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>COMPLETE RATE</Text>
+                </View>
+                <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+                <View style={styles.statItem}>
+                  <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "SpaceMono" }]}>
+                    {perfSummary.completed}/{perfSummary.attempts}
+                  </Text>
+                  <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>DONE/ATTEMPTED</Text>
+                </View>
+              </View>
+              {weakestExecutionDomain && (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    router.push({
+                      pathname: "/(tabs)/quests",
+                      params: { domain: weakestExecutionDomain },
+                    });
+                  }}
+                >
+                  <Text style={[styles.calendarTeaser, { color: colors.mutedForeground }]}>
+                    Weakest execution domain:{" "}
+                    <Text style={{ color: DOMAIN_COLORS[weakestExecutionDomain], fontWeight: "700" }}>
+                      {weakestExecutionDomain} (tap to focus)
+                    </Text>
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {sparkline ? (
+                <Text style={[styles.sparkline, { color: colors.primary }]}>{sparkline}</Text>
+              ) : (
+                <Text style={[styles.calendarTeaser, { color: colors.mutedForeground }]}>
+                  No daily completion trend yet.
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text style={[styles.calendarTeaser, { color: colors.mutedForeground }]}>No performance data yet.</Text>
+          )}
         </View>
 
         {/* Streak Calendar */}
@@ -461,6 +611,8 @@ const styles = StyleSheet.create({
   },
   countText: { fontSize: 8, fontWeight: "800" as const, letterSpacing: 1 },
   calendarTeaser: { fontSize: 10, letterSpacing: 0.5, fontStyle: "italic" },
+  refreshMini: { fontSize: 9, letterSpacing: 1.5, fontWeight: "700" as const },
+  sparkline: { fontSize: 18, letterSpacing: 1, fontFamily: "SpaceMono" },
   shadowCard: { padding: 14, borderRadius: 4, borderWidth: 1, gap: 8 },
   shadowHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   shadowTitle: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 2 },

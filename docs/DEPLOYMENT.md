@@ -9,6 +9,8 @@ Set these variables in each environment:
 - `CORS_ORIGIN=https://your-app-domain.com`
 - `RATE_LIMIT_WINDOW_MS=60000`
 - `RATE_LIMIT_MAX=60`
+- `AUTH_ENABLED=true`
+- `API_AUTH_TOKENS=<token>:<username>[,<token2>:<username2>]`
 
 ## 2. Health Checks
 - Liveness: `GET /api/healthz`
@@ -25,11 +27,13 @@ pnpm --filter @workspace/api-server start
 - `pnpm --filter @workspace/api-server typecheck`
 - `pnpm --filter @workspace/api-server test`
 - Verify mobile app can call `/api/system/message` and `/api/system/quests`.
+- Verify mobile requests include `Authorization: Bearer <token>` where token maps to the same username in API query/body.
 - Verify history endpoints:
   - `GET /api/system/messages?username=<name>`
   - `GET /api/system/quests/history?username=<name>`
   - `GET /api/system/recap/weekly?username=<name>`
   - `GET /api/system/recap/weekly/debrief?username=<name>`
+  - `GET /api/system/completions/summary?username=<name>&days=14`
   - `POST /api/system/quest-completion`
 
 ## 6. Query Options

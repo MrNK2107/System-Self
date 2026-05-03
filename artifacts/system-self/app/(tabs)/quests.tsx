@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, PREDEFINED_CHAINS, type Quest, type QuestChain } from "@/context/AppContext";
@@ -106,6 +107,8 @@ const RANK_UP_PREP_QUESTS: Record<string, { title: string; description: string; 
 };
 
 export default function QuestsScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ domain?: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
@@ -124,12 +127,23 @@ export default function QuestsScreen() {
     setRefreshing(false);
   };
 
+  const domainFilter = (
+    params.domain === "BODY" ||
+    params.domain === "MIND" ||
+    params.domain === "WEALTH" ||
+    params.domain === "DISCIPLINE"
+  ) ? params.domain : null;
+
+  const visibleQuests = domainFilter
+    ? quests.filter(q => q.domain === domainFilter)
+    : quests;
+
   // Partition quests
-  const activeDailies = quests.filter(q => q.type === "daily" && q.status === "active");
-  const activeWeeklies = quests.filter(q => q.type === "weekly" && q.status === "active");
-  const activeArcs = quests.filter(q => q.type === "arc" && q.status === "active");
-  const completedQuests = quests.filter(q => q.status === "complete");
-  const failedQuests = quests.filter(q => q.status === "failed" || q.status === "refused");
+  const activeDailies = visibleQuests.filter(q => q.type === "daily" && q.status === "active");
+  const activeWeeklies = visibleQuests.filter(q => q.type === "weekly" && q.status === "active");
+  const activeArcs = visibleQuests.filter(q => q.type === "arc" && q.status === "active");
+  const completedQuests = visibleQuests.filter(q => q.status === "complete");
+  const failedQuests = visibleQuests.filter(q => q.status === "failed" || q.status === "refused");
 
   const completedCount = completedQuests.length;
   const totalActive = activeDailies.length + activeWeeklies.length + activeArcs.length;
@@ -206,6 +220,23 @@ export default function QuestsScreen() {
             </View>
           </View>
         </View>
+
+        {domainFilter && (
+          <View style={[styles.filterBar, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <Text style={[styles.filterText, { color: colors.mutedForeground }]}>
+              FILTER:{" "}
+              <Text style={{ color: DOMAIN_COLORS[domainFilter], fontWeight: "700" }}>
+                {domainFilter}
+              </Text>
+            </Text>
+            <TouchableOpacity
+              onPress={() => router.replace("/(tabs)/quests")}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.clearFilterText, { color: colors.primary }]}>CLEAR</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Calibration banner */}
         {lastGenRecord && (
@@ -495,6 +526,17 @@ const styles = StyleSheet.create({
   pressureText: {
     flex: 1, fontSize: 9, fontWeight: "700" as const, letterSpacing: 1.5, color: "#E05555",
   },
+  filterBar: {
+    borderWidth: 1,
+    borderRadius: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  filterText: { fontSize: 10, letterSpacing: 1.2, fontWeight: "600" as const },
+  clearFilterText: { fontSize: 10, letterSpacing: 1.5, fontWeight: "700" as const },
 
   rankUpSection: {
     borderWidth: 1, borderRadius: 6, padding: 14, gap: 10,

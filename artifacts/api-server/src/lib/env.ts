@@ -11,6 +11,11 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().optional(),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  AUTH_ENABLED: z
+    .union([z.literal("true"), z.literal("false")])
+    .default("true")
+    .transform((v) => v === "true"),
+  API_AUTH_TOKENS: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);
@@ -20,4 +25,16 @@ export function resolveCorsOrigins() {
     return "*";
   }
   return env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean);
+}
+
+export function resolveAuthTokenMap(): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!env.API_AUTH_TOKENS) return out;
+  for (const item of env.API_AUTH_TOKENS.split(",")) {
+    const [tokenRaw, usernameRaw] = item.split(":");
+    const token = tokenRaw?.trim();
+    const username = usernameRaw?.trim();
+    if (token && username) out.set(token, username);
+  }
+  return out;
 }
