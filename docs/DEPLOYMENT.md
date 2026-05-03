@@ -29,6 +29,19 @@ pnpm --filter @workspace/api-server start
   - `GET /api/system/messages?username=<name>`
   - `GET /api/system/quests/history?username=<name>`
   - `GET /api/system/recap/weekly?username=<name>`
+  - `GET /api/system/recap/weekly/debrief?username=<name>`
+
+## 6. Query Options
+- Messages:
+  - `limit` (default 20, max 100)
+  - `cursor` (message id for pagination)
+  - `messageType`, `rank`
+  - `from`, `to` (ISO datetime)
+- Quest history:
+  - `limit` (default 10, max 50)
+  - `cursor` (batch id for pagination)
+  - `rank`
+  - `from`, `to` (ISO datetime)
 
 ## 5. Rollout
 - Deploy to staging first.

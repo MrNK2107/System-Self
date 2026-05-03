@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db, generatedQuestBatches, generatedQuests, systemMessages } from "@workspace/db";
+import { desc, eq } from "drizzle-orm";
 import { validateBody } from "../middlewares/validate";
 import {
   generateQuestsBodySchema,
@@ -11,7 +12,7 @@ import { generateWithFallback } from "../lib/ai";
 
 const router = Router();
 const MESSAGE_PROMPT_VERSION = "system-message-v2";
-const QUESTS_PROMPT_VERSION = "system-quests-v2";
+const QUESTS_PROMPT_VERSION = "system-quests-v3";
 
 function extractJsonObject(text: string): string | null {
   const cleaned = text.replace(/```json|```/g, "").trim();
@@ -245,6 +246,36 @@ router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req
     const includeArc = profile.arcCount > 0;
     const gap = Number(shadowGap ?? 0);
     const day = Number(dayNumber ?? 1);
+    let adaptiveNote = "No historical quest data available. Use rank baseline.";
+
+    if (db) {
+      const recentBatches = await db
+        .select()
+        .from(generatedQuestBatches)
+        .where(eq(generatedQuestBatches.username, username))
+        .orderBy(desc(generatedQuestBatches.createdAt))
+        .limit(5);
+
+      if (recentBatches.length > 0) {
+        const recentQuests = await db
+          .select()
+          .from(generatedQuests)
+          .where(eq(generatedQuests.username, username))
+          .orderBy(desc(generatedQuests.createdAt))
+          .limit(30);
+
+        const domainCounts = recentQuests.reduce<Record<string, number>>((acc, q) => {
+          acc[q.domain] = (acc[q.domain] ?? 0) + 1;
+          return acc;
+        }, {});
+
+        const repeatedWeakest = recentBatches.filter((b) => b.weakestDomain === weakestDomain).length;
+        const dailyCount = recentQuests.filter((q) => q.type === "daily").length;
+        const arcCount = recentQuests.filter((q) => q.type === "arc").length;
+
+        adaptiveNote = `Recent batches: ${recentBatches.length}. Domain mix: BODY ${domainCounts.BODY ?? 0}, MIND ${domainCounts.MIND ?? 0}, WEALTH ${domainCounts.WEALTH ?? 0}, DISCIPLINE ${domainCounts.DISCIPLINE ?? 0}. Daily quests in recent history: ${dailyCount}, arc quests: ${arcCount}. Weakest domain repeated ${repeatedWeakest}/${recentBatches.length} times. If a domain is overrepresented, rebalance. If weakest domain repeated 3+ times, vary execution style but keep target domain pressure.`;
+      }
+    }
 
     const shadowPressureNote = gap > 20
       ? `SHADOW SELF is critically ahead by ${gap.toFixed(1)} pts. Bias at least 2 quests toward DISCIPLINE and ${weakestDomain}. Escalate difficulty.`
@@ -269,6 +300,7 @@ router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req
 - Weakest domain: ${weakestDomain}
 - Recent activity: ${recentLogs?.join(", ") || "no recent logs"}
 - Shadow pressure: ${shadowPressureNote}
+- Adaptive difficulty signal: ${adaptiveNote}
 
 DIFFICULTY CALIBRATION FOR RANK ${rank}:
 ${profile.intensityNote}
