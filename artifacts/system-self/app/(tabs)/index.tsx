@@ -159,6 +159,8 @@ export default function Dashboard() {
 
   const [briefing, setBriefing] = useState<string>("");
   const [briefingLoaded, setBriefingLoaded] = useState(false);
+  const [systemIntel, setSystemIntel] = useState<string>("");
+  const [systemIntelLoaded, setSystemIntelLoaded] = useState(false);
   const [logVisible, setLogVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [confrontVisible, setConfrontVisible] = useState(false);
@@ -203,16 +205,47 @@ export default function Dashboard() {
     setBriefingLoaded(true);
   }, [user, briefingLoaded, domainScores, trajectory, shadowSelf, activeQuests.length, completedToday, rank]);
 
+  const loadSystemIntel = useCallback(async () => {
+    if (!user || systemIntelLoaded) return;
+    const scores: { BODY: number; MIND: number; WEALTH: number; DISCIPLINE: number } = {
+      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
+      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
+      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
+      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
+    };
+    const msg = await generateMessage({
+      messageType: "nightly_debrief",
+      username: user.username,
+      rank,
+      domainScores: scores,
+      trajectory,
+      shadowActive: shadowSelf.active,
+      shadowGap: shadowSelf.gap,
+      questCount: activeQuests.length,
+      completedQuestCount: completedToday,
+      primaryGoal: user.primaryGoal,
+      dayNumber: user.dayNumber,
+    });
+    setSystemIntel(msg);
+    setSystemIntelLoaded(true);
+  }, [user, systemIntelLoaded, domainScores, trajectory, shadowSelf, activeQuests.length, completedToday, rank]);
+
   useEffect(() => {
     loadBriefing();
   }, [loadBriefing]);
 
+  useEffect(() => {
+    loadSystemIntel();
+  }, [loadSystemIntel]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setBriefingLoaded(false);
+    setSystemIntelLoaded(false);
     await loadBriefing();
+    await loadSystemIntel();
     setRefreshing(false);
-  }, [loadBriefing]);
+  }, [loadBriefing, loadSystemIntel]);
 
   if (!user) return null;
 
@@ -306,6 +339,22 @@ export default function Dashboard() {
             <SystemMessage message={briefing} animate={!refreshing} label="THE SYSTEM" />
           ) : (
             <Text style={[styles.placeholder, { color: colors.mutedForeground }]}>Loading transmission...</Text>
+          )}
+        </View>
+
+        {/* SYSTEM INTEL */}
+        <View style={[styles.intelCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.intelHeader}>
+            <Text style={[styles.intelLabel, { color: colors.mutedForeground }]}>SYSTEM INTEL</Text>
+            <View style={[styles.lockPill, { borderColor: colors.border }]}>
+              <Feather name="lock" size={9} color={colors.mutedForeground} />
+              <Text style={[styles.lockText, { color: colors.mutedForeground }]}>LOCKED</Text>
+            </View>
+          </View>
+          {systemIntel ? (
+            <SystemMessage message={systemIntel} animate={!refreshing} label="THE SYSTEM" />
+          ) : (
+            <Text style={[styles.placeholder, { color: colors.mutedForeground }]}>Decrypting transmission...</Text>
           )}
         </View>
 
@@ -439,6 +488,38 @@ const styles = StyleSheet.create({
     gap: 12,
     minHeight: 80,
     justifyContent: "center",
+  },
+  intelCard: {
+    padding: 16,
+    borderRadius: 4,
+    borderWidth: 1,
+    gap: 12,
+    minHeight: 92,
+    justifyContent: "center",
+  },
+  intelHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  intelLabel: {
+    fontSize: 9,
+    letterSpacing: 3,
+    fontWeight: "600" as const,
+  },
+  lockPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  lockText: {
+    fontSize: 8,
+    letterSpacing: 2,
+    fontWeight: "700" as const,
   },
   card: {
     padding: 16,
