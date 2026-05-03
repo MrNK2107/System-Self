@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { anthropic } from "@workspace/integrations-anthropic-ai";
+import { geminiModel } from "@workspace/integrations-gemini-ai";
 
 const router = Router();
 
@@ -30,6 +30,7 @@ function buildUserPrompt(body: {
   primaryGoal: string;
   dayNumber: number;
   rivalMovement?: string | null;
+  extraContext?: string | null;
 }): { prompt: string; maxWords: number } {
   const {
     messageType,
@@ -44,6 +45,7 @@ function buildUserPrompt(body: {
     primaryGoal,
     dayNumber,
     rivalMovement,
+    extraContext,
   } = body;
 
   const context = `USER CONTEXT:
@@ -55,7 +57,8 @@ function buildUserPrompt(body: {
 - Active quests: ${questCount} | Completed today: ${completedQuestCount}
 - Shadow Self status: ${shadowActive ? `ACTIVE — gap is ${shadowGap.toFixed(1)} points` : "inactive"}
 - Primary goal: ${primaryGoal}
-${rivalMovement ? `- Rival movement: ${rivalMovement}` : ""}`;
+${rivalMovement ? `- Rival movement: ${rivalMovement}` : ""}
+${extraContext ? `- Extra context: ${extraContext}` : ""}`;
 
   const typeConfigs: Record<string, { instruction: string; maxWords: number }> = {
     morning_briefing: {
@@ -161,16 +164,15 @@ const RANK_QUEST_PROFILES: Record<string, {
 router.post("/system/message", async (req, res) => {
   try {
     const { prompt } = buildUserPrompt(req.body);
-
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 300,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: prompt }],
+    const result = await geminiModel.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      systemInstruction: SYSTEM_PROMPT,
+      generationConfig: {
+        maxOutputTokens: 300,
+        temperature: 0.7,
+      },
     });
-
-    const content = message.content[0];
-    const text = content.type === "text" ? content.text : "";
+    const text = result.response.text();
 
     res.json({
       message: text.trim(),
@@ -248,15 +250,15 @@ Return ONLY valid JSON in this exact format:
   ]
 }`;
 
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1200,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: prompt }],
+    const result = await geminiModel.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      systemInstruction: SYSTEM_PROMPT,
+      generationConfig: {
+        maxOutputTokens: 1200,
+        temperature: 0.4,
+      },
     });
-
-    const content = message.content[0];
-    const text = content.type === "text" ? content.text : "{}";
+    const text = result.response.text() || "{}";
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON in response");
