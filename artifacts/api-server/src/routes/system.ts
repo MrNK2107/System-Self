@@ -1,9 +1,16 @@
 import { Router } from "express";
-import { getGeminiModel } from "@workspace/integrations-gemini-ai";
 import { validateBody } from "../middlewares/validate";
-import { generateQuestsBodySchema, generateSystemMessageBodySchema } from "../lib/schemas";
+import {
+  generateQuestsBodySchema,
+  generateQuestsResponseSchema,
+  generateSystemMessageBodySchema,
+  generateSystemMessageResponseSchema,
+} from "../lib/schemas";
+import { generateWithFallback } from "../lib/ai";
 
 const router = Router();
+const MESSAGE_PROMPT_VERSION = "system-message-v2";
+const QUESTS_PROMPT_VERSION = "system-quests-v2";
 
 function extractJsonObject(text: string): string | null {
   const cleaned = text.replace(/```json|```/g, "").trim();
@@ -172,20 +179,23 @@ const RANK_QUEST_PROFILES: Record<string, {
 router.post("/system/message", validateBody(generateSystemMessageBodySchema), async (req, res) => {
   try {
     const { prompt } = buildUserPrompt(req.body);
-    const result = await getGeminiModel().generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    const ai = await generateWithFallback({
       systemInstruction: SYSTEM_PROMPT,
-      generationConfig: {
-        maxOutputTokens: 300,
-        temperature: 0.7,
+      prompt: `Prompt-Version: ${MESSAGE_PROMPT_VERSION}\n${prompt}`,
+      maxOutputTokens: 300,
+      temperature: 0.7,
+    });
+    const payload = generateSystemMessageResponseSchema.parse({
+      message: ai.text.trim(),
+      messageType: req.body.messageType,
+      meta: {
+        promptVersion: MESSAGE_PROMPT_VERSION,
+        model: ai.model,
+        attempts: ai.attempts,
       },
     });
-    const text = result.response.text();
-
-    res.json({
-      message: text.trim(),
-      messageType: req.body.messageType,
-    });
+    req.log.info({ ai: payload.meta, messageType: req.body.messageType }, "Generated system message");
+    res.json(payload);
   } catch (error) {
     req.log.error({ error }, "Failed to generate system message");
     res.status(500).json({ error: "Failed to generate message" });
@@ -258,31 +268,44 @@ Return ONLY valid JSON in this exact format:
   ]
 }`;
 
-    const result = await getGeminiModel().generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    const ai = await generateWithFallback({
       systemInstruction: SYSTEM_PROMPT,
-      generationConfig: {
-        maxOutputTokens: 1200,
-        temperature: 0.4,
-      },
+      prompt: `Prompt-Version: ${QUESTS_PROMPT_VERSION}\n${prompt}`,
+      maxOutputTokens: 1200,
+      temperature: 0.4,
     });
-    const text = result.response.text() || "{}";
+    const text = ai.text || "{}";
 
     const jsonMatch = extractJsonObject(text);
     if (!jsonMatch) throw new Error("No JSON in response");
 
     const parsed = JSON.parse(jsonMatch);
-    res.json(parsed);
+    const payload = generateQuestsResponseSchema.parse({
+      ...parsed,
+      meta: {
+        promptVersion: QUESTS_PROMPT_VERSION,
+        model: ai.model,
+        attempts: ai.attempts,
+      },
+    });
+    req.log.info({ ai: payload.meta, rank }, "Generated quests");
+    res.json(payload);
   } catch (error) {
     req.log.error({ error }, "Failed to generate quests");
-    res.status(500).json({
+    const payload = generateQuestsResponseSchema.parse({
       quests: [
         { title: "Log your workout", description: "Complete and log any physical activity today.", domain: "BODY", type: "daily" },
         { title: "Deep work session", description: "Complete one uninterrupted 90-minute focus session.", domain: "MIND", type: "daily" },
         { title: "Review expenses", description: "Categorize all uncategorized expenses from this week.", domain: "WEALTH", type: "daily" },
         { title: "Maintain your streak", description: "Log at least one entry per day for the next 7 days.", domain: "DISCIPLINE", type: "weekly" },
       ],
+      meta: {
+        promptVersion: QUESTS_PROMPT_VERSION,
+        model: "fallback-static",
+        attempts: 1,
+      },
     });
+    res.status(500).json(payload);
   }
 });
 

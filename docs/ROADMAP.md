@@ -8,7 +8,7 @@
 - Add readiness endpoint (`/api/readyz`) for deployment probes.
 - Add initial schema tests.
 
-## Phase 2: AI Reliability
+## Phase 2: AI Reliability (Implemented)
 - Add prompt version tags and record them in responses/logs.
 - Add model fallback chain (primary + backup model).
 - Add stricter response schema validation for AI outputs.

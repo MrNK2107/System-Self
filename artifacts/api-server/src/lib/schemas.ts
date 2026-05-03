@@ -48,3 +48,29 @@ export const generateQuestsBodySchema = z.object({
   shadowGap: z.number().optional(),
   dayNumber: z.number().int().min(1).optional(),
 });
+
+export const generateSystemMessageResponseSchema = z.object({
+  message: z.string().min(1),
+  messageType: z.string().min(1),
+  meta: z.object({
+    promptVersion: z.string().min(1),
+    model: z.string().min(1),
+    attempts: z.number().int().min(1),
+  }),
+});
+
+export const generatedQuestSchema = z.object({
+  title: z.string().min(1).max(120),
+  description: z.string().min(1).max(400),
+  domain: z.enum(["BODY", "MIND", "WEALTH", "DISCIPLINE"]),
+  type: z.enum(["daily", "weekly", "arc"]),
+});
+
+export const generateQuestsResponseSchema = z.object({
+  quests: z.array(generatedQuestSchema).min(1),
+  meta: z.object({
+    promptVersion: z.string().min(1),
+    model: z.string().min(1),
+    attempts: z.number().int().min(1),
+  }),
+});
