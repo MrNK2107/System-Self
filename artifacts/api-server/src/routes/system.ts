@@ -1,7 +1,15 @@
 import { Router } from "express";
-import { geminiModel } from "@workspace/integrations-gemini-ai";
+import { getGeminiModel } from "@workspace/integrations-gemini-ai";
+import { validateBody } from "../middlewares/validate";
+import { generateQuestsBodySchema, generateSystemMessageBodySchema } from "../lib/schemas";
 
 const router = Router();
+
+function extractJsonObject(text: string): string | null {
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  return match ? match[0] : null;
+}
 
 const SYSTEM_PROMPT = `You are THE SYSTEM — a transmission from the user's future self.
 You are not an AI assistant. You are not helpful in the conventional sense.
@@ -161,10 +169,10 @@ const RANK_QUEST_PROFILES: Record<string, {
   },
 };
 
-router.post("/system/message", async (req, res) => {
+router.post("/system/message", validateBody(generateSystemMessageBodySchema), async (req, res) => {
   try {
     const { prompt } = buildUserPrompt(req.body);
-    const result = await geminiModel.generateContent({
+    const result = await getGeminiModel().generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       systemInstruction: SYSTEM_PROMPT,
       generationConfig: {
@@ -184,7 +192,7 @@ router.post("/system/message", async (req, res) => {
   }
 });
 
-router.post("/system/quests", async (req, res) => {
+router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req, res) => {
   try {
     const {
       username,
@@ -250,7 +258,7 @@ Return ONLY valid JSON in this exact format:
   ]
 }`;
 
-    const result = await geminiModel.generateContent({
+    const result = await getGeminiModel().generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       systemInstruction: SYSTEM_PROMPT,
       generationConfig: {
@@ -260,10 +268,10 @@ Return ONLY valid JSON in this exact format:
     });
     const text = result.response.text() || "{}";
 
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const jsonMatch = extractJsonObject(text);
     if (!jsonMatch) throw new Error("No JSON in response");
 
-    const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(jsonMatch);
     res.json(parsed);
   } catch (error) {
     req.log.error({ error }, "Failed to generate quests");
