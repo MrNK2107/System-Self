@@ -17,7 +17,12 @@ type MessageType =
   | "milestone"
   | "failure_response"
   | "streak_break"
-  | "shadow_confrontation";
+  | "shadow_confrontation"
+  | "rival_taunt"
+  | "chain_complete"
+  | "domain_milestone"
+  | "forbidden_log"
+  | "rank_up_prep";
 
 interface GeneratedQuest {
   title: string;
@@ -56,6 +61,7 @@ export function useSystemAI() {
     primaryGoal: string;
     dayNumber: number;
     rivalMovement?: string | null;
+    extraContext?: string | null;
   }): Promise<string> => {
     setLoading(true);
     setError(null);
@@ -95,12 +101,45 @@ export function useSystemAI() {
     }
   };
 
-  return { generateMessage, generateQuests, loading, error };
+  const generateRivalTaunt = async (params: {
+    rivalCodename: string;
+    rivalRank: string;
+    rivalTrajectory: string;
+    username: string;
+    userRank: string;
+    domainScores: DomainScores;
+  }): Promise<string> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchApi<{ message: string }>("/system/message", {
+        messageType: "rival_taunt",
+        username: params.username,
+        rank: params.userRank,
+        domainScores: params.domainScores,
+        trajectory: params.rivalTrajectory,
+        shadowActive: false,
+        shadowGap: 0,
+        questCount: 0,
+        completedQuestCount: 0,
+        primaryGoal: "",
+        dayNumber: 0,
+        extraContext: `Rival codename: ${params.rivalCodename}, Rival rank: ${params.rivalRank}`,
+      });
+      return data.message;
+    } catch {
+      return getRivalTauntFallback(params.rivalCodename, params.rivalTrajectory);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { generateMessage, generateQuests, generateRivalTaunt, loading, error };
 }
 
 function getFallbackMessage(
   type: MessageType,
-  params: { dayNumber: number; domainScores: DomainScores; questCount: number }
+  params: { dayNumber: number; domainScores: DomainScores; questCount: number },
 ): string {
   const fallbacks: Record<MessageType, string> = {
     morning_briefing: `Day ${params.dayNumber}. Three quests active. Your scores are being watched. Today's verdict begins now.`,
@@ -109,11 +148,30 @@ function getFallbackMessage(
     rank_change: `Rank updated. Noted.`,
     shadow_self: `Your Shadow Self has been initialized. It is already ahead of you. This is information.`,
     milestone: `Progress logged. Continue.`,
-    failure_response: `Quest failure logged. The timestamp is permanent.`,
+    failure_response: `Quest failure logged. The timestamp is permanent. The gap just widened.`,
     streak_break: `Streak data erased. The gap with your Shadow Self just widened. This is recorded.`,
     shadow_confrontation: `You are still behind. That gap does not close on its own. Log something.`,
+    rival_taunt: `You think you have time. Your scores say otherwise.`,
+    chain_complete: `Arc complete. The system has noted your consistency. Barely.`,
+    domain_milestone: `Threshold reached. This is not praise. It is an observation. Continue.`,
+    forbidden_log: `Transmission received. The system acknowledges the entry. There will be consequences.`,
+    rank_up_prep: `You are close to promotion. The gap between your current state and the next rank is thin. Do not celebrate yet.`,
   };
   return fallbacks[type];
+}
+
+function getRivalTauntFallback(rivalCodename: string, trajectory: string): string {
+  const name = rivalCodename.split(" // ")[1] ?? rivalCodename;
+  const taunts = [
+    `Your logs are inconsistent. Mine are not. — ${name}`,
+    `You missed yesterday. I did not. The gap grows. — ${name}`,
+    `Watching your scores plateau from here. — ${name}`,
+    `I was where you are. I didn't stay there. — ${name}`,
+    trajectory === "up"
+      ? `I'm accelerating. You'll see the gap in your dashboard. — ${name}`
+      : `Even at stable I'm ahead of you. — ${name}`,
+  ];
+  return taunts[Math.floor(Math.random() * taunts.length)]!;
 }
 
 function getDefaultQuests(weakestDomain: Domain): GeneratedQuest[] {

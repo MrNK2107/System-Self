@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import {
   Animated,
   Platform,
@@ -12,15 +12,13 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp, type Quest } from "@/context/AppContext";
+import { useApp, PREDEFINED_CHAINS, type Quest, type QuestChain } from "@/context/AppContext";
 import { QuestCard } from "@/components/QuestCard";
+import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
 import { useQuestScheduler } from "@/hooks/useQuestScheduler";
 
 const DOMAIN_COLORS = {
-  BODY: "#E05555",
-  MIND: "#3A7BD5",
-  WEALTH: "#4B8B6F",
-  DISCIPLINE: "#C4873A",
+  BODY: "#E05555", MIND: "#3A7BD5", WEALTH: "#4B8B6F", DISCIPLINE: "#C4873A",
 };
 
 function GeneratingState() {
@@ -73,12 +71,7 @@ function GeneratingState() {
 
 const genStyles = StyleSheet.create({
   container: { paddingVertical: 24 },
-  card: {
-    borderWidth: 1,
-    borderRadius: 6,
-    padding: 20,
-    gap: 12,
-  },
+  card: { borderWidth: 1, borderRadius: 6, padding: 20, gap: 12 },
   top: { flexDirection: "row", alignItems: "center", gap: 8 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   label: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 3 },
@@ -87,13 +80,42 @@ const genStyles = StyleSheet.create({
   dot: { width: 5, height: 5, borderRadius: 2.5 },
 });
 
+// ---- Rank-up prep quests ---------------------------------------------------
+
+const RANK_UP_PREP_QUESTS: Record<string, { title: string; description: string; domain: "BODY" | "MIND" | "WEALTH" | "DISCIPLINE" }[]> = {
+  D: [
+    { title: "LOG 7 CONSECUTIVE DAYS", description: "Log at least one domain per day for 7 days without missing. This establishes the baseline for D-rank.", domain: "DISCIPLINE" },
+    { title: "AWARENESS AUDIT", description: "Log one detailed entry across all 4 domains this week. The system requires a complete assessment.", domain: "MIND" },
+  ],
+  C: [
+    { title: "3-DAY STREAK IN ALL DOMAINS", description: "Log all 4 domains for 3 days in a row. Consistency is the only qualifier for rank C.", domain: "DISCIPLINE" },
+    { title: "PUSH WEAKEST DOMAIN TO 60+", description: "Your weakest domain score must clear 60. Any method counts. The number does not lie.", domain: "BODY" },
+  ],
+  B: [
+    { title: "COMPLETE 3 QUESTS THIS WEEK", description: "Operatives at B rank complete, not attempt. Mark 3 quests done before the week ends.", domain: "DISCIPLINE" },
+    { title: "SHADOW GAP UNDER 5 POINTS", description: "Close the distance with your Shadow Self to under 5 composite points.", domain: "DISCIPLINE" },
+  ],
+  A: [
+    { title: "ALL DOMAINS ABOVE 70", description: "No ceiling below 70 in any domain. A-rank operatives do not have weak points.", domain: "MIND" },
+    { title: "10-DAY UNBROKEN STREAK", description: "Log at least 2 domains per day for 10 consecutive days. The system recognizes this.", domain: "DISCIPLINE" },
+  ],
+  S: [
+    { title: "DISCIPLINE SOVEREIGN", description: "Push DISCIPLINE past 90. S-rank requires system-level self-command.", domain: "DISCIPLINE" },
+    { title: "ALL DOMAINS ABOVE 85", description: "Every domain at 85 or higher. S-rank is total sovereignty, not selective excellence.", domain: "BODY" },
+  ],
+};
+
 export default function QuestsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { quests, completeQuest, refuseQuest, shadowSelf, domainScores, getWeakestDomain } = useApp();
+  const {
+    quests, completeQuest, refuseQuest, shadowSelf, domainScores, getWeakestDomain,
+    questChains, startQuestChain, user, getHiddenScore, computeRank,
+  } = useApp();
   const { generating, lastGenRecord, triggerGeneration } = useQuestScheduler();
 
   const [refreshing, setRefreshing] = React.useState(false);
+  const [showChainCatalog, setShowChainCatalog] = useState(false);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const onRefresh = async () => {
@@ -120,11 +142,38 @@ export default function QuestsScreen() {
   const shadowPressure = shadowGap > 20 ? "critical" : shadowGap > 10 ? "elevated" : shadowGap > 0 ? "active" : "none";
   const weakest = getWeakestDomain();
 
+  // Rank-up prep
+  const hiddenScore = getHiddenScore();
+  const rank = user?.rank ?? computeRank(hiddenScore);
+  const rankThresholds: Record<string, { min: number; max: number }> = {
+    E: { min: 0, max: 25 }, D: { min: 26, max: 40 },
+    C: { min: 41, max: 55 }, B: { min: 56, max: 70 },
+    A: { min: 71, max: 85 }, S: { min: 86, max: 100 },
+  };
+  const threshold = rankThresholds[rank];
+  const nextRank = ({ E: "D", D: "C", C: "B", B: "A", A: "S", S: null } as Record<string, string | null>)[rank];
+  const progressToNext = threshold
+    ? ((hiddenScore - threshold.min) / (threshold.max - threshold.min)) * 100
+    : 100;
+  const showRankUpPrep = nextRank && progressToNext >= 75;
+  const rankUpPrepItems = nextRank ? (RANK_UP_PREP_QUESTS[nextRank] ?? []) : [];
+
+  // Active chains
+  const activeChains = questChains.filter(c => c.status === "active");
+  const completedChains = questChains.filter(c => c.status === "complete");
+
   // Next gen time: 4am tomorrow
   const nextGen = new Date();
   nextGen.setDate(nextGen.getDate() + 1);
   nextGen.setHours(4, 0, 0, 0);
   const nextGenStr = nextGen.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const handleStartChain = async (template: typeof PREDEFINED_CHAINS[0]) => {
+    const alreadyActive = questChains.some(c => c.name === template.name && c.status === "active");
+    if (!alreadyActive) {
+      await startQuestChain(template);
+    }
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -207,6 +256,40 @@ export default function QuestsScreen() {
           </View>
         )}
 
+        {/* Rank-up prep missions */}
+        {showRankUpPrep && rankUpPrepItems.length > 0 && (
+          <View style={[styles.rankUpSection, { borderColor: "#C4873A40", backgroundColor: "#C4873A06" }]}>
+            <View style={styles.rankUpHeader}>
+              <Feather name="arrow-up-circle" size={12} color="#C4873A" />
+              <Text style={[styles.rankUpLabel, { color: "#C4873A" }]}>
+                RANK-UP PREP — PROMOTE TO {nextRank}
+              </Text>
+              <Text style={[styles.rankUpPct, { color: "#C4873A", fontFamily: "SpaceMono" }]}>
+                {Math.round(progressToNext)}%
+              </Text>
+            </View>
+            <Text style={[styles.rankUpDesc, { color: colors.mutedForeground }]}>
+              You are near the promotion threshold. Complete these preparations before rank evaluation.
+            </Text>
+            {rankUpPrepItems.map((item, i) => (
+              <View key={i} style={[styles.prepItem, { borderColor: "#C4873A30" }]}>
+                <View style={[styles.prepNum, { backgroundColor: "#C4873A20" }]}>
+                  <Text style={[styles.prepNumText, { color: "#C4873A" }]}>{i + 1}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.prepTitle, { color: colors.foreground }]}>{item.title}</Text>
+                  <Text style={[styles.prepDesc, { color: colors.mutedForeground }]}>{item.description}</Text>
+                </View>
+                <View style={[styles.prepDomain, { borderColor: (DOMAIN_COLORS[item.domain] ?? "#C4873A") + "50" }]}>
+                  <Text style={[styles.prepDomainText, { color: DOMAIN_COLORS[item.domain] ?? "#C4873A" }]}>
+                    {item.domain.slice(0, 4)}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Generating state */}
         {generating && <GeneratingState />}
 
@@ -258,6 +341,21 @@ export default function QuestsScreen() {
               </View>
             )}
 
+            {/* Active Quest Chains */}
+            {activeChains.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>ACTIVE ARC CHAINS</Text>
+                  <Text style={[styles.sectionMeta, { color: colors.mutedForeground }]}>
+                    {activeChains.length} running
+                  </Text>
+                </View>
+                {activeChains.map(chain => (
+                  <QuestChainCard key={chain.id} chain={chain} />
+                ))}
+              </View>
+            )}
+
             {/* Completed */}
             {completedQuests.length > 0 && (
               <View style={styles.section}>
@@ -267,6 +365,21 @@ export default function QuestsScreen() {
                 </View>
                 {completedQuests.map(q => (
                   <QuestCard key={q.id} quest={q} onComplete={completeQuest} />
+                ))}
+              </View>
+            )}
+
+            {/* Completed chains */}
+            {completedChains.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>COMPLETED CHAINS</Text>
+                  <Text style={[styles.sectionMeta, { color: "#4B8B6F" }]}>
+                    {completedChains.length}
+                  </Text>
+                </View>
+                {completedChains.map(chain => (
+                  <QuestChainCard key={chain.id} chain={chain} />
                 ))}
               </View>
             )}
@@ -299,6 +412,45 @@ export default function QuestsScreen() {
           </>
         )}
 
+        {/* Arc Chain Catalog */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={styles.catalogToggle}
+            onPress={() => setShowChainCatalog(s => !s)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              ARC CHAIN CATALOG
+            </Text>
+            <View style={[styles.catalogCount, { borderColor: colors.border }]}>
+              <Text style={[styles.catalogCountText, { color: colors.mutedForeground }]}>
+                {PREDEFINED_CHAINS.length} CHAINS
+              </Text>
+            </View>
+            <Feather
+              name={showChainCatalog ? "chevron-up" : "chevron-down"}
+              size={13} color={colors.mutedForeground}
+            />
+          </TouchableOpacity>
+          {showChainCatalog && (
+            <View style={styles.catalogList}>
+              {PREDEFINED_CHAINS.map(chain => {
+                const alreadyStarted = questChains.some(
+                  c => c.name === chain.name && c.status === "active"
+                );
+                return (
+                  <QuestChainCatalogCard
+                    key={chain.name}
+                    chain={chain}
+                    onStart={() => handleStartChain(chain)}
+                    alreadyStarted={alreadyStarted}
+                  />
+                );
+              })}
+            </View>
+          )}
+        </View>
+
         {/* Manual refresh hint */}
         {!generating && totalActive > 0 && (
           <TouchableOpacity onPress={onRefresh} activeOpacity={0.6} style={styles.refreshHint}>
@@ -317,142 +469,79 @@ const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 20, gap: 12 },
 
   headerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
   },
-  title: {
-    fontSize: 14,
-    fontWeight: "700" as const,
-    letterSpacing: 3,
-  },
-  subtitle: {
-    fontSize: 9,
-    letterSpacing: 1.5,
-    marginTop: 3,
-    fontWeight: "500" as const,
-  },
+  title: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 3 },
+  subtitle: { fontSize: 9, letterSpacing: 1.5, marginTop: 3, fontWeight: "500" as const },
   headerRight: {},
   rateBadge: {
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 2,
-    alignItems: "center",
+    borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 2, alignItems: "center",
   },
-  rateLabel: {
-    fontSize: 7,
-    letterSpacing: 2,
-    fontWeight: "700" as const,
-  },
-  rateValue: {
-    fontSize: 16,
-    fontWeight: "800" as const,
-  },
+  rateLabel: { fontSize: 7, letterSpacing: 2, fontWeight: "700" as const },
+  rateValue: { fontSize: 16, fontWeight: "800" as const },
 
-  calibrationBanner: {
-    borderWidth: 1,
-    borderRadius: 4,
-    padding: 12,
-  },
-  calibRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  calibItem: {
-    flex: 1,
-    alignItems: "center",
-    gap: 3,
-  },
-  calibDiv: {
-    width: StyleSheet.hairlineWidth,
-    height: 24,
-  },
-  calibLabel: {
-    fontSize: 7,
-    letterSpacing: 1.5,
-    fontWeight: "600" as const,
-  },
-  calibValue: {
-    fontSize: 11,
-    fontWeight: "700" as const,
-    letterSpacing: 0.5,
-  },
+  calibrationBanner: { borderWidth: 1, borderRadius: 4, padding: 12 },
+  calibRow: { flexDirection: "row", alignItems: "center" },
+  calibItem: { flex: 1, alignItems: "center", gap: 3 },
+  calibDiv: { width: StyleSheet.hairlineWidth, height: 24 },
+  calibLabel: { fontSize: 7, letterSpacing: 1.5, fontWeight: "600" as const },
+  calibValue: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 0.5 },
 
   pressureBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    borderWidth: 1,
-    borderRadius: 3,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    flexDirection: "row", alignItems: "center", gap: 7,
+    borderWidth: 1, borderRadius: 3, paddingHorizontal: 12, paddingVertical: 8,
   },
   pressureText: {
-    flex: 1,
-    fontSize: 9,
-    fontWeight: "700" as const,
-    letterSpacing: 1.5,
-    color: "#E05555",
+    flex: 1, fontSize: 9, fontWeight: "700" as const, letterSpacing: 1.5, color: "#E05555",
   },
+
+  rankUpSection: {
+    borderWidth: 1, borderRadius: 6, padding: 14, gap: 10,
+  },
+  rankUpHeader: {
+    flexDirection: "row", alignItems: "center", gap: 7,
+  },
+  rankUpLabel: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 2, flex: 1 },
+  rankUpPct: { fontSize: 11, fontWeight: "700" as const },
+  rankUpDesc: { fontSize: 11, lineHeight: 17 },
+  prepItem: {
+    flexDirection: "row", alignItems: "flex-start", gap: 10,
+    borderWidth: 1, borderRadius: 4, padding: 10,
+  },
+  prepNum: { width: 24, height: 24, borderRadius: 4, alignItems: "center", justifyContent: "center" },
+  prepNumText: { fontSize: 10, fontWeight: "800" as const },
+  prepTitle: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 0.3, marginBottom: 3 },
+  prepDesc: { fontSize: 10, lineHeight: 15 },
+  prepDomain: {
+    borderWidth: 1, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 2, alignSelf: "flex-start",
+  },
+  prepDomainText: { fontSize: 8, fontWeight: "800" as const, letterSpacing: 1 },
 
   section: { gap: 8 },
   sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 2,
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2,
   },
-  sectionLabel: {
-    fontSize: 9,
-    letterSpacing: 3,
-    fontWeight: "700" as const,
-  },
-  sectionMeta: {
-    fontSize: 9,
-    letterSpacing: 1,
-    fontWeight: "600" as const,
-  },
+  sectionLabel: { fontSize: 9, letterSpacing: 3, fontWeight: "700" as const },
+  sectionMeta: { fontSize: 9, letterSpacing: 1, fontWeight: "600" as const },
+  arcBadge: { borderWidth: 1, borderRadius: 2, paddingHorizontal: 6, paddingVertical: 2 },
+  arcBadgeText: { fontSize: 7, letterSpacing: 2, fontWeight: "700" as const },
 
-  arcBadge: {
-    borderWidth: 1,
-    borderRadius: 2,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+  catalogToggle: {
+    flexDirection: "row", alignItems: "center", gap: 8,
   },
-  arcBadgeText: {
-    fontSize: 7,
-    letterSpacing: 2,
-    fontWeight: "700" as const,
+  catalogCount: {
+    borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 2,
   },
+  catalogCountText: { fontSize: 8, fontWeight: "700" as const, letterSpacing: 1.5 },
+  catalogList: { gap: 10 },
 
   emptyCard: {
-    borderWidth: 1,
-    borderRadius: 6,
-    alignItems: "center",
-    paddingVertical: 48,
-    paddingHorizontal: 24,
-    gap: 10,
-    marginTop: 8,
+    borderWidth: 1, borderRadius: 6, alignItems: "center",
+    paddingVertical: 48, paddingHorizontal: 24, gap: 10, marginTop: 8,
   },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: "600" as const,
-    marginTop: 4,
-  },
-  emptyText: {
-    fontSize: 12,
-    textAlign: "center",
-    lineHeight: 19,
-  },
-
-  refreshHint: {
-    alignItems: "center",
-    paddingVertical: 8,
-    marginTop: 4,
-  },
-  refreshHintText: {
-    fontSize: 10,
-    letterSpacing: 1,
-  },
+  emptyTitle: { fontSize: 16, fontWeight: "600" as const, marginTop: 4 },
+  emptyText: { fontSize: 12, textAlign: "center", lineHeight: 19 },
+  refreshHint: { alignItems: "center", paddingVertical: 8, marginTop: 4 },
+  refreshHintText: { fontSize: 10, letterSpacing: 1 },
 });

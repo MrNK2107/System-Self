@@ -24,6 +24,8 @@ import { NightlyDebriefModal } from "@/components/NightlyDebriefModal";
 import { useNightlyDebrief } from "@/hooks/useNightlyDebrief";
 import { StreakBrokenModal } from "@/components/StreakBrokenModal";
 import { ShadowConfrontationModal } from "@/components/ShadowConfrontationModal";
+import { AchievementModal } from "@/components/AchievementModal";
+import { MilestoneModal } from "@/components/MilestoneModal";
 
 const DOMAIN_COLORS: Record<Domain, string> = {
   BODY: "#E05555",
@@ -153,7 +155,7 @@ const shadowStyles = StyleSheet.create({
 export default function Dashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank, getShadowScores, pendingRankUp, acknowledgeRankUp, pendingStreakBreak, acknowledgeStreakBreak } = useApp();
+  const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank, getShadowScores, pendingRankUp, acknowledgeRankUp, pendingStreakBreak, acknowledgeStreakBreak, pendingAchievement, acknowledgePendingAchievement, pendingMilestone, acknowledgePendingMilestone } = useApp();
   const { generateMessage, loading: aiLoading } = useSystemAI();
   const { checkAndTriggerDebrief, pendingDebrief, acknowledgeDebrief } = useNightlyDebrief();
 
@@ -411,6 +413,20 @@ export default function Dashboard() {
       </TouchableOpacity>
 
       <LogModal visible={logVisible} onClose={() => setLogVisible(false)} />
+
+      {/* Achievement unlock modal */}
+      <AchievementModal
+        visible={pendingAchievement !== null}
+        achievement={pendingAchievement}
+        onAcknowledge={acknowledgePendingAchievement}
+      />
+
+      {/* Domain milestone modal */}
+      <MilestoneModal
+        visible={pendingMilestone !== null}
+        milestone={pendingMilestone}
+        onAcknowledge={acknowledgePendingMilestone}
+      />
     </View>
   );
 }

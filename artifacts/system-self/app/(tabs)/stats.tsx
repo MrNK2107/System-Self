@@ -10,20 +10,34 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
-import { useApp } from "@/context/AppContext";
+import { useApp, ACHIEVEMENT_DEFS, MILESTONE_TITLES, type Domain, type MilestoneTier } from "@/context/AppContext";
 import { DomainBar } from "@/components/DomainBar";
 import { RankBadge } from "@/components/RankBadge";
 import { useSystemAI } from "@/hooks/useSystemAI";
 import { SystemMessage } from "@/components/SystemMessage";
+import { StreakCalendar } from "@/components/StreakCalendar";
+
+const DOMAIN_COLORS: Record<Domain, string> = {
+  BODY: "#E05555", MIND: "#3A7BD5", WEALTH: "#4B8B6F", DISCIPLINE: "#C4873A",
+};
+const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
+const MILESTONE_TIERS: MilestoneTier[] = [60, 70, 80, 90, 100];
 
 export default function StatsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, domainScores, shadowSelf, logs, quests, trajectory, getHiddenScore, computeRank, resetAll } = useApp();
+  const {
+    user, domainScores, shadowSelf, logs, quests, trajectory,
+    getHiddenScore, computeRank, resetAll,
+    achievements, milestones, getShadowPhase,
+  } = useApp();
   const { generateMessage, loading } = useSystemAI();
   const [debrief, setDebrief] = useState("");
   const [debriefLoading, setDebriefLoading] = useState(false);
   const [showReset, setShowReset] = useState(false);
+  const [showAchievements, setShowAchievements] = useState(false);
+  const [showMilestones, setShowMilestones] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
 
   const hiddenScore = getHiddenScore();
   const rank = user?.rank ?? computeRank(hiddenScore);
@@ -31,6 +45,8 @@ export default function StatsScreen() {
 
   const completedQuests = quests.filter(q => q.status === "complete").length;
   const totalLogs = logs.length;
+  const forbiddenLogs = logs.filter(l => l.forbidden).length;
+  const shadowPhase = getShadowPhase();
 
   const rankThresholds: Record<string, { min: number; max: number }> = {
     E: { min: 0, max: 25 }, D: { min: 26, max: 40 },
@@ -38,8 +54,11 @@ export default function StatsScreen() {
     A: { min: 71, max: 85 }, S: { min: 86, max: 100 },
   };
   const threshold = rankThresholds[rank];
-  const nextRank = rank === "B" ? null : ({ E: "D", D: "C", C: "B", B: "A", A: "S" } as Record<string, string>)[rank];
+  const nextRank = ({ E: "D", D: "C", C: "B", B: "A", A: "S", S: null } as Record<string, string | null>)[rank];
   const progressToNext = threshold ? ((hiddenScore - threshold.min) / (threshold.max - threshold.min)) * 100 : 100;
+
+  // Rank-up prep: show when within last 20% of current rank
+  const showRankUpPrep = nextRank && progressToNext >= 75;
 
   const requestDebrief = async () => {
     if (!user || debriefLoading) return;
@@ -67,6 +86,14 @@ export default function StatsScreen() {
     setDebriefLoading(false);
   };
 
+  const unlockedAchievements = achievements.filter(a => a.unlockedAt !== null);
+  const unlockedMilestones = milestones.filter(m => m.unlockedAt !== null);
+
+  const shadowPhaseColors: Record<string, string> = {
+    DORMANT: colors.mutedForeground, AWAKENED: "#C4873A",
+    HUNTING: "#E05555", DOMINANT: "#9B0000",
+  };
+
   if (!user) return null;
 
   return (
@@ -78,7 +105,7 @@ export default function StatsScreen() {
         {/* Profile Header */}
         <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.profileTop}>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={[styles.systemLabel, { color: colors.mutedForeground }]}>SYSTEM // SELF</Text>
               <Text style={[styles.username, { color: colors.foreground }]}>{user.username}</Text>
               <Text style={[styles.goal, { color: colors.mutedForeground }]} numberOfLines={2}>
@@ -90,25 +117,28 @@ export default function StatsScreen() {
 
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "SpaceMono" }]}>
-                {user.dayNumber}
-              </Text>
+              <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "SpaceMono" }]}>{user.dayNumber}</Text>
               <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>DAYS</Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "SpaceMono" }]}>
-                {totalLogs}
-              </Text>
+              <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "SpaceMono" }]}>{totalLogs}</Text>
               <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>LOGS</Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "SpaceMono" }]}>
-                {completedQuests}
-              </Text>
+              <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "SpaceMono" }]}>{completedQuests}</Text>
               <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>QUESTS</Text>
             </View>
+            {forbiddenLogs > 0 && (
+              <>
+                <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+                <View style={styles.statItem}>
+                  <Text style={[styles.statValue, { color: "#9B0000", fontFamily: "SpaceMono" }]}>{forbiddenLogs}</Text>
+                  <Text style={[styles.statLabel, { color: "#9B0000" }]}>FORBIDDEN</Text>
+                </View>
+              </>
+            )}
           </View>
 
           {/* Rank Progress */}
@@ -123,12 +153,17 @@ export default function StatsScreen() {
               <View style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
                 <View style={[styles.progressFill, {
                   width: `${Math.min(100, progressToNext)}%` as any,
-                  backgroundColor: colors.primary,
+                  backgroundColor: progressToNext >= 75 ? "#C4873A" : colors.primary,
                 }]} />
               </View>
-              <Text style={[styles.progressNote, { color: colors.mutedForeground }]}>
-                Requires 14 consecutive days at next tier
-              </Text>
+              {showRankUpPrep && (
+                <View style={[styles.rankPrepBadge, { borderColor: "#C4873A40", backgroundColor: "#C4873A08" }]}>
+                  <Feather name="arrow-up" size={9} color="#C4873A" />
+                  <Text style={[styles.rankPrepText, { color: "#C4873A" }]}>
+                    PROMOTION THRESHOLD NEAR — Complete rank-up prep missions on Quest Board
+                  </Text>
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -137,31 +172,191 @@ export default function StatsScreen() {
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DOMAIN SCORES</Text>
           {domainScores.map(ds => (
-            <DomainBar
-              key={ds.domain}
-              domain={ds.domain}
-              score={ds.score}
-              streak={ds.streak}
-              showStreak
-            />
+            <View key={ds.domain}>
+              <DomainBar domain={ds.domain} score={ds.score} streak={ds.streak} showStreak />
+              {/* Milestone badges under each bar */}
+              <View style={styles.milestoneBadgesRow}>
+                {MILESTONE_TIERS.map(tier => {
+                  const milestone = milestones.find(m => m.domain === ds.domain && m.tier === tier);
+                  const unlocked = milestone?.unlockedAt !== null;
+                  return (
+                    <View
+                      key={tier}
+                      style={[
+                        styles.milestonePip,
+                        {
+                          backgroundColor: unlocked ? DOMAIN_COLORS[ds.domain] : colors.muted,
+                          opacity: unlocked ? 1 : 0.3,
+                        },
+                      ]}
+                    />
+                  );
+                })}
+                {(() => {
+                  const topMilestone = milestones
+                    .filter(m => m.domain === ds.domain && m.unlockedAt !== null)
+                    .sort((a, b) => b.tier - a.tier)[0];
+                  return topMilestone ? (
+                    <Text style={[styles.milestoneTitle, { color: DOMAIN_COLORS[ds.domain] }]}>
+                      {topMilestone.title}
+                    </Text>
+                  ) : null;
+                })()}
+              </View>
+            </View>
           ))}
+        </View>
+
+        {/* Streak Calendar */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TouchableOpacity
+            style={styles.expandHeader}
+            onPress={() => setShowCalendar(c => !c)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>HABIT STREAK CALENDAR</Text>
+            <Feather name={showCalendar ? "chevron-up" : "chevron-down"} size={13} color={colors.mutedForeground} />
+          </TouchableOpacity>
+          {showCalendar && <StreakCalendar logs={logs} weeks={4} />}
+          {!showCalendar && (
+            <Text style={[styles.calendarTeaser, { color: colors.mutedForeground }]}>
+              4-week view · {logs.length} total entries
+            </Text>
+          )}
         </View>
 
         {/* Shadow Self */}
         {shadowSelf.active && (
-          <View style={[styles.shadowCard, { borderColor: colors.destructive + "60", backgroundColor: colors.destructive + "08" }]}>
+          <View style={[styles.shadowCard, { borderColor: "#E0555540", backgroundColor: "#E0555508" }]}>
             <View style={styles.shadowHeader}>
-              <Text style={[styles.shadowTitle, { color: colors.destructive }]}>SHADOW SELF — DIVERGENCE</Text>
-              <Text style={[styles.shadowGap, { color: colors.destructive, fontFamily: "SpaceMono" }]}>
-                {shadowSelf.gap.toFixed(1)} PTS
+              <Text style={[styles.shadowTitle, { color: "#E05555" }]}>SHADOW SELF</Text>
+              <Text style={[styles.shadowPhase, { color: shadowPhaseColors[shadowPhase] ?? "#E05555" }]}>
+                {shadowPhase}
               </Text>
             </View>
+            <Text style={[styles.shadowGap, { color: shadowSelf.gap > 0 ? "#E05555" : "#4B8B6F", fontFamily: "SpaceMono" }]}>
+              {shadowSelf.gap > 0 ? `+${shadowSelf.gap.toFixed(1)} ahead` : `${Math.abs(shadowSelf.gap).toFixed(1)} behind`}
+            </Text>
             <Text style={[styles.shadowText, { color: colors.mutedForeground }]}>
-              Active since {shadowSelf.activatedAt ? new Date(shadowSelf.activatedAt).toLocaleDateString() : "unknown"}.
-              Surpass it across all domains to deactivate.
+              {shadowPhase === "DOMINANT"
+                ? "The Shadow has established full dominance. Emergency countermeasures required across all domains."
+                : shadowPhase === "HUNTING"
+                ? "Closing in on your position. Daily consistency will close the gap in two weeks."
+                : "Active. Gaining at its daily rate. Your logs are the only countermeasure."}
             </Text>
           </View>
         )}
+
+        {/* Achievements */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TouchableOpacity
+            style={styles.expandHeader}
+            onPress={() => setShowAchievements(s => !s)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.expandLeft}>
+              <Text style={[styles.sectionLabel, { color: "#C4873A" }]}>ACHIEVEMENTS</Text>
+              <View style={[styles.countBadge, { backgroundColor: "#C4873A20", borderColor: "#C4873A30" }]}>
+                <Text style={[styles.countText, { color: "#C4873A" }]}>
+                  {unlockedAchievements.length}/{achievements.length}
+                </Text>
+              </View>
+            </View>
+            <Feather name={showAchievements ? "chevron-up" : "chevron-down"} size={13} color={colors.mutedForeground} />
+          </TouchableOpacity>
+          {showAchievements && (
+            <View style={styles.achievementGrid}>
+              {achievements.map(a => {
+                const def = ACHIEVEMENT_DEFS[a.id];
+                const unlocked = a.unlockedAt !== null;
+                return (
+                  <View
+                    key={a.id}
+                    style={[
+                      styles.achievementTile,
+                      {
+                        borderColor: unlocked ? "#C4873A50" : colors.border,
+                        backgroundColor: unlocked ? "#C4873A0A" : "transparent",
+                        opacity: unlocked ? 1 : 0.35,
+                      },
+                    ]}
+                  >
+                    <Feather name={def.icon as any} size={16} color={unlocked ? "#C4873A" : colors.mutedForeground} />
+                    <Text style={[styles.achievementName, { color: unlocked ? colors.foreground : colors.mutedForeground }]}
+                      numberOfLines={2}
+                    >
+                      {def.title}
+                    </Text>
+                    {unlocked && (
+                      <Text style={[styles.achievementDate, { color: colors.mutedForeground }]}>
+                        {new Date(a.unlockedAt!).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
+        {/* Domain Milestones */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TouchableOpacity
+            style={styles.expandHeader}
+            onPress={() => setShowMilestones(s => !s)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.expandLeft}>
+              <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DOMAIN MILESTONES</Text>
+              <View style={[styles.countBadge, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+                <Text style={[styles.countText, { color: colors.mutedForeground }]}>
+                  {unlockedMilestones.length}/{milestones.length}
+                </Text>
+              </View>
+            </View>
+            <Feather name={showMilestones ? "chevron-up" : "chevron-down"} size={13} color={colors.mutedForeground} />
+          </TouchableOpacity>
+          {showMilestones && (
+            <View style={styles.milestoneList}>
+              {DOMAINS.map(domain => {
+                const domColor = DOMAIN_COLORS[domain];
+                return (
+                  <View key={domain} style={styles.milestoneDomainRow}>
+                    <Text style={[styles.milestoneDomain, { color: domColor }]}>{domain}</Text>
+                    <View style={styles.milestoneTierRow}>
+                      {MILESTONE_TIERS.map(tier => {
+                        const m = milestones.find(ml => ml.domain === domain && ml.tier === tier);
+                        const unlocked = m?.unlockedAt !== null;
+                        return (
+                          <View
+                            key={tier}
+                            style={[
+                              styles.milestoneTile,
+                              {
+                                borderColor: unlocked ? domColor + "60" : colors.border,
+                                backgroundColor: unlocked ? domColor + "10" : "transparent",
+                              },
+                            ]}
+                          >
+                            <Text style={[styles.milestoneTierNum, { color: unlocked ? domColor : colors.mutedForeground }]}>
+                              {tier}
+                            </Text>
+                            <Text style={[styles.milestoneTileTitle, {
+                              color: unlocked ? colors.foreground : colors.mutedForeground,
+                              opacity: unlocked ? 1 : 0.4,
+                            }]} numberOfLines={2}>
+                              {MILESTONE_TITLES[domain][tier]}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
 
         {/* Nightly Debrief */}
         <TouchableOpacity
@@ -234,156 +429,69 @@ export default function StatsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { paddingHorizontal: 20, gap: 12 },
-  profileCard: {
-    padding: 16,
-    borderRadius: 4,
-    borderWidth: 1,
-    gap: 16,
+  profileCard: { padding: 16, borderRadius: 4, borderWidth: 1, gap: 16 },
+  profileTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  systemLabel: { fontSize: 9, letterSpacing: 3, fontWeight: "600" as const, marginBottom: 2 },
+  username: { fontSize: 22, fontWeight: "700" as const, letterSpacing: 1 },
+  goal: { fontSize: 12, lineHeight: 18, marginTop: 4, maxWidth: 180 },
+  statsRow: { flexDirection: "row", alignItems: "center" },
+  statItem: { flex: 1, alignItems: "center", gap: 2 },
+  statValue: { fontSize: 20, fontWeight: "700" as const },
+  statLabel: { fontSize: 8, letterSpacing: 2, fontWeight: "600" as const },
+  statDivider: { width: 1, height: 32 },
+  rankProgress: { gap: 6 },
+  rankProgressHeader: { flexDirection: "row", justifyContent: "space-between" },
+  progressPct: { fontSize: 12, fontWeight: "700" as const },
+  progressTrack: { height: 2, borderRadius: 1, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 1 },
+  rankPrepBadge: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    borderWidth: 1, borderRadius: 3, paddingHorizontal: 10, paddingVertical: 6,
   },
-  profileTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+  rankPrepText: { fontSize: 9, fontWeight: "700" as const, letterSpacing: 1, flex: 1 },
+  card: { padding: 16, borderRadius: 4, borderWidth: 1, gap: 12 },
+  sectionLabel: { fontSize: 9, letterSpacing: 3, fontWeight: "600" as const },
+  milestoneBadgesRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, marginBottom: 8 },
+  milestonePip: { width: 8, height: 4, borderRadius: 2 },
+  milestoneTitle: { fontSize: 8, fontWeight: "800" as const, letterSpacing: 1.5, marginLeft: 4 },
+  expandHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  expandLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  countBadge: {
+    borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10,
   },
-  systemLabel: {
-    fontSize: 9,
-    letterSpacing: 3,
-    fontWeight: "600" as const,
-    marginBottom: 2,
+  countText: { fontSize: 8, fontWeight: "800" as const, letterSpacing: 1 },
+  calendarTeaser: { fontSize: 10, letterSpacing: 0.5, fontStyle: "italic" },
+  shadowCard: { padding: 14, borderRadius: 4, borderWidth: 1, gap: 8 },
+  shadowHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  shadowTitle: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 2 },
+  shadowPhase: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 2 },
+  shadowGap: { fontSize: 14, fontWeight: "700" as const },
+  shadowText: { fontSize: 12, lineHeight: 18 },
+  achievementGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  achievementTile: {
+    width: "47%", borderWidth: 1, borderRadius: 4,
+    padding: 10, gap: 6, alignItems: "center",
   },
-  username: {
-    fontSize: 22,
-    fontWeight: "700" as const,
-    letterSpacing: 1,
+  achievementName: { fontSize: 9, fontWeight: "700" as const, letterSpacing: 0.5, textAlign: "center" },
+  achievementDate: { fontSize: 8, letterSpacing: 0.5 },
+  milestoneList: { gap: 14 },
+  milestoneDomainRow: { gap: 8 },
+  milestoneDomain: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 3 },
+  milestoneTierRow: { flexDirection: "row", gap: 6 },
+  milestoneTile: {
+    flex: 1, borderWidth: 1, borderRadius: 4, padding: 8, alignItems: "center", gap: 4,
   },
-  goal: {
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 4,
-    maxWidth: 180,
-  },
-  statsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 0,
-  },
-  statItem: {
-    flex: 1,
-    alignItems: "center",
-    gap: 2,
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: "700" as const,
-  },
-  statLabel: {
-    fontSize: 9,
-    letterSpacing: 2,
-    fontWeight: "600" as const,
-  },
-  statDivider: {
-    width: 1,
-    height: 32,
-  },
-  rankProgress: {
-    gap: 6,
-  },
-  rankProgressHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  progressPct: {
-    fontSize: 12,
-    fontWeight: "700" as const,
-  },
-  progressTrack: {
-    height: 2,
-    borderRadius: 1,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    borderRadius: 1,
-  },
-  progressNote: {
-    fontSize: 9,
-    letterSpacing: 1,
-  },
-  card: {
-    padding: 16,
-    borderRadius: 4,
-    borderWidth: 1,
-    gap: 12,
-  },
-  sectionLabel: {
-    fontSize: 9,
-    letterSpacing: 3,
-    fontWeight: "600" as const,
-  },
-  shadowCard: {
-    padding: 14,
-    borderRadius: 4,
-    borderWidth: 1,
-    gap: 8,
-  },
-  shadowHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  shadowTitle: {
-    fontSize: 10,
-    fontWeight: "700" as const,
-    letterSpacing: 2,
-  },
-  shadowGap: {
-    fontSize: 14,
-    fontWeight: "700" as const,
-  },
-  shadowText: {
-    fontSize: 12,
-    lineHeight: 18,
-  },
+  milestoneTierNum: { fontSize: 13, fontWeight: "800" as const },
+  milestoneTileTitle: { fontSize: 8, fontWeight: "600" as const, textAlign: "center", letterSpacing: 0.5, lineHeight: 12 },
   debriefBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    padding: 14,
-    borderRadius: 4,
-    borderWidth: 1,
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, padding: 14, borderRadius: 4, borderWidth: 1,
   },
-  debriefBtnText: {
-    fontSize: 10,
-    letterSpacing: 2,
-    fontWeight: "600" as const,
-  },
-  settingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  settingLabel: {
-    flex: 1,
-    fontSize: 13,
-  },
-  settingValue: {
-    fontSize: 11,
-    letterSpacing: 1,
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-  },
-  resetConfirm: {
-    padding: 12,
-    borderRadius: 2,
-    borderWidth: 1,
-    alignItems: "center",
-  },
-  resetConfirmText: {
-    fontSize: 10,
-    fontWeight: "700" as const,
-    letterSpacing: 1.5,
-    textAlign: "center",
-  },
+  debriefBtnText: { fontSize: 10, letterSpacing: 2, fontWeight: "600" as const },
+  settingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  settingLabel: { flex: 1, fontSize: 13 },
+  settingValue: { fontSize: 11, letterSpacing: 1 },
+  separator: { height: StyleSheet.hairlineWidth },
+  resetConfirm: { padding: 12, borderRadius: 2, borderWidth: 1, alignItems: "center" },
+  resetConfirmText: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 1.5, textAlign: "center" },
 });

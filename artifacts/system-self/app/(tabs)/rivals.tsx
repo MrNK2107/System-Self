@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -25,6 +26,8 @@ import { ShadowSelfCard } from "@/components/ShadowSelfCard";
 import { RankBadge } from "@/components/RankBadge";
 import { ChallengeModal } from "@/components/ChallengeModal";
 import { ChallengeOutcomeModal } from "@/components/ChallengeOutcomeModal";
+import { RivalTauntCard } from "@/components/RivalTauntCard";
+import { useSystemAI } from "@/hooks/useSystemAI";
 
 const DRIFT_KEY = "@system_self:rivals_last_drift";
 const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
@@ -670,7 +673,9 @@ export default function RivalsScreen() {
     getShadowScores, getShadowRank, getHiddenScore, computeRank,
     updateRivals, challenges, challengeRecord,
     declareChallenge, acknowledgeChallenge,
+    rivalTaunts, addRivalTaunt, markRivalTauntsRead,
   } = useApp();
+  const { generateRivalTaunt } = useSystemAI();
 
   const [refreshing, setRefreshing] = useState(false);
   const [challengeTarget, setChallengeTarget] = useState<Rival | null>(null);
@@ -934,6 +939,62 @@ export default function RivalsScreen() {
           ))}
         </View>
 
+        {/* Rival Taunts */}
+        {rivalTaunts.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.tauntHeader}>
+              <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>INCOMING TRANSMISSIONS</Text>
+              {rivalTaunts.some(t => !t.read) && (
+                <View style={[styles.unreadBadge, { backgroundColor: "#E05555" }]}>
+                  <Text style={styles.unreadCount}>
+                    {rivalTaunts.filter(t => !t.read).length}
+                  </Text>
+                </View>
+              )}
+              <TouchableOpacity
+                onPress={markRivalTauntsRead}
+                activeOpacity={0.7}
+                style={[styles.markReadBtn, { borderColor: colors.border }]}
+              >
+                <Text style={[styles.markReadText, { color: colors.mutedForeground }]}>MARK READ</Text>
+              </TouchableOpacity>
+            </View>
+            {rivalTaunts.slice().reverse().map(taunt => (
+              <RivalTauntCard key={taunt.id} taunt={taunt} />
+            ))}
+          </View>
+        )}
+
+        {/* Generate taunt from rivals */}
+        {rivals.length > 0 && (
+          <TouchableOpacity
+            style={[styles.tauntGenBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+            onPress={async () => {
+              const rival = rivals[Math.floor(Math.random() * rivals.length)];
+              if (!rival || !user) return;
+              const scores = {
+                BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
+                MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
+                WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
+                DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
+              };
+              const msg = await generateRivalTaunt({
+                rivalCodename: rival.codename,
+                rivalRank: rival.rank,
+                rivalTrajectory: rival.trajectory,
+                username: user.username,
+                userRank: user.rank,
+                domainScores: scores,
+              });
+              await addRivalTaunt({ rivalCodename: rival.codename, message: msg });
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="message-circle" size={12} color="#E05555" />
+            <Text style={[styles.tauntGenText, { color: "#E05555" }]}>REQUEST RIVAL TRANSMISSION</Text>
+          </TouchableOpacity>
+        )}
+
         <View style={[styles.noticeCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Feather name="eye-off" size={12} color={colors.mutedForeground} />
           <Text style={[styles.noticeText, { color: colors.mutedForeground }]}>
@@ -989,4 +1050,17 @@ const styles = StyleSheet.create({
     borderWidth: 1, alignItems: "flex-start",
   },
   noticeText: { flex: 1, fontSize: 10, lineHeight: 16 },
+  tauntHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  unreadBadge: {
+    minWidth: 18, height: 18, borderRadius: 9,
+    alignItems: "center", justifyContent: "center", paddingHorizontal: 4,
+  },
+  unreadCount: { fontSize: 9, fontWeight: "800" as const, color: "#fff" },
+  markReadBtn: { marginLeft: "auto", borderWidth: 1, borderRadius: 2, paddingHorizontal: 8, paddingVertical: 3 },
+  markReadText: { fontSize: 8, fontWeight: "700" as const, letterSpacing: 1.5 },
+  tauntGenBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, borderWidth: 1, borderRadius: 4, padding: 12,
+  },
+  tauntGenText: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 2 },
 });

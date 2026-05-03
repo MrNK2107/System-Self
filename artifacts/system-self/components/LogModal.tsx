@@ -31,9 +31,7 @@ interface LogConfig {
 
 const LOG_CONFIGS: LogConfig[] = [
   {
-    domain: "BODY",
-    icon: "activity",
-    color: "#E05555",
+    domain: "BODY", icon: "activity", color: "#E05555",
     types: [
       { key: "workout", label: "Workout" },
       { key: "sleep", label: "Sleep" },
@@ -41,9 +39,7 @@ const LOG_CONFIGS: LogConfig[] = [
     ],
   },
   {
-    domain: "MIND",
-    icon: "book",
-    color: "#3A7BD5",
+    domain: "MIND", icon: "book", color: "#3A7BD5",
     types: [
       { key: "deep_work", label: "Deep Work" },
       { key: "reading", label: "Reading" },
@@ -51,9 +47,7 @@ const LOG_CONFIGS: LogConfig[] = [
     ],
   },
   {
-    domain: "WEALTH",
-    icon: "trending-up",
-    color: "#4B8B6F",
+    domain: "WEALTH", icon: "trending-up", color: "#4B8B6F",
     types: [
       { key: "income", label: "Income" },
       { key: "expense", label: "Expense" },
@@ -61,9 +55,7 @@ const LOG_CONFIGS: LogConfig[] = [
     ],
   },
   {
-    domain: "DISCIPLINE",
-    icon: "zap",
-    color: "#C4873A",
+    domain: "DISCIPLINE", icon: "zap", color: "#C4873A",
     types: [
       { key: "quest_complete", label: "Quest Done" },
       { key: "routine", label: "Routine" },
@@ -73,26 +65,16 @@ const LOG_CONFIGS: LogConfig[] = [
 ];
 
 const BASE_DELTAS: Record<Domain, number> = {
-  BODY: 2.5,
-  MIND: 2.5,
-  WEALTH: 2.0,
-  DISCIPLINE: 3.0,
+  BODY: 2.5, MIND: 2.5, WEALTH: 2.0, DISCIPLINE: 3.0,
 };
 
 const TIER_LABELS: Record<string, string> = {
-  none: "NO STREAK",
-  low: "BUILDING",
-  mid: "ON STREAK",
-  high: "HIGH STREAK",
-  max: "MAX STREAK",
+  none: "NO STREAK", low: "BUILDING", mid: "ON STREAK",
+  high: "HIGH STREAK", max: "MAX STREAK",
 };
 
 const TIER_COLORS: Record<string, string | null> = {
-  none: null,
-  low: "#6B7280",
-  mid: null, // domain color
-  high: null, // domain color
-  max: "#D4B483",
+  none: null, low: "#6B7280", mid: null, high: null, max: "#D4B483",
 };
 
 export function LogModal({ visible, onClose }: LogModalProps) {
@@ -105,29 +87,28 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const [note, setNote] = useState("");
   const [intensity, setIntensity] = useState(3);
   const [submitting, setSubmitting] = useState(false);
+  const [isForbidden, setIsForbidden] = useState(false);
+  const [showForbiddenWarning, setShowForbiddenWarning] = useState(false);
 
   const config = LOG_CONFIGS.find(c => c.domain === selectedDomain)!;
 
-  // Streak data for selected domain
   const domainScore = domainScores.find(s => s.domain === selectedDomain);
   const streak = domainScore?.streak ?? 0;
   const tier = getStreakTier(streak);
   const multiplier = getStreakMultiplier(streak);
-  const baseDelta = BASE_DELTAS[selectedDomain];
-  const bonusDelta = Math.round(baseDelta * multiplier * 10) / 10;
-  const bonusGain = Math.round((bonusDelta - baseDelta) * 10) / 10;
+  const baseDelta = isForbidden ? 5.0 : BASE_DELTAS[selectedDomain];
+  const bonusDelta = isForbidden ? 5.0 : Math.round(baseDelta * multiplier * 10) / 10;
+  const bonusGain = Math.round((bonusDelta - BASE_DELTAS[selectedDomain]) * 10) / 10;
   const tierColor = TIER_COLORS[tier] ?? config.color;
 
-  // Animate the preview banner on domain change
   const bannerOpacity = useRef(new Animated.Value(1)).current;
   const bannerTranslate = useRef(new Animated.Value(0)).current;
-
   const prevDomain = useRef(selectedDomain);
+  const forbiddenFlash = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (prevDomain.current === selectedDomain) return;
     prevDomain.current = selectedDomain;
-
     bannerOpacity.setValue(0);
     bannerTranslate.setValue(6);
     Animated.parallel([
@@ -136,7 +117,6 @@ export function LogModal({ visible, onClose }: LogModalProps) {
     ]).start();
   }, [selectedDomain]);
 
-  // Pulse animation for high/max streak indicator
   const pulseOpacity = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (tier !== "high" && tier !== "max") {
@@ -159,6 +139,19 @@ export function LogModal({ visible, onClose }: LogModalProps) {
     setSelectedType(firstType);
   };
 
+  const handleToggleForbidden = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    if (!isForbidden) {
+      setShowForbiddenWarning(true);
+      // Flash red
+      Animated.sequence([
+        Animated.timing(forbiddenFlash, { toValue: 1, duration: 150, useNativeDriver: false }),
+        Animated.timing(forbiddenFlash, { toValue: 0, duration: 400, useNativeDriver: false }),
+      ]).start();
+    }
+    setIsForbidden(f => !f);
+  };
+
   const handleSubmit = async () => {
     if (submitting) return;
     setSubmitting(true);
@@ -167,14 +160,22 @@ export function LogModal({ visible, onClose }: LogModalProps) {
     await addLog({
       domain: selectedDomain,
       type: selectedType,
-      data: { note, intensity },
+      forbidden: isForbidden,
+      data: { note, intensity, forbidden: isForbidden },
     });
 
     setNote("");
     setIntensity(3);
+    setIsForbidden(false);
+    setShowForbiddenWarning(false);
     setSubmitting(false);
     onClose();
   };
+
+  const forbiddenBg = forbiddenFlash.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["transparent", "#9B000030"],
+  });
 
   return (
     <Modal
@@ -183,15 +184,68 @@ export function LogModal({ visible, onClose }: LogModalProps) {
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={[styles.container, { backgroundColor: colors.background, paddingBottom: insets.bottom + 16 }]}>
+      <Animated.View style={[
+        styles.container,
+        { backgroundColor: colors.background, paddingBottom: insets.bottom + 16 },
+        isForbidden ? { backgroundColor: "#0A0203" } : {},
+      ]}>
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: forbiddenBg }]} pointerEvents="none" />
+
         <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.foreground }]}>LOG ENTRY</Text>
+          <View style={styles.headerLeft}>
+            <Text style={[styles.title, { color: isForbidden ? "#9B0000" : colors.foreground }]}>
+              {isForbidden ? "FORBIDDEN TRANSMISSION" : "LOG ENTRY"}
+            </Text>
+          </View>
           <TouchableOpacity onPress={onClose}>
             <Feather name="x" size={20} color={colors.mutedForeground} />
           </TouchableOpacity>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false}>
+          {/* Forbidden mode toggle */}
+          <TouchableOpacity
+            style={[
+              styles.forbiddenToggle,
+              {
+                borderColor: isForbidden ? "#9B000080" : colors.border,
+                backgroundColor: isForbidden ? "#9B000015" : "transparent",
+              },
+            ]}
+            onPress={handleToggleForbidden}
+            activeOpacity={0.7}
+          >
+            <View style={styles.forbiddenLeft}>
+              <Feather name="alert-triangle" size={13} color={isForbidden ? "#9B0000" : colors.mutedForeground} />
+              <View>
+                <Text style={[styles.forbiddenTitle, { color: isForbidden ? "#9B0000" : colors.mutedForeground }]}>
+                  {isForbidden ? "FORBIDDEN MODE ACTIVE" : "FORBIDDEN LOG"}
+                </Text>
+                <Text style={[styles.forbiddenSub, { color: colors.mutedForeground }]}>
+                  {isForbidden ? "+5 pts, −2 DISCIPLINE. Record is permanent." : "High-risk, high-gain transmission"}
+                </Text>
+              </View>
+            </View>
+            <View style={[
+              styles.forbiddenTogglePill,
+              { backgroundColor: isForbidden ? "#9B0000" : colors.muted },
+            ]}>
+              <View style={[
+                styles.forbiddenToggleDot,
+                { marginLeft: isForbidden ? "auto" : 2, backgroundColor: "#fff" },
+              ]} />
+            </View>
+          </TouchableOpacity>
+
+          {/* Forbidden warning */}
+          {showForbiddenWarning && isForbidden && (
+            <View style={styles.forbiddenWarning}>
+              <Text style={styles.forbiddenWarningText}>
+                This entry is flagged as forbidden. It yields +5 pts to the selected domain but −2 to DISCIPLINE. The record cannot be deleted.
+              </Text>
+            </View>
+          )}
+
           {/* Domain selector */}
           <View style={styles.section}>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DOMAIN</Text>
@@ -202,6 +256,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                 const dTier = getStreakTier(dStreak);
                 const isSelected = selectedDomain === cfg.domain;
                 const badgeColor = TIER_COLORS[dTier] ?? cfg.color;
+                const activeColor = isForbidden ? "#9B0000" : cfg.color;
 
                 return (
                   <TouchableOpacity
@@ -209,8 +264,8 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                     style={[
                       styles.domainBtn,
                       {
-                        borderColor: isSelected ? cfg.color : colors.border,
-                        backgroundColor: isSelected ? cfg.color + "20" : colors.card,
+                        borderColor: isSelected ? activeColor : colors.border,
+                        backgroundColor: isSelected ? activeColor + "20" : colors.card,
                       },
                     ]}
                     onPress={() => handleDomainSelect(cfg.domain, cfg.types[0]!.key)}
@@ -220,13 +275,12 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                       <Feather
                         name={cfg.icon as "activity"}
                         size={16}
-                        color={isSelected ? cfg.color : colors.mutedForeground}
+                        color={isSelected ? activeColor : colors.mutedForeground}
                       />
-                      <Text style={[styles.domainLabel, { color: isSelected ? cfg.color : colors.mutedForeground }]}>
+                      <Text style={[styles.domainLabel, { color: isSelected ? activeColor : colors.mutedForeground }]}>
                         {cfg.domain}
                       </Text>
                     </View>
-                    {/* Streak badge on button */}
                     {dTier !== "none" && (
                       <View style={[styles.domainStreakBadge, { backgroundColor: badgeColor + "20" }]}>
                         {(dTier === "mid" || dTier === "high" || dTier === "max") && (
@@ -248,8 +302,10 @@ export function LogModal({ visible, onClose }: LogModalProps) {
             style={[
               styles.multiplierBanner,
               {
-                borderColor: tier === "none" ? colors.border : tierColor + "50",
-                backgroundColor: tier === "none" ? "transparent" : tierColor + "0E",
+                borderColor: isForbidden ? "#9B000050" :
+                  tier === "none" ? colors.border : tierColor + "50",
+                backgroundColor: isForbidden ? "#9B000010" :
+                  tier === "none" ? "transparent" : tierColor + "0E",
                 opacity: bannerOpacity,
                 transform: [{ translateY: bannerTranslate }],
                 marginBottom: 24,
@@ -257,43 +313,36 @@ export function LogModal({ visible, onClose }: LogModalProps) {
             ]}
           >
             <View style={styles.multiplierLeft}>
-              {tier !== "none" && (
-                <Animated.View style={{ opacity: (tier === "high" || tier === "max") ? pulseOpacity : 1 }}>
-                  <Feather
-                    name="zap"
-                    size={13}
-                    color={tierColor}
-                  />
-                </Animated.View>
-              )}
+              <Feather
+                name={isForbidden ? "alert-triangle" : "zap"}
+                size={13}
+                color={isForbidden ? "#9B0000" : tierColor}
+              />
               <View>
                 <Text style={[
                   styles.multiplierMain,
-                  { color: tier === "none" ? colors.mutedForeground : tierColor },
+                  { color: isForbidden ? "#9B0000" : tier === "none" ? colors.mutedForeground : tierColor },
                 ]}>
-                  {tier === "none"
+                  {isForbidden
+                    ? "FORBIDDEN  ·  RISK ACTIVE"
+                    : tier === "none"
                     ? "NO STREAK  ·  BASE"
                     : `×${multiplier.toFixed(1)}  ·  ${streak}D  ·  ${TIER_LABELS[tier]}`
                   }
                 </Text>
-                {tier !== "none" && bonusGain > 0 && (
-                  <Text style={[styles.multiplierSub, { color: colors.mutedForeground }]}>
-                    base {baseDelta.toFixed(1)} pts  →  boosted
-                  </Text>
-                )}
+                <Text style={[styles.multiplierSub, { color: colors.mutedForeground }]}>
+                  {isForbidden ? "−2 DISCIPLINE penalty applied" : bonusGain > 0 ? `base ${baseDelta.toFixed(1)} pts  →  boosted` : ""}
+                </Text>
               </View>
             </View>
-
             <View style={styles.multiplierRight}>
               <Text style={[
                 styles.multiplierPts,
-                { color: tier === "none" ? colors.mutedForeground : tierColor },
+                { color: isForbidden ? "#9B0000" : tier === "none" ? colors.mutedForeground : tierColor },
               ]}>
                 +{bonusDelta.toFixed(1)}
               </Text>
-              <Text style={[styles.multiplierPtsLabel, { color: colors.mutedForeground }]}>
-                pts
-              </Text>
+              <Text style={[styles.multiplierPtsLabel, { color: colors.mutedForeground }]}>pts</Text>
             </View>
           </Animated.View>
 
@@ -307,8 +356,12 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                   style={[
                     styles.typeBtn,
                     {
-                      borderColor: selectedType === type.key ? config.color : colors.border,
-                      backgroundColor: selectedType === type.key ? config.color + "20" : "transparent",
+                      borderColor: selectedType === type.key
+                        ? (isForbidden ? "#9B0000" : config.color)
+                        : colors.border,
+                      backgroundColor: selectedType === type.key
+                        ? (isForbidden ? "#9B000020" : config.color + "20")
+                        : "transparent",
                     },
                   ]}
                   onPress={() => setSelectedType(type.key)}
@@ -316,7 +369,9 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                 >
                   <Text style={[
                     styles.typeLabel,
-                    { color: selectedType === type.key ? config.color : colors.mutedForeground },
+                    { color: selectedType === type.key
+                        ? (isForbidden ? "#9B0000" : config.color)
+                        : colors.mutedForeground },
                   ]}>
                     {type.label}
                   </Text>
@@ -334,7 +389,9 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                   key={i}
                   style={[
                     styles.intensityBtn,
-                    { backgroundColor: intensity >= i ? config.color : colors.muted },
+                    { backgroundColor: intensity >= i
+                        ? (isForbidden ? "#9B0000" : config.color)
+                        : colors.muted },
                   ]}
                   onPress={() => setIntensity(i)}
                   activeOpacity={0.7}
@@ -348,18 +405,23 @@ export function LogModal({ visible, onClose }: LogModalProps) {
 
           {/* Note */}
           <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>NOTE (OPTIONAL)</Text>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              {isForbidden ? "FORBIDDEN NOTE (REQUIRED)" : "NOTE (OPTIONAL)"}
+            </Text>
             <TextInput
               style={[
                 styles.input,
                 {
-                  color: colors.foreground,
-                  borderColor: colors.border,
-                  backgroundColor: colors.card,
+                  color: isForbidden ? "#CC3333" : colors.foreground,
+                  borderColor: isForbidden ? "#9B000060" : colors.border,
+                  backgroundColor: isForbidden ? "#0A0102" : colors.card,
                 },
               ]}
-              placeholder="What happened. Be specific."
-              placeholderTextColor={colors.mutedForeground}
+              placeholder={isForbidden
+                ? "Document what you're transmitting. This record is permanent."
+                : "What happened. Be specific."
+              }
+              placeholderTextColor={isForbidden ? "#660000" : colors.mutedForeground}
               value={note}
               onChangeText={setNote}
               multiline
@@ -368,189 +430,94 @@ export function LogModal({ visible, onClose }: LogModalProps) {
           </View>
         </ScrollView>
 
-        {/* Submit — shows bonus pts */}
+        {/* Submit */}
         <TouchableOpacity
-          style={[styles.submitBtn, { backgroundColor: config.color }]}
+          style={[styles.submitBtn, {
+            backgroundColor: isForbidden ? "#6B0000" : config.color,
+            borderWidth: isForbidden ? 1 : 0,
+            borderColor: isForbidden ? "#9B0000" : "transparent",
+          }]}
           onPress={handleSubmit}
           activeOpacity={0.8}
           disabled={submitting}
         >
-          <Text style={styles.submitText}>LOG IT</Text>
+          <Text style={styles.submitText}>
+            {isForbidden ? "TRANSMIT FORBIDDEN" : "LOG IT"}
+          </Text>
           <View style={styles.submitDivider} />
           <Text style={styles.submitPts}>
-            +{bonusDelta.toFixed(1)} pts{tier !== "none" && tier !== "low" ? `  ×${multiplier.toFixed(1)}` : ""}
+            {isForbidden
+              ? "+5 pts / −2 DISC"
+              : `+${bonusDelta.toFixed(1)} pts${tier !== "none" && tier !== "low" ? `  ×${multiplier.toFixed(1)}` : ""}`
+            }
           </Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-  },
+  container: { flex: 1, padding: 20 },
   header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 24,
-    marginTop: 8,
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    marginBottom: 20, marginTop: 8,
   },
-  title: {
-    fontSize: 14,
-    fontWeight: "700" as const,
-    letterSpacing: 3,
+  headerLeft: { flex: 1 },
+  title: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 3 },
+  section: { marginBottom: 24, gap: 10 },
+  sectionLabel: { fontSize: 9, fontWeight: "600" as const, letterSpacing: 2 },
+  forbiddenToggle: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    borderWidth: 1, borderRadius: 6, padding: 12, marginBottom: 12,
   },
-  section: {
-    marginBottom: 24,
-    gap: 10,
+  forbiddenLeft: { flexDirection: "row", alignItems: "flex-start", gap: 10, flex: 1 },
+  forbiddenTitle: { fontSize: 10, fontWeight: "800" as const, letterSpacing: 2 },
+  forbiddenSub: { fontSize: 9, marginTop: 2, letterSpacing: 0.5 },
+  forbiddenTogglePill: {
+    width: 38, height: 22, borderRadius: 11, padding: 2,
+    flexDirection: "row", alignItems: "center",
   },
-  sectionLabel: {
-    fontSize: 9,
-    fontWeight: "600" as const,
-    letterSpacing: 2,
+  forbiddenToggleDot: { width: 18, height: 18, borderRadius: 9 },
+  forbiddenWarning: {
+    borderWidth: 1, borderColor: "#9B000050", borderRadius: 4,
+    padding: 10, marginBottom: 12, backgroundColor: "#9B000008",
   },
-  domainGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  domainBtn: {
-    flex: 1,
-    minWidth: "45%",
-    padding: 12,
-    borderWidth: 1,
-    borderRadius: 4,
-    gap: 8,
-  },
-  domainBtnMain: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  domainLabel: {
-    fontSize: 10,
-    fontWeight: "700" as const,
-    letterSpacing: 2,
-  },
+  forbiddenWarningText: { fontSize: 10, color: "#CC3333", lineHeight: 16, letterSpacing: 0.3 },
+  domainGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  domainBtn: { flex: 1, minWidth: "45%", padding: 12, borderWidth: 1, borderRadius: 4, gap: 8 },
+  domainBtnMain: { flexDirection: "row", alignItems: "center", gap: 8 },
+  domainLabel: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 2 },
   domainStreakBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    alignSelf: "flex-start",
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 2,
+    flexDirection: "row", alignItems: "center", gap: 3, alignSelf: "flex-start",
+    paddingHorizontal: 5, paddingVertical: 2, borderRadius: 2,
   },
-  domainStreakText: {
-    fontSize: 8,
-    fontWeight: "700" as const,
-    letterSpacing: 1,
-  },
+  domainStreakText: { fontSize: 8, fontWeight: "700" as const, letterSpacing: 1 },
   multiplierBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    borderWidth: 1, borderRadius: 4, paddingHorizontal: 14, paddingVertical: 12,
   },
-  multiplierLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-  },
-  multiplierMain: {
-    fontSize: 11,
-    fontWeight: "700" as const,
-    letterSpacing: 1.5,
-  },
-  multiplierSub: {
-    fontSize: 9,
-    letterSpacing: 0.5,
-    marginTop: 2,
-  },
-  multiplierRight: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 3,
-  },
-  multiplierPts: {
-    fontSize: 22,
-    fontWeight: "800" as const,
-    letterSpacing: -0.5,
-  },
-  multiplierPtsLabel: {
-    fontSize: 10,
-    fontWeight: "600" as const,
-    letterSpacing: 1,
-  },
-  typeRow: {
-    flexDirection: "row",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  typeBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderRadius: 2,
-  },
-  typeLabel: {
-    fontSize: 11,
-    fontWeight: "600" as const,
-  },
-  intensityRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  intensityBtn: {
-    width: 32,
-    height: 6,
-    borderRadius: 1,
-  },
-  intensityLabel: {
-    fontSize: 11,
-    marginLeft: 4,
-  },
+  multiplierLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+  multiplierMain: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 1.5 },
+  multiplierSub: { fontSize: 9, letterSpacing: 0.5, marginTop: 2 },
+  multiplierRight: { flexDirection: "row", alignItems: "baseline", gap: 3 },
+  multiplierPts: { fontSize: 22, fontWeight: "800" as const, letterSpacing: -0.5 },
+  multiplierPtsLabel: { fontSize: 10, fontWeight: "600" as const, letterSpacing: 1 },
+  typeRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  typeBtn: { paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 2 },
+  typeLabel: { fontSize: 11, fontWeight: "600" as const },
+  intensityRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  intensityBtn: { width: 32, height: 6, borderRadius: 1 },
+  intensityLabel: { fontSize: 11, marginLeft: 4 },
   input: {
-    borderWidth: 1,
-    borderRadius: 4,
-    padding: 12,
-    fontSize: 13,
-    minHeight: 80,
-    textAlignVertical: "top",
+    borderWidth: 1, borderRadius: 4, padding: 12,
+    fontSize: 13, minHeight: 80, textAlignVertical: "top",
   },
   submitBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-    borderRadius: 2,
-    marginTop: 8,
-    gap: 12,
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    padding: 16, borderRadius: 2, marginTop: 8, gap: 12,
   },
-  submitText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "700" as const,
-    letterSpacing: 3,
-  },
-  submitDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 16,
-    backgroundColor: "#FFFFFF40",
-  },
-  submitPts: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "600" as const,
-    letterSpacing: 1,
-    opacity: 0.85,
-  },
+  submitText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" as const, letterSpacing: 3 },
+  submitDivider: { width: StyleSheet.hairlineWidth, height: 16, backgroundColor: "#FFFFFF40" },
+  submitPts: { color: "#FFFFFF", fontSize: 12, fontWeight: "600" as const, letterSpacing: 1, opacity: 0.85 },
 });

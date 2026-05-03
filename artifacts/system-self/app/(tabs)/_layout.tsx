@@ -57,6 +57,14 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="recap"
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="calendar" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="stats"
         options={{
           tabBarIcon: ({ color, size }) => (
