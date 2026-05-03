@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { HealthCheckResponse } from "@workspace/api-zod";
+import { hasDatabase } from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -13,7 +14,7 @@ router.get("/readyz", (_req, res) => {
   if (!ready) {
     return res.status(503).json({ status: "not_ready", reason: "Missing GEMINI_API_KEY" });
   }
-  return res.json({ status: "ready" });
+  return res.json({ status: "ready", databaseConfigured: hasDatabase });
 });
 
 export default router;

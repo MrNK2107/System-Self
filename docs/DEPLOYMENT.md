@@ -16,6 +16,7 @@ Set these variables in each environment:
 
 ## 3. Build + Start
 ```bash
+pnpm --filter @workspace/db push
 pnpm --filter @workspace/api-server build
 pnpm --filter @workspace/api-server start
 ```
@@ -24,6 +25,10 @@ pnpm --filter @workspace/api-server start
 - `pnpm --filter @workspace/api-server typecheck`
 - `pnpm --filter @workspace/api-server test`
 - Verify mobile app can call `/api/system/message` and `/api/system/quests`.
+- Verify history endpoints:
+  - `GET /api/system/messages?username=<name>`
+  - `GET /api/system/quests/history?username=<name>`
+  - `GET /api/system/recap/weekly?username=<name>`
 
 ## 5. Rollout
 - Deploy to staging first.

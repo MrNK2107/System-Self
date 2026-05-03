@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { db, generatedQuestBatches, generatedQuests, systemMessages } from "@workspace/db";
 import { validateBody } from "../middlewares/validate";
 import {
   generateQuestsBodySchema,
@@ -195,6 +196,31 @@ router.post("/system/message", validateBody(generateSystemMessageBodySchema), as
       },
     });
     req.log.info({ ai: payload.meta, messageType: req.body.messageType }, "Generated system message");
+    if (db) {
+      void db.insert(systemMessages).values({
+      username: req.body.username,
+      messageType: req.body.messageType,
+      rank: req.body.rank,
+      trajectory: req.body.trajectory,
+      shadowActive: req.body.shadowActive,
+      shadowGap: Math.round(req.body.shadowGap),
+      dayNumber: req.body.dayNumber,
+      message: payload.message,
+      model: payload.meta.model,
+      promptVersion: payload.meta.promptVersion,
+      attempts: payload.meta.attempts,
+      context: {
+        domainScores: req.body.domainScores,
+        questCount: req.body.questCount,
+        completedQuestCount: req.body.completedQuestCount,
+        primaryGoal: req.body.primaryGoal,
+        rivalMovement: req.body.rivalMovement ?? null,
+        extraContext: req.body.extraContext ?? null,
+      },
+      }).catch((error) => {
+        req.log.error({ error }, "Failed to persist system message");
+      });
+    }
     res.json(payload);
   } catch (error) {
     req.log.error({ error }, "Failed to generate system message");
@@ -289,6 +315,39 @@ Return ONLY valid JSON in this exact format:
       },
     });
     req.log.info({ ai: payload.meta, rank }, "Generated quests");
+    if (db) {
+      void db.transaction(async (tx) => {
+      const [batch] = await tx
+        .insert(generatedQuestBatches)
+        .values({
+          username,
+          rank,
+          weakestDomain,
+          primaryGoal,
+          dayNumber: day,
+          shadowGap: Math.round(gap),
+          model: payload.meta.model,
+          promptVersion: payload.meta.promptVersion,
+          attempts: payload.meta.attempts,
+        })
+        .returning({ id: generatedQuestBatches.id });
+
+      if (!batch) return;
+
+      await tx.insert(generatedQuests).values(
+        payload.quests.map((quest) => ({
+          batchId: batch.id,
+          username,
+          title: quest.title,
+          description: quest.description,
+          domain: quest.domain,
+          type: quest.type,
+        })),
+      );
+      }).catch((error) => {
+        req.log.error({ error }, "Failed to persist generated quests");
+      });
+    }
     res.json(payload);
   } catch (error) {
     req.log.error({ error }, "Failed to generate quests");

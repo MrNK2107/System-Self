@@ -14,10 +14,11 @@
 - Add stricter response schema validation for AI outputs.
 - Add retry/backoff wrappers around Gemini calls.
 
-## Phase 3: Data + Product
+## Phase 3: Data + Product (Partially Implemented)
 - Persist generated quests/messages with timestamps and model metadata.
 - Add weekly recap aggregation endpoints.
-- Add adaptive quest difficulty from history and streaks.
+- Add retrieval endpoints for message and quest history.
+- Remaining: adaptive quest difficulty from history and streaks.
 
 ## Phase 4: Deployment + Operations
 - Add CI for typecheck/build/test.
