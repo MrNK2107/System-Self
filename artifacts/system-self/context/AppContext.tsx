@@ -422,6 +422,31 @@ const DEFAULT_SHADOW: ShadowSelf = {
   activatedAt: null, gap: 0,
 };
 
+async function postQuestCompletionEvent(params: {
+  username: string;
+  questId: string;
+  status: "complete" | "failed" | "refused";
+  domain: Domain;
+  questType: QuestType;
+}) {
+  try {
+    const baseUrl = process.env.EXPO_PUBLIC_DOMAIN
+      ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
+      : "";
+    await fetch(`${baseUrl}/api/system/quest-completion`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...params,
+        completedAt: new Date().toISOString(),
+        source: "app",
+      }),
+    });
+  } catch {
+    // Non-blocking: app behavior should not fail when analytics/completion ingestion fails.
+  }
+}
+
 function initAchievements(): Achievement[] {
   return (Object.keys(ACHIEVEMENT_DEFS) as AchievementId[]).map(id => ({ id, unlockedAt: null }));
 }
@@ -881,6 +906,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const completeQuest = useCallback(async (questId: string) => {
+    const questSnapshot = state.quests.find(q => q.id === questId);
+    const usernameSnapshot = state.user?.username;
     setState(prev => {
       const quest = prev.quests.find(q => q.id === questId);
       const updated = prev.quests.map(q => q.id === questId ? { ...q, status: "complete" as QuestStatus } : q);
@@ -917,16 +944,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { ...prev, quests: updated, questChains, achievements, pendingAchievement };
     });
     await updateDomainScore("DISCIPLINE", 3.0, true);
-  }, [updateDomainScore]);
+    if (questSnapshot && usernameSnapshot) {
+      void postQuestCompletionEvent({
+        username: usernameSnapshot,
+        questId: questSnapshot.id,
+        status: "complete",
+        domain: questSnapshot.domain,
+        questType: questSnapshot.type,
+      });
+    }
+  }, [state.quests, state.user?.username, updateDomainScore]);
 
   const refuseQuest = useCallback(async (questId: string) => {
+    const questSnapshot = state.quests.find(q => q.id === questId);
+    const usernameSnapshot = state.user?.username;
     setState(prev => {
       const updated = prev.quests.map(q => q.id === questId ? { ...q, status: "refused" as QuestStatus } : q);
       AsyncStorage.setItem(STORAGE_KEYS.QUESTS, JSON.stringify(updated));
       return { ...prev, quests: updated };
     });
     await updateDomainScore("DISCIPLINE", -1.5, false);
-  }, [updateDomainScore]);
+    if (questSnapshot && usernameSnapshot) {
+      void postQuestCompletionEvent({
+        username: usernameSnapshot,
+        questId: questSnapshot.id,
+        status: "refused",
+        domain: questSnapshot.domain,
+        questType: questSnapshot.type,
+      });
+    }
+  }, [state.quests, state.user?.username, updateDomainScore]);
 
   const acknowledgeRankUp = useCallback(async () => {
     setState(prev => {

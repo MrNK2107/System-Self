@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, generatedQuestBatches, generatedQuests, systemMessages } from "@workspace/db";
+import { db, generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 import { validateBody } from "../middlewares/validate";
 import {
@@ -7,6 +7,7 @@ import {
   generateQuestsResponseSchema,
   generateSystemMessageBodySchema,
   generateSystemMessageResponseSchema,
+  questCompletionEventBodySchema,
 } from "../lib/schemas";
 import { generateWithFallback } from "../lib/ai";
 
@@ -272,8 +273,17 @@ router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req
         const repeatedWeakest = recentBatches.filter((b) => b.weakestDomain === weakestDomain).length;
         const dailyCount = recentQuests.filter((q) => q.type === "daily").length;
         const arcCount = recentQuests.filter((q) => q.type === "arc").length;
+        const recentCompletions = await db
+          .select()
+          .from(questCompletionEvents)
+          .where(eq(questCompletionEvents.username, username))
+          .orderBy(desc(questCompletionEvents.completedAt))
+          .limit(40);
+        const completed = recentCompletions.filter((e) => e.status === "complete").length;
+        const attempted = recentCompletions.length;
+        const completionRate = attempted > 0 ? Math.round((completed / attempted) * 100) : 0;
 
-        adaptiveNote = `Recent batches: ${recentBatches.length}. Domain mix: BODY ${domainCounts.BODY ?? 0}, MIND ${domainCounts.MIND ?? 0}, WEALTH ${domainCounts.WEALTH ?? 0}, DISCIPLINE ${domainCounts.DISCIPLINE ?? 0}. Daily quests in recent history: ${dailyCount}, arc quests: ${arcCount}. Weakest domain repeated ${repeatedWeakest}/${recentBatches.length} times. If a domain is overrepresented, rebalance. If weakest domain repeated 3+ times, vary execution style but keep target domain pressure.`;
+        adaptiveNote = `Recent batches: ${recentBatches.length}. Domain mix: BODY ${domainCounts.BODY ?? 0}, MIND ${domainCounts.MIND ?? 0}, WEALTH ${domainCounts.WEALTH ?? 0}, DISCIPLINE ${domainCounts.DISCIPLINE ?? 0}. Daily quests in recent history: ${dailyCount}, arc quests: ${arcCount}. Weakest domain repeated ${repeatedWeakest}/${recentBatches.length} times. Completion rate from recent tracked attempts: ${completionRate}% (${completed}/${attempted}). If completion rate < 45%, reduce scope by 15-20% while maintaining discipline pressure. If completion rate > 75%, escalate scope by 10-15% with stricter output constraints. If weakest domain repeated 3+ times, vary execution style but keep target domain pressure.`;
       }
     }
 
@@ -397,6 +407,25 @@ Return ONLY valid JSON in this exact format:
       },
     });
     res.status(500).json(payload);
+  }
+});
+
+router.post("/system/quest-completion", validateBody(questCompletionEventBodySchema), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ error: "Database is not configured" });
+    await db.insert(questCompletionEvents).values({
+      username: req.body.username,
+      questId: req.body.questId,
+      status: req.body.status,
+      domain: req.body.domain,
+      questType: req.body.questType,
+      completedAt: req.body.completedAt ? new Date(req.body.completedAt) : new Date(),
+      source: req.body.source,
+    });
+    res.status(201).json({ status: "ok" });
+  } catch (error) {
+    req.log.error({ error }, "Failed to persist quest completion event");
+    res.status(500).json({ error: "Failed to persist completion event" });
   }
 });
 

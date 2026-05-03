@@ -5,6 +5,7 @@ import { useApp, type Quest } from "@/context/AppContext";
 import { useSystemAI } from "./useSystemAI";
 
 const QUEST_GEN_KEY = "@system_self:quest_gen_record";
+const FAILED_EVENT_SENT_KEY = "@system_self:failed_quest_event_sent_ids";
 
 interface GenRecord {
   date: string;
@@ -20,6 +21,47 @@ function generateId(): string {
 
 function isExpiredActive(quest: Quest): boolean {
   return quest.status === "active" && new Date(quest.expiresAt) < new Date();
+}
+
+async function postQuestCompletionEvent(params: {
+  username: string;
+  questId: string;
+  status: "complete" | "failed" | "refused";
+  domain: Quest["domain"];
+  questType: Quest["type"];
+}) {
+  try {
+    const baseUrl = process.env.EXPO_PUBLIC_DOMAIN
+      ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
+      : "";
+    await fetch(`${baseUrl}/api/system/quest-completion`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...params,
+        completedAt: new Date().toISOString(),
+        source: "app",
+      }),
+    });
+  } catch {
+    // Non-blocking.
+  }
+}
+
+async function getFailedEventSentIds(): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(FAILED_EVENT_SENT_KEY);
+    if (!raw) return new Set<string>();
+    const parsed = JSON.parse(raw) as string[];
+    return new Set(parsed);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+async function saveFailedEventSentIds(ids: Set<string>) {
+  const trimmed = Array.from(ids).slice(-500);
+  await AsyncStorage.setItem(FAILED_EVENT_SENT_KEY, JSON.stringify(trimmed));
 }
 
 export function useQuestScheduler() {
@@ -63,14 +105,15 @@ export function useQuestScheduler() {
 
       // Expire active dailies and keep weeklies/arcs
       const now = new Date();
-      const expiredIds = new Set<string>();
       const currentQuests = questsRef.current;
+      const newlyFailedQuests = currentQuests.filter(
+        q => q.type === "daily" && isExpiredActive(q),
+      );
 
       // Mark expired active dailies as failed
       const preservedQuests: Quest[] = currentQuests
         .map(q => {
           if (q.type === "daily" && isExpiredActive(q)) {
-            expiredIds.add(q.id);
             return { ...q, status: "failed" as const };
           }
           return q;
@@ -153,6 +196,22 @@ export function useQuestScheduler() {
       ];
 
       await setQuests(finalQuests);
+
+      if (newlyFailedQuests.length > 0) {
+        const sentIds = await getFailedEventSentIds();
+        for (const quest of newlyFailedQuests) {
+          if (sentIds.has(quest.id)) continue;
+          void postQuestCompletionEvent({
+            username: currentUser.username,
+            questId: quest.id,
+            status: "failed",
+            domain: quest.domain,
+            questType: quest.type,
+          });
+          sentIds.add(quest.id);
+        }
+        await saveFailedEventSentIds(sentIds);
+      }
 
       const today = new Date().toISOString().split("T")[0]!;
       const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });

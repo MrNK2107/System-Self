@@ -64,6 +64,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/QuestGenerationResponse"
+  /system/quest-completion:
+    post:
+      operationId: recordQuestCompletion
+      tags: [system]
+      summary: Record quest completion event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestCompletionEventRequest"
+      responses:
+        "201":
+          description: Completion event recorded
 components:
   schemas:
     HealthStatus:
@@ -183,3 +197,30 @@ components:
             $ref: "#/components/schemas/QuestItem"
       required:
         - quests
+    QuestCompletionEventRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        questId:
+          type: string
+        status:
+          type: string
+          enum: [complete, failed, refused]
+        domain:
+          type: string
+          enum: [BODY, MIND, WEALTH, DISCIPLINE]
+        questType:
+          type: string
+          enum: [daily, weekly, arc]
+        completedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+      required:
+        - username
+        - questId
+        - status
+        - domain
+        - questType

@@ -30,6 +30,7 @@ pnpm --filter @workspace/api-server start
   - `GET /api/system/quests/history?username=<name>`
   - `GET /api/system/recap/weekly?username=<name>`
   - `GET /api/system/recap/weekly/debrief?username=<name>`
+  - `POST /api/system/quest-completion`
 
 ## 6. Query Options
 - Messages:
@@ -42,6 +43,25 @@ pnpm --filter @workspace/api-server start
   - `cursor` (batch id for pagination)
   - `rank`
   - `from`, `to` (ISO datetime)
+
+## 7. Completion Event Ingestion
+Send a completion event when a quest is completed/failed/refused:
+```json
+{
+  "username": "nanda",
+  "questId": "quest-123",
+  "status": "complete",
+  "domain": "DISCIPLINE",
+  "questType": "daily",
+  "completedAt": "2026-05-03T12:00:00.000Z",
+  "source": "app"
+}
+```
+
+App behavior:
+- `complete` and `refused` are emitted from quest actions.
+- `failed` is emitted automatically by the quest scheduler when active daily quests expire.
+- Failed events are de-duplicated client-side so each quest id is sent once.
 
 ## 5. Rollout
 - Deploy to staging first.

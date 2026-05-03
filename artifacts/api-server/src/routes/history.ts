@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, generatedQuestBatches, generatedQuests, systemMessages } from "@workspace/db";
+import { db, generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages } from "@workspace/db";
 import { generateWithFallback } from "../lib/ai";
 
 const router = Router();
@@ -136,6 +136,14 @@ router.get("/system/recap/weekly", async (req, res) => {
       .where(and(eq(generatedQuests.username, username), gte(generatedQuests.createdAt, from)))
       .groupBy(generatedQuests.domain);
 
+    const [completionStats] = await db
+      .select({
+        attempts: sql<number>`count(*)::int`,
+        completed: sql<number>`sum(case when ${questCompletionEvents.status} = 'complete' then 1 else 0 end)::int`,
+      })
+      .from(questCompletionEvents)
+      .where(and(eq(questCompletionEvents.username, username), gte(questCompletionEvents.completedAt, from)));
+
     return res.json({
       username,
       windowDays: 7,
@@ -144,6 +152,12 @@ router.get("/system/recap/weekly", async (req, res) => {
       messagesGenerated: messageStats?.count ?? 0,
       questBatchesGenerated: questStats?.batchCount ?? 0,
       questsGenerated: questStats?.questCount ?? 0,
+      questAttempts: completionStats?.attempts ?? 0,
+      questsCompleted: completionStats?.completed ?? 0,
+      completionRate:
+        (completionStats?.attempts ?? 0) > 0
+          ? Math.round(((completionStats?.completed ?? 0) / (completionStats?.attempts ?? 1)) * 100)
+          : 0,
       domainBreakdown,
     });
   } catch (error) {
@@ -185,12 +199,26 @@ router.get("/system/recap/weekly/debrief", async (req, res) => {
       .from(generatedQuests)
       .where(and(eq(generatedQuests.username, username), gte(generatedQuests.createdAt, from)))
       .groupBy(generatedQuests.domain);
+    const [completionStats] = await db
+      .select({
+        attempts: sql<number>`count(*)::int`,
+        completed: sql<number>`sum(case when ${questCompletionEvents.status} = 'complete' then 1 else 0 end)::int`,
+      })
+      .from(questCompletionEvents)
+      .where(and(eq(questCompletionEvents.username, username), gte(questCompletionEvents.completedAt, from)));
+    const completionRate =
+      (completionStats?.attempts ?? 0) > 0
+        ? Math.round(((completionStats?.completed ?? 0) / (completionStats?.attempts ?? 1)) * 100)
+        : 0;
 
     const prompt = `Generate a strict weekly debrief for ${username}.
 Data window: last 7 days.
 Messages generated: ${messageStats?.count ?? 0}
 Quest batches generated: ${questStats?.batchCount ?? 0}
 Quests generated: ${questStats?.questCount ?? 0}
+Quest attempts tracked: ${completionStats?.attempts ?? 0}
+Quests completed: ${completionStats?.completed ?? 0}
+Completion rate: ${completionRate}%
 Domain quest distribution: ${domainBreakdown.map((d) => `${d.domain}:${d.count}`).join(", ") || "none"}
 
 Style:

@@ -74,3 +74,13 @@ export const generateQuestsResponseSchema = z.object({
     attempts: z.number().int().min(1),
   }),
 });
+
+export const questCompletionEventBodySchema = z.object({
+  username: z.string().min(1),
+  questId: z.string().min(1),
+  status: z.enum(["complete", "failed", "refused"]),
+  domain: z.enum(["BODY", "MIND", "WEALTH", "DISCIPLINE"]),
+  questType: z.enum(["daily", "weekly", "arc"]),
+  completedAt: z.string().datetime().optional(),
+  source: z.string().default("app"),
+});
