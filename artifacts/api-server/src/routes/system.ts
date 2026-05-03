@@ -417,16 +417,21 @@ router.post("/system/quest-completion", validateBody(questCompletionEventBodySch
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
     if (!requireOwnership(req, res, req.body.username)) return;
+    const headerKey = typeof req.headers["idempotency-key"] === "string"
+      ? req.headers["idempotency-key"].trim()
+      : undefined;
+    const idempotencyKey =
+      req.body.idempotencyKey ||
+      headerKey ||
+      `${req.body.questId}:${req.body.status}:${req.body.domain}:${req.body.questType}`;
+
     const already = await db
       .select({ id: questCompletionEvents.id })
       .from(questCompletionEvents)
       .where(
         and(
           eq(questCompletionEvents.username, req.body.username),
-          eq(questCompletionEvents.questId, req.body.questId),
-          eq(questCompletionEvents.status, req.body.status),
-          eq(questCompletionEvents.domain, req.body.domain),
-          eq(questCompletionEvents.questType, req.body.questType),
+          eq(questCompletionEvents.idempotencyKey, idempotencyKey),
         ),
       )
       .limit(1);
@@ -439,6 +444,7 @@ router.post("/system/quest-completion", validateBody(questCompletionEventBodySch
       status: req.body.status,
       domain: req.body.domain,
       questType: req.body.questType,
+      idempotencyKey,
       completedAt: req.body.completedAt ? new Date(req.body.completedAt) : new Date(),
       source: req.body.source,
     });

@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, getStreakMultiplier, getStreakTier, type Domain } from "@/context/AppContext";
@@ -78,6 +79,7 @@ const TIER_COLORS: Record<string, string | null> = {
 };
 
 export function LogModal({ visible, onClose }: LogModalProps) {
+  const router = useRouter();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { addLog, domainScores } = useApp();
@@ -347,6 +349,23 @@ export function LogModal({ visible, onClose }: LogModalProps) {
           </Animated.View>
 
           {/* Type */}
+          {selectedDomain === "BODY" && (
+            <TouchableOpacity
+              style={[styles.gymShortcut, { borderColor: colors.border, backgroundColor: colors.card }]}
+              onPress={() => {
+                onClose();
+                router.push("/(tabs)/gym");
+              }}
+              activeOpacity={0.7}
+            >
+              <Feather name="activity" size={13} color={config.color} />
+              <Text style={[styles.gymShortcutText, { color: colors.foreground }]}>
+                Open Gym tracker for structured sets, PRs, and plan completion
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Type */}
           <View style={styles.section}>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TYPE</Text>
             <View style={styles.typeRow}>
@@ -484,6 +503,21 @@ const styles = StyleSheet.create({
     padding: 10, marginBottom: 12, backgroundColor: "#9B000008",
   },
   forbiddenWarningText: { fontSize: 10, color: "#CC3333", lineHeight: 16, letterSpacing: 0.3 },
+  gymShortcut: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
+  gymShortcutText: {
+    fontSize: 10,
+    letterSpacing: 0.4,
+    flex: 1,
+  },
   domainGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   domainBtn: { flex: 1, minWidth: "45%", padding: 12, borderWidth: 1, borderRadius: 4, gap: 8 },
   domainBtnMain: { flexDirection: "row", alignItems: "center", gap: 8 },

@@ -434,14 +434,17 @@ async function postQuestCompletionEvent(params: {
       ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
       : "";
     const token = process.env.EXPO_PUBLIC_API_TOKEN;
+    const idempotencyKey = `${params.questId}:${params.status}:${params.domain}:${params.questType}`;
     await fetch(`${baseUrl}/api/system/quest-completion`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({
         ...params,
+        idempotencyKey,
         completedAt: new Date().toISOString(),
         source: "app",
       }),

@@ -81,6 +81,7 @@ export const questCompletionEventBodySchema = z.object({
   status: z.enum(["complete", "failed", "refused"]),
   domain: z.enum(["BODY", "MIND", "WEALTH", "DISCIPLINE"]),
   questType: z.enum(["daily", "weekly", "arc"]),
+  idempotencyKey: z.string().min(8).max(200).optional(),
   completedAt: z.string().datetime().optional(),
   source: z.string().default("app"),
 });

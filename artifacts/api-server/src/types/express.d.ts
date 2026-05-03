@@ -5,7 +5,7 @@ declare module "express-serve-static-core" {
     auth?: {
       username: string;
       token: string;
+      isAdmin?: boolean;
     };
   }
 }
-

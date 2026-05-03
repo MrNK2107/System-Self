@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -46,16 +46,26 @@ export const generatedQuests = pgTable("generated_quests", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const questCompletionEvents = pgTable("quest_completion_events", {
-  id: serial("id").primaryKey(),
-  username: text("username").notNull(),
-  questId: text("quest_id").notNull(),
-  status: text("status").notNull(),
-  domain: text("domain").notNull(),
-  questType: text("quest_type").notNull(),
-  completedAt: timestamp("completed_at", { withTimezone: true }).defaultNow().notNull(),
-  source: text("source").notNull().default("app"),
-});
+export const questCompletionEvents = pgTable(
+  "quest_completion_events",
+  {
+    id: serial("id").primaryKey(),
+    username: text("username").notNull(),
+    questId: text("quest_id").notNull(),
+    status: text("status").notNull(),
+    domain: text("domain").notNull(),
+    questType: text("quest_type").notNull(),
+    idempotencyKey: text("idempotency_key"),
+    completedAt: timestamp("completed_at", { withTimezone: true }).defaultNow().notNull(),
+    source: text("source").notNull().default("app"),
+  },
+  (table) => ({
+    usernameIdempotencyUnique: uniqueIndex("quest_completion_events_username_idempotency_key_unique").on(
+      table.username,
+      table.idempotencyKey,
+    ),
+  }),
+);
 
 export const insertSystemMessageSchema = createInsertSchema(systemMessages).omit({
   id: true,

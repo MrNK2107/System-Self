@@ -69,6 +69,13 @@ paths:
       operationId: recordQuestCompletion
       tags: [system]
       summary: Record quest completion event
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+          description: Optional idempotency key. If omitted, server derives a deterministic fallback.
       requestBody:
         required: true
         content:
@@ -213,6 +220,8 @@ components:
         questType:
           type: string
           enum: [daily, weekly, arc]
+        idempotencyKey:
+          type: string
         completedAt:
           type: string
           format: date-time
