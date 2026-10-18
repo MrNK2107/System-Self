@@ -37,6 +37,11 @@ export interface OnboardingPayload {
   clientId?: string;
 }
 
+/** The zone to onboard with: the device's, else the account's, else UTC. */
+export function pickTimezone(device: string, account: string): string {
+  return device.trim() || account.trim() || "UTC";
+}
+
 export function buildOnboardingPayload(draft: OnboardingDraft, clientId?: string): OnboardingPayload {
   const stoppedBefore = draft.stoppedBefore.trim().slice(0, MAX_STOPPED_BEFORE_LENGTH);
   return {

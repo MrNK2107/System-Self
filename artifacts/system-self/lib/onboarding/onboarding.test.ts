@@ -11,9 +11,10 @@ import {
   canRetry,
   describeOnboardingError,
   submitOnboarding,
+  submitOnboardingWithFallback,
   updateSchedule,
 } from "./actions";
-import { buildOnboardingPayload, draftFromParams, parseRatings, type OnboardingDraft } from "./payload";
+import { buildOnboardingPayload, draftFromParams, parseRatings, pickTimezone, type OnboardingDraft } from "./payload";
 
 const session: Session = {
   user: { id: "u1", email: "a@b.co", username: "alpha", role: "user", emailVerified: false, timezone: "UTC", createdAt: "2026-01-01T00:00:00.000Z" },
@@ -174,4 +175,33 @@ test("applyOnboarded seeds the game state and marks the gate onboarded; applyPro
   assert.equal((store.get(JSON.stringify(gameStateKey("u1"))) as GameState).profile.morningTime, "05:00");
   applyProfile(qc, "u2", profile as GameState["profile"]); // no cache for u2: stays empty
   assert.equal(store.get(JSON.stringify(gameStateKey("u2"))), undefined);
+});
+
+test("pickTimezone: device, then account, then UTC", () => {
+  assert.equal(pickTimezone("Asia/Kolkata", "UTC"), "Asia/Kolkata");
+  assert.equal(pickTimezone("", "Europe/Paris"), "Europe/Paris");
+  assert.equal(pickTimezone("  ", ""), "UTC");
+});
+
+const tzReject = { status: 400, body: { error: "Validation failed", issues: [{ path: "timezone", message: "Unknown timezone" }] } };
+
+test("submitOnboardingWithFallback retries a timezone-only rejection with the account zone, then UTC", async () => {
+  const seen: string[] = [];
+  const h = harness((c) => {
+    const tz = (c.body as { timezone: string }).timezone;
+    seen.push(tz);
+    return tz === "UTC" ? { status: 201, body: gameState } : tzReject;
+  });
+  const state = await submitOnboardingWithFallback(h.api, buildOnboardingPayload({ ...draft, timezone: "Bad/Zone" }), ["Also/Bad", "UTC"]);
+  assert.equal(state.profile.onboarded, true);
+  assert.deepEqual(seen, ["Bad/Zone", "Also/Bad", "UTC"]);
+});
+
+test("submitOnboardingWithFallback does not retry other rejections and gives up after the list", async () => {
+  const other = harness(() => ({ status: 400, body: { issues: [{ path: "primaryGoal", message: "Too short" }] } }));
+  await assert.rejects(submitOnboardingWithFallback(other.api, buildOnboardingPayload(draft), ["UTC"]), ApiError);
+  assert.equal(other.calls.length, 1);
+  const always = harness(() => tzReject);
+  await assert.rejects(submitOnboardingWithFallback(always.api, buildOnboardingPayload(draft), ["UTC"]), ApiError);
+  assert.equal(always.calls.length, 2);
 });

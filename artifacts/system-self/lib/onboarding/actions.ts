@@ -2,7 +2,7 @@
 import { GameStateSchema, type GameState } from "@workspace/contracts";
 import { ApiError, type ApiClient } from "../api/client";
 import { gameStateKey } from "../game/keys";
-import { onboardingStatusKey } from "../auth/actions";
+import { onboardingStatusKey, rejectsOnlyTimezone } from "../auth/actions";
 import type { OnboardingPayload } from "./payload";
 
 export const PROFILE_SCHEMA = GameStateSchema.shape.profile;
@@ -25,6 +25,28 @@ export async function submitOnboarding(api: ApiClient, payload: OnboardingPayloa
     }
     throw e;
   }
+}
+
+/**
+ * submitOnboarding, but a rejection that blames only the timezone is retried with each fallback zone in turn
+ * (the account's, then "UTC"), so an odd device zone never blocks onboarding.
+ */
+export async function submitOnboardingWithFallback(
+  api: ApiClient,
+  payload: OnboardingPayload,
+  fallbackZones: string[],
+): Promise<GameState> {
+  const zones = [payload.timezone, ...fallbackZones.filter((z) => z && z !== payload.timezone)];
+  let lastError: unknown;
+  for (const timezone of zones) {
+    try {
+      return await submitOnboarding(api, { ...payload, timezone });
+    } catch (e) {
+      lastError = e;
+      if (!rejectsOnlyTimezone(e)) throw e;
+    }
+  }
+  throw lastError;
 }
 
 export interface ScheduleTimes {

@@ -18,12 +18,13 @@ import {
   applyOnboarded,
   canRetry,
   describeOnboardingError,
-  submitOnboarding,
+  submitOnboardingWithFallback,
 } from "@/lib/onboarding/actions";
 import {
   RANKED_DOMAINS,
   buildOnboardingPayload,
   draftFromParams,
+  pickTimezone,
   type RankedDomain as Domain,
 } from "@/lib/onboarding/payload";
 
@@ -47,7 +48,6 @@ const STEPS = [
   { icon: "check-circle" as const, label: "Calibration complete.", domain: null },
 ];
 
-const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 type Phase = "running" | "failed";
 
@@ -65,7 +65,7 @@ export default function CalibratingScreen() {
   const scanY = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0.2)).current;
 
-  const draft = draftFromParams(params, deviceTimezone());
+  const draft = draftFromParams(params, pickTimezone(deviceTimezone(), user?.timezone ?? ""));
   const draftRef = useRef(draft);
   draftRef.current = draft;
   // One id per visit: a retry after a lost reply is recognised by the server instead of onboarding twice.
@@ -124,15 +124,20 @@ export default function CalibratingScreen() {
     setPhase("running");
     setFailure(null);
     startAnimation();
+    // The animation and the request run together; leaving waits for both. A failed request drops the wait.
+    let waitTimer: ReturnType<typeof setTimeout> | undefined;
+    const minimum = new Promise<void>((resolve) => {
+      waitTimer = setTimeout(resolve, MIN_CALIBRATION_MS);
+    });
     try {
-      // The animation and the request run together; leaving waits for both.
       const [state] = await Promise.all([
-        submitOnboarding(api, buildOnboardingPayload(current, clientId)),
-        wait(MIN_CALIBRATION_MS),
+        submitOnboardingWithFallback(api, buildOnboardingPayload(current, clientId), [user?.timezone ?? "", "UTC"]),
+        minimum,
       ]);
       applyOnboarded(queryClient, userId, state);
       if (alive.current) router.replace("/onboarding/schedule");
     } catch (e) {
+      clearTimeout(waitTimer);
       if (!alive.current) return;
       clearTimers();
       progressAnim.stopAnimation();
@@ -141,7 +146,7 @@ export default function CalibratingScreen() {
     } finally {
       running.current = false;
     }
-  }, [userId, queryClient, clientId, startAnimation]);
+  }, [userId, user?.timezone, queryClient, clientId, startAnimation]);
 
   const hasDraft = draft !== null;
   useEffect(() => {

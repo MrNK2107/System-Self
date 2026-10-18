@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
+  BackHandler,
   Platform,
   ScrollView,
   StyleSheet,
@@ -79,6 +80,11 @@ export default function ScheduleScreen() {
 
   const topPad = insets.top + (Platform.OS === "web" ? 0 : 0);
 
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => sub.remove();
+  }, []);
+
   const handleFinish = async () => {
     if (saving) return;
     setSaving(true);
@@ -105,9 +111,8 @@ export default function ScheduleScreen() {
     <View style={[s.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[s.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={s.back}>
-          <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
-        </TouchableOpacity>
+        {/* No back: the account already exists, and going back would re-run calibration. */}
+        <View style={s.back} />
         <View style={s.headerMid}>
           <Text style={[s.headerTag, { color: colors.subtle }]}>SCHEDULE</Text>
           <StepBadge step={3} />
