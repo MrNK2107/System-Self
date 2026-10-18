@@ -267,8 +267,10 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
 }
 
 /**
- * A local date may roll only ROLLOVER_GRACE_MS after it ends, so logs recorded offline before midnight
- * and synced shortly after still land on their own date before its streaks and decay are evaluated.
+ * Passive catch-up (the worker, GET /state, ensureRolledOver, the timezone hook) rolls a local date only
+ * ROLLOVER_GRACE_MS after it ends, so logs recorded offline before midnight and synced shortly after still
+ * land on their own date before its streaks and decay are evaluated. Activity for a date X rolls every date
+ * before X at once, ignoring the grace (see rollOverDue's `before`).
  */
 export const ROLLOVER_GRACE_MS = 2 * 3600_000;
 
@@ -281,11 +283,12 @@ export function rolloverDueAt(date: string, tz: string): Date {
  * Catches a user up inside the caller's locked transaction: rolls every rollable local date (see
  * ROLLOVER_GRACE_MS) from the day after `lastRolledDate` (or the onboarding day), in order, then schedules
  * the next rollover for when the first unrolled date becomes rollable. Dates older than the most recent
- * MAX_CATCH_UP_DAYS collapse into one decay-only step. Mutating game routes call this first so a new write
- * never lands before older dates are rolled.
+ * MAX_CATCH_UP_DAYS collapse into one decay-only step.
  *
- * With `before`, only dates strictly before it are rolled and the schedule is left alone: POST /logs and
- * gym complete roll the dates before the log's date, apply the log, then call this again without it.
+ * With `before` (activity or scoring for local date `before`), exactly the dates strictly before it are
+ * rolled, grace or not: the client flushes older offline logs first, so activity for X means every date
+ * before X is complete. POST /logs passes its log's date (then applies the log and calls this again
+ * without `before`); quest, chain, generate and gym-complete writes use rollOverBeforeToday.
  * Nothing is written when nothing is due and the schedule is unchanged.
  */
 export async function rollOverDue(tx: Tx, userId: string, now: Date, opts: { before?: string } = {}): Promise<void> {
@@ -303,9 +306,13 @@ export async function rollOverDue(tx: Tx, userId: string, now: Date, opts: { bef
   const { user, profile, day } = ctx;
   const tz = user.timezone;
   const yesterday = addDays(localDate(now, tz), -1);
-  // The latest rollable date: yesterday once its grace window has passed, else the day before.
-  let lastDue = now.getTime() >= rolloverDueAt(yesterday, tz).getTime() ? yesterday : addDays(yesterday, -1);
-  if (opts.before !== undefined && opts.before <= lastDue) lastDue = addDays(opts.before, -1);
+  // Passive: yesterday once its grace window has passed, else the day before. Activity: the day before `before`.
+  const lastDue =
+    opts.before !== undefined
+      ? minDate(addDays(opts.before, -1), yesterday)
+      : now.getTime() >= rolloverDueAt(yesterday, tz).getTime()
+        ? yesterday
+        : addDays(yesterday, -1);
   let start = day.lastRolledDate !== null ? addDays(day.lastRolledDate, 1) : localDate(profile.onboardedAt, tz);
 
   if (daysBetween(start, lastDue) + 1 > MAX_CATCH_UP_DAYS) {
@@ -320,12 +327,19 @@ export async function rollOverDue(tx: Tx, userId: string, now: Date, opts: { bef
     start = addDays(lastCollapsed, 1);
   }
   for (let d = start; d <= lastDue; d = addDays(d, 1)) await rolloverDate(tx, userId, d, now);
-  if (opts.before !== undefined) return;
 
   const firstUnrolled = start > lastDue ? start : addDays(lastDue, 1);
   const next = rolloverDueAt(firstUnrolled, tz);
   if (next.getTime() === day.nextRolloverAt.getTime()) return;
   await tx.update(userDayState).set({ nextRolloverAt: next }).where(eq(userDayState.userId, userId));
+}
+
+const minDate = (a: string, b: string) => (a < b ? a : b);
+
+/** For a write that counts as activity (or scores) on the user's local today: rolls every date before today. */
+export async function rollOverBeforeToday(tx: Tx, userId: string, now: Date): Promise<void> {
+  const [user] = await tx.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
+  await rollOverDue(tx, userId, now, user ? { before: localDate(now, user.tz) } : {});
 }
 
 /** rollOverDue in its own per-user locked transaction (GET /state and the worker). */

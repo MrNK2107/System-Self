@@ -621,3 +621,60 @@ test("ensureRolledOver writes nothing when nothing is due and the schedule is un
   await ensureRolledOver(db!, id, at(addDays(D0, 1), "20:00"));
   assert.equal(await version(), before);
 });
+
+// --- activity inside the grace window rolls the previous dates first -------------------------
+
+/** onboardAtD0, D0 rolled, BODY on a 5-day streak whose last log is D0; D0+1 has no activity. */
+async function streakUserMissingD1() {
+  const { id } = await onboardAtD0();
+  await db!
+    .update(domainScores)
+    .set({ streak: 5, lastLogDate: D0 })
+    .where(and(eq(domainScores.userId, id), eq(domainScores.domain, "BODY")));
+  await addLog(id, D0);
+  await ensureRolledOver(db!, id, at(addDays(D0, 1)));
+  return id;
+}
+
+test("a log at 01:00 (inside the grace window) first rolls the missed day: streak break and penalty", { skip }, async (t) => {
+  const id = await streakUserMissingD1();
+  const d1 = addDays(D0, 1);
+  const d2 = addDays(D0, 2);
+  const disciplineBefore = (await score(id, "DISCIPLINE")).score;
+  t.mock.timers.enable({ apis: ["Date"], now: at(d2, "01:00") });
+  const { token } = await signAccessToken({ id, role: "user", tokenVersion: 0 });
+  const res = await request(app()).post("/api/logs").set(auth(token)).send({ clientId: "early", domain: "BODY", logType: "x" });
+  t.mock.timers.reset();
+  assert.equal(res.status, 201);
+  assert.equal(res.body.log.localDate, d2);
+  assert.equal(res.body.results[0].streak, 1);
+  const breaks = await eventsOf(id, "streak_break");
+  assert.equal(breaks.length, 1);
+  assert.equal(breaks[0]!.localDate, d1);
+  assert.equal((await score(id, "DISCIPLINE")).score, disciplineBefore - 2);
+  const n = await noticesOf(id, "streak_break");
+  assert.deepEqual(n[0]!.payload, { domains: [{ domain: "BODY", lostStreak: 5 }], penalty: 2 });
+  assert.equal((await dayStateOf(id)).lastRolledDate, d1);
+  const [snap] = await db!
+    .select()
+    .from(dailySnapshots)
+    .where(and(eq(dailySnapshots.userId, id), eq(dailySnapshots.localDate, d1)));
+  const body = (await score(id, "BODY")).score;
+  assert.equal(Math.round(((snap!.scores as Record<string, number>).BODY! + 2.5) * 10) / 10, body); // excludes the d2 log
+});
+
+test("a quest completed at 01:00 first rolls the missed day", { skip }, async (t) => {
+  const id = await streakUserMissingD1();
+  const d1 = addDays(D0, 1);
+  const d2 = addDays(D0, 2);
+  const q = await dailyQuest(id, at(d2, "20:00"));
+  t.mock.timers.enable({ apis: ["Date"], now: at(d2, "01:00") });
+  const { token } = await signAccessToken({ id, role: "user", tokenVersion: 0 });
+  const res = await request(app()).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
+  t.mock.timers.reset();
+  assert.equal(res.status, 200);
+  assert.equal((await dayStateOf(id)).lastRolledDate, d1);
+  const breaks = await eventsOf(id, "streak_break");
+  assert.equal(breaks.length, 1);
+  assert.equal(breaks[0]!.localDate, d1);
+});

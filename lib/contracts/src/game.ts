@@ -291,7 +291,7 @@ export const ChainStartResponseSchema = z.object({
   quest: QuestSchema,
 });
 
-/** Unseen notices, oldest first, at most NOTICE_PAGE_SIZE; `hasMore` when older ones are waiting behind them. */
+/** Unseen notices, oldest first, at most NOTICE_PAGE_SIZE; `hasMore` when newer unseen ones are waiting after them. */
 export const NOTICE_PAGE_SIZE = 50;
 export const NoticeListResponseSchema = z.object({ items: z.array(NoticeSchema), hasMore: z.boolean() });
 

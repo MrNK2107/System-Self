@@ -14,7 +14,7 @@ import { QuestRefuseRequestSchema } from "@workspace/contracts";
 import type { AiDeps } from "../lib/ai";
 import { generateQuestsRequestSchema } from "../lib/schemas";
 import { findReplay, readKey, withIdempotency, type HandlerResult } from "../services/idempotency";
-import { rollOverDue } from "../services/rollover";
+import { rollOverBeforeToday } from "../services/rollover";
 import { abandonChain, activeBoard, createQuests, hasActiveChain, toQuestDto } from "../services/quests";
 import { applyChanges, insertNotice } from "../services/scoring";
 import { withUserLock, type Tx } from "../services/user-lock";
@@ -100,7 +100,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
     const step1 = await withUserLock(db, userId, async (tx): Promise<GenerateStep1> => {
       const replay = await findReplay(tx, userId, readKey(req), GENERATE_ROUTE);
       if (replay) return { kind: "done", result: replay };
-      await rollOverDue(tx, userId, now);
+      await rollOverBeforeToday(tx, userId, now);
       const ctx = await buildUserContext(tx, userId, now);
       if (!ctx) return { kind: "done", result: { status: 409, body: { error: "Onboarding required", code: "not_onboarded" } } };
       const [batch] = await tx
@@ -126,7 +126,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
     await withIdempotency(db, req, res, GENERATE_ROUTE, async (tx) => {
       // The model call may have run past midnight: date the batch and expiries from a fresh clock.
       const at = new Date();
-      await rollOverDue(tx, userId, at);
+      await rollOverBeforeToday(tx, userId, at);
       const tz = (await userTimezone(tx, userId)) ?? ctx.timezone;
       const today = localDate(at, tz);
       const [batch] = await tx
@@ -183,7 +183,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
     }
     await withIdempotency(db, req, res, `POST /quests/${questId}/complete`, async (tx) => {
       const now = new Date();
-      await rollOverDue(tx, userId, now); // roll missed dates before this write lands
+      await rollOverBeforeToday(tx, userId, now); // roll every date before today before this write lands
       const [quest] = await tx
         .select()
         .from(quests)
@@ -260,7 +260,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
     }
     await withIdempotency(db, req, res, `POST /quests/${questId}/refuse`, async (tx) => {
       const now = new Date();
-      await rollOverDue(tx, userId, now); // roll missed dates before this write lands
+      await rollOverBeforeToday(tx, userId, now); // roll every date before today before this write lands
       const [quest] = await tx
         .select()
         .from(quests)
