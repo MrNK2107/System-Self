@@ -46,7 +46,6 @@ export function logsRoutes(db: Db): IRouter {
 
     await withIdempotency(db, req, res, "POST /logs", async (tx) => {
       const now = new Date();
-      await rollOverDue(tx, userId, now); // roll missed dates before this write lands
       const occurredAt = body.occurredAt ? new Date(body.occurredAt) : now;
       if (now.getTime() - occurredAt.getTime() > RETROACTIVE_LIMIT_MS) {
         return { status: 422, body: { error: "Log is too old", code: "retroactive_limit" } };
@@ -58,6 +57,11 @@ export function logsRoutes(db: Db): IRouter {
       const [user] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
       const [profile] = await tx.select({ id: profiles.userId }).from(profiles).where(eq(profiles.userId, userId));
       if (!user || !profile) return { status: 409, body: { error: "Not onboarded", code: "not_onboarded" } };
+      const today = localDate(now, user.timezone);
+      const logDate = localDate(occurredAt, user.timezone);
+      // Roll only the dates before the log's own date, so an offline log synced after midnight still
+      // counts for its date's streak and decay; the remaining due dates roll after it is applied.
+      await rollOverDue(tx, userId, now, { before: logDate });
 
       const [dup] = await tx
         .select({ id: logs.id })
@@ -68,8 +72,6 @@ export function logsRoutes(db: Db): IRouter {
         return { status: 409, body: { error: "clientId already used for a log", code: "duplicate_client_id" } };
       }
 
-      const today = localDate(now, user.timezone);
-      const logDate = localDate(occurredAt, user.timezone);
       const forbidden = body.forbidden ?? false;
       const [log] = await tx
         .insert(logs)
@@ -94,6 +96,7 @@ export function logsRoutes(db: Db): IRouter {
         refId: log!.id,
       }));
       const { results, notices } = await applyChanges(tx, userId, changes, { localDate: logDate, now });
+      await rollOverDue(tx, userId, now);
       return { status: 201, body: { log: toLogDto(log!), results, notices } };
     });
   });

@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm";
 import { dailySnapshots, domainScores, profiles, scoreEvents, userDayState, users, type Db } from "@workspace/db";
 import {
   RANKED_DOMAINS,
-  endOfLocalDay,
   generateCodename,
   hiddenScore,
   localDate,
@@ -11,6 +10,7 @@ import {
 } from "@workspace/engine";
 import { OnboardingRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
+import { rolloverDueAt } from "../services/rollover";
 import { buildGameState } from "../services/state";
 
 export function onboardingRoutes(db: Db): IRouter {
@@ -65,7 +65,7 @@ export function onboardingRoutes(db: Db): IRouter {
             createdAt: now,
           })),
         );
-        await tx.insert(userDayState).values({ userId, nextRolloverAt: endOfLocalDay(today, body.timezone) });
+        await tx.insert(userDayState).values({ userId, nextRolloverAt: rolloverDueAt(today, body.timezone) });
         await tx.insert(dailySnapshots).values({
           userId,
           localDate: today,

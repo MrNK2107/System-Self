@@ -234,13 +234,14 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
     const userId = req.user!.id;
     await withIdempotency(db, req, res, `POST /gym/sessions/${sessionId}/complete`, async (tx) => {
       const now = clock();
-      await rollOverDue(tx, userId, now); // roll missed dates before this write lands
+      const today = localDate(now, await userTimezone(tx, userId));
+      // Like POST /logs: roll the dates before the session's log date, apply it, then roll the rest.
+      await rollOverDue(tx, userId, now, { before: today });
       const session = await ownSession(tx, userId, sessionId);
       if (!session) return notFound("Session");
       if (session.completedAt) {
         return { status: 409, body: { error: "Session already completed", code: "already_completed" } };
       }
-      const today = localDate(now, await userTimezone(tx, userId));
 
       // The plan day is picked by the weekday of the session's own local date.
       const weekday = weekdayOf(session.localDate);
@@ -305,6 +306,7 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
         results = applied.results;
         notices = applied.notices;
       }
+      await rollOverDue(tx, userId, now);
       return {
         status: 200,
         body: {

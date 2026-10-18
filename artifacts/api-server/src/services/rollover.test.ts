@@ -356,9 +356,12 @@ test("user_day_state without a profile is pushed back a day instead of re-leased
   assert.equal(uds!.lastRolledDate, null);
 });
 
-test("POST /logs catches up missed dates first: streak break applied, earlier snapshots exclude the new log", { skip }, async () => {
+test("POST /logs catches up missed dates first: streak break applied, earlier snapshots exclude the new log", { skip }, async (t) => {
   const a = app();
-  const { token, id } = await setup(a);
+  const { id } = await setup(a);
+  // Noon local, so yesterday is past its rollover grace window whatever the real clock says.
+  t.mock.timers.enable({ apis: ["Date"], now: at(addDays(localDate(new Date(), TZ), 1)) });
+  const { token } = await signAccessToken({ id, role: "user", tokenVersion: 0 });
   const today = localDate(new Date(), TZ);
   const d0 = addDays(today, -4);
   await db!.update(profiles).set({ onboardedAt: at(d0, "09:00") }).where(eq(profiles.userId, id));
@@ -370,6 +373,7 @@ test("POST /logs catches up missed dates first: streak break applied, earlier sn
   await addLog(id, d0);
 
   const res = await request(a).post("/api/logs").set(auth(token)).send({ clientId: "late", domain: "BODY", logType: "x" });
+  t.mock.timers.reset();
   assert.equal(res.status, 201);
   assert.equal(res.body.results[0].streak, 1); // broken on d0+1, restarted today
 
@@ -409,7 +413,7 @@ test("catch-up after 10 days processes 10 dates in order", { skip }, async () =>
   assert.equal(new Set(dates).size, 9); // D0+1 .. D0+9 (D0 is k = 1)
   const [uds] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
   assert.equal(uds!.lastRolledDate, addDays(D0, 9));
-  assert.equal(uds!.nextRolloverAt.getTime(), endOfLocalDay(addDays(D0, 10), TZ).getTime());
+  assert.equal(uds!.nextRolloverAt.getTime(), endOfLocalDay(addDays(D0, 10), TZ).getTime() + GRACE_MS);
 });
 
 test("catch-up over 30 days collapses older days into one decay step", { skip }, async () => {
@@ -440,7 +444,7 @@ test("two concurrent runWorkerTick calls never process the same user twice", { s
     assert.equal((await eventsOf(id, "quest_failed")).length, 1);
     const [uds] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
     assert.equal(uds!.lastRolledDate, D0);
-    assert.equal(uds!.nextRolloverAt.getTime(), endOfLocalDay(addDays(D0, 1), TZ).getTime());
+    assert.equal(uds!.nextRolloverAt.getTime(), endOfLocalDay(addDays(D0, 1), TZ).getTime() + GRACE_MS);
   }
   // Nothing is due any more.
   assert.deepEqual(await claimDueUsers(db!, 10, now), []);
@@ -468,7 +472,7 @@ test("PATCH /auth/me timezone recomputes nextRolloverAt", { skip }, async (t) =>
   t.mock.timers.reset();
   assert.equal(res.status, 200);
   const [uds] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
-  assert.equal(uds!.nextRolloverAt.toISOString(), "2026-10-21T04:00:00.000Z"); // NY midnight (EDT)
+  assert.equal(uds!.nextRolloverAt.toISOString(), "2026-10-21T06:00:00.000Z"); // NY midnight (EDT) + 2h grace
 });
 
 test("aborted worker: tick releases unprocessed claims and runLoop exits without waiting a full tick", { skip }, async () => {
@@ -499,4 +503,78 @@ test("runLoop re-ticks immediately after a full batch instead of sleeping", { sk
   controller.abort();
   await loop;
   assert.equal(await rolled(), 3, "all 3 users rolled within one tick interval (batch size 1)");
+});
+
+// --- rollover grace (2h after local midnight) ------------------------------------------------
+
+const GRACE_MS = 2 * 3600_000;
+const dayStateOf = async (userId: string) =>
+  (await db!.select().from(userDayState).where(eq(userDayState.userId, userId)))[0]!;
+
+test("rollover grace: a worker tick at 00:30 does not roll the previous date; one at 02:01 does", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  const d1 = addDays(D0, 1);
+  await runWorkerTick(db!, at(d1, "00:30"));
+  let uds = await dayStateOf(id);
+  assert.equal(uds.lastRolledDate, null);
+  assert.equal(uds.nextRolloverAt.getTime(), endOfLocalDay(D0, TZ).getTime() + GRACE_MS);
+  assert.deepEqual(await claimDueUsers(db!, 10, at(d1, "01:59")), []);
+
+  await runWorkerTick(db!, at(d1, "02:01"));
+  uds = await dayStateOf(id);
+  assert.equal(uds.lastRolledDate, D0);
+  assert.equal(uds.nextRolloverAt.getTime(), endOfLocalDay(d1, TZ).getTime() + GRACE_MS);
+});
+
+/** onboardAtD0 + D0 rolled, BODY on a 2-day streak ending D0, and a token valid at the mocked clock. */
+async function streakUserRolledThroughD0() {
+  const { id } = await onboardAtD0();
+  await db!
+    .update(domainScores)
+    .set({ streak: 2, lastLogDate: D0 })
+    .where(and(eq(domainScores.userId, id), eq(domainScores.domain, "BODY")));
+  await addLog(id, D0);
+  await ensureRolledOver(db!, id, at(addDays(D0, 1)));
+  assert.equal((await dayStateOf(id)).lastRolledDate, D0);
+  return id;
+}
+
+test("offline log from 23:50 the day before, synced at 00:05: no streak break, streak +1", { skip }, async (t) => {
+  const id = await streakUserRolledThroughD0();
+  const d1 = addDays(D0, 1);
+  t.mock.timers.enable({ apis: ["Date"], now: at(addDays(D0, 2), "00:05") });
+  const { token } = await signAccessToken({ id, role: "user", tokenVersion: 0 });
+  const res = await request(app())
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "offline", domain: "BODY", logType: "x", occurredAt: `${d1}T23:50:00+05:30` });
+  t.mock.timers.reset();
+  assert.equal(res.status, 201);
+  assert.equal(res.body.log.localDate, d1);
+  assert.equal(res.body.results[0].streak, 3);
+  assert.equal((await eventsOf(id, "streak_break")).length, 0);
+  assert.equal((await dayStateOf(id)).lastRolledDate, D0); // d1 is still inside its grace window
+});
+
+test("POST /logs rolls dates before the log's date, applies it, then rolls the rest", { skip }, async (t) => {
+  const id = await streakUserRolledThroughD0();
+  const d1 = addDays(D0, 1);
+  // 02:30 on d1+1: d1 is due but not rolled yet (no worker ran); the log belongs to d1.
+  t.mock.timers.enable({ apis: ["Date"], now: at(addDays(D0, 2), "02:30") });
+  const { token } = await signAccessToken({ id, role: "user", tokenVersion: 0 });
+  const res = await request(app())
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "offline-2", domain: "BODY", logType: "x", occurredAt: `${d1}T23:50:00+05:30` });
+  t.mock.timers.reset();
+  assert.equal(res.status, 201);
+  assert.equal(res.body.results[0].streak, 3);
+  assert.equal((await eventsOf(id, "streak_break")).length, 0);
+  assert.equal((await eventsOf(id, "decay")).length, 0);
+  assert.equal((await dayStateOf(id)).lastRolledDate, d1);
+  const [snap] = await db!
+    .select()
+    .from(dailySnapshots)
+    .where(and(eq(dailySnapshots.userId, id), eq(dailySnapshots.localDate, d1)));
+  assert.equal((snap!.scores as Record<string, number>).BODY, (await score(id, "BODY")).score); // includes the log
 });
