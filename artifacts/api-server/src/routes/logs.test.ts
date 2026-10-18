@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { domainScores, scoreEvents } from "@workspace/db";
+import { domainScores, idempotencyKeys, scoreEvents } from "@workspace/db";
 import { localDate } from "@workspace/engine";
 import { GameStateSchema, LogListResponseSchema, LogResponseSchema, NoticeListResponseSchema } from "@workspace/contracts";
 import { app, auth, db, score, setup, skip, TZ, assertContract, assertStoredNoticesMatchContract } from "./game-test-helpers";
@@ -179,4 +179,33 @@ test("GET /state lists unlocked achievements and milestones", { skip }, async ()
     state.milestones.map(({ domain, tier }) => ({ domain, tier })),
     [{ domain: "BODY", tier: 60 }],
   );
+});
+
+test("same clientId with a different or absent Idempotency-Key replays the log with 200", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const send = (key?: string) => {
+    const r = request(a).post("/api/logs").set(auth(token));
+    if (key) r.set("Idempotency-Key", key);
+    return r.send({ clientId: "retry", domain: "MIND", logType: "read" });
+  };
+  const first = await send("k-1");
+  const second = await send("k-2");
+  const third = await send();
+  assert.equal(first.status, 201);
+  assert.equal(second.status, 200);
+  assert.equal(third.status, 200);
+  assert.equal(second.body.log.id, first.body.log.id);
+  assert.equal(third.body.log.id, first.body.log.id);
+  const evs = await db!.select().from(scoreEvents).where(and(eq(scoreEvents.userId, id), eq(scoreEvents.reason, "log")));
+  assert.equal(evs.length, 1);
+
+  // Once the stored response is pruned, the stored log comes back with no new score changes.
+  await db!.delete(idempotencyKeys).where(eq(idempotencyKeys.userId, id));
+  const late = await send("k-3");
+  assert.equal(late.status, 200);
+  assertContract(LogResponseSchema, late.body);
+  assert.equal(late.body.log.id, first.body.log.id);
+  assert.deepEqual([late.body.results, late.body.notices], [[], []]);
+  assert.equal((await db!.select().from(scoreEvents).where(and(eq(scoreEvents.userId, id), eq(scoreEvents.reason, "log")))).length, 1);
 });

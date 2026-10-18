@@ -63,14 +63,14 @@ export function logsRoutes(db: Db): IRouter {
       // counts for its date's streak and decay; the remaining due dates roll after it is applied.
       await rollOverDue(tx, userId, now, { before: logDate });
 
+      // The clientId is the idempotency key, so a stored response replays above. Once that has been
+      // pruned, a retry gets the stored log back without applying it again.
       const [dup] = await tx
-        .select({ id: logs.id })
+        .select()
         .from(logs)
         .where(and(eq(logs.userId, userId), eq(logs.clientId, body.clientId)))
         .limit(1);
-      if (dup) {
-        return { status: 409, body: { error: "clientId already used for a log", code: "duplicate_client_id" } };
-      }
+      if (dup) return { status: 200, body: { log: toLogDto(dup), results: [], notices: [] } };
 
       const forbidden = body.forbidden ?? false;
       const [log] = await tx
@@ -98,7 +98,7 @@ export function logsRoutes(db: Db): IRouter {
       const { results, notices } = await applyChanges(tx, userId, changes, { localDate: logDate, now });
       await rollOverDue(tx, userId, now);
       return { status: 201, body: { log: toLogDto(log!), results, notices } };
-    });
+    }, { preferClientId: true });
   });
 
   router.get("/logs", async (req, res) => {

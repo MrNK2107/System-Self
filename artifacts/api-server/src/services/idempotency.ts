@@ -8,12 +8,18 @@ export interface HandlerResult {
   body: unknown;
 }
 
-export function readKey(req: Request): string | null {
-  const header = req.get("Idempotency-Key");
-  if (header && header.trim()) return header.trim().slice(0, 200);
-  const clientId = (req.body as { clientId?: unknown } | undefined)?.clientId;
-  if (typeof clientId === "string" && clientId.trim()) return clientId.trim().slice(0, 200);
-  return null;
+export interface KeyOptions {
+  /** Use the body's `clientId` ahead of the Idempotency-Key header (routes whose clientId names the record). */
+  preferClientId?: boolean;
+}
+
+/** The request's idempotency key: the Idempotency-Key header, else the body's `clientId` (or the reverse). */
+export function readKey(req: Request, opts: KeyOptions = {}): string | null {
+  const header = req.get("Idempotency-Key")?.trim() || null;
+  const raw = (req.body as { clientId?: unknown } | undefined)?.clientId;
+  const clientId = typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  const key = opts.preferClientId ? (clientId ?? header) : (header ?? clientId);
+  return key ? key.slice(0, 200) : null;
 }
 
 /** The stored result for this key on this route (replayed with 200), a 409 on cross-route reuse, else null. */
@@ -44,6 +50,8 @@ export async function findReplay(
  * key insert share one transaction, so concurrent same-key requests cannot both apply and a crash cannot
  * lose the key. With an `Idempotency-Key` header (or `clientId` body field) a successful (2xx) result is
  * stored and replayed with 200 on a repeat. Error results are not stored. Requires req.user.
+ * With `preferClientId`, a body `clientId` is the key even when a header is sent, so a retry of the same
+ * record with a fresh header still replays.
  * Handlers must do all their writes on the given tx.
  */
 export async function withIdempotency(
@@ -52,9 +60,10 @@ export async function withIdempotency(
   res: Response,
   routeKey: string,
   handler: (tx: Tx) => Promise<HandlerResult>,
+  opts: KeyOptions = {},
 ): Promise<void> {
   const userId = req.user!.id;
-  const key = readKey(req);
+  const key = readKey(req, opts);
   const out = await withUserLock(db, userId, async (tx): Promise<HandlerResult> => {
     const replay = await findReplay(tx, userId, key, routeKey);
     if (replay) return replay;

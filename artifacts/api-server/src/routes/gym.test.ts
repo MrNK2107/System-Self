@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { bodyPartScores, logs, personalRecords, workoutSessions } from "@workspace/db";
+import { bodyPartScores, logs, performedSets, personalRecords, workoutSessions } from "@workspace/db";
 import { addDays, localDate } from "@workspace/engine";
 import {
   GymResponseSchema,
@@ -247,4 +247,28 @@ test("sets validate input and ownership; sessions replay by clientId", { skip },
   const s1 = await set(alice.token, { exerciseId: "ex_squat", reps: 1, weight: 1, completed: true });
   assert.equal(s0.body.setIndex, 0);
   assert.equal(s1.body.setIndex, 1);
+});
+
+test("session and set create replay by clientId even with a different Idempotency-Key", { skip }, async () => {
+  const a = app();
+  const { token } = await setup(a);
+  const session = (key: string) =>
+    request(a).post("/api/gym/sessions").set(auth(token)).set("Idempotency-Key", key).send({ clientId: "sess-1" });
+  const s1 = await session("h-1");
+  const s2 = await session("h-2");
+  assert.equal(s1.status, 201);
+  assert.equal(s2.status, 200);
+  assert.equal(s2.body.id, s1.body.id);
+  const set = (key: string) =>
+    request(a)
+      .post(`/api/gym/sessions/${s1.body.id}/sets`)
+      .set(auth(token))
+      .set("Idempotency-Key", key)
+      .send({ clientId: "set-1", exerciseId: "ex_squat", reps: 5, weight: 100, completed: true });
+  const t1 = await set("h-3");
+  const t2 = await set("h-4");
+  assert.equal(t1.status, 201);
+  assert.equal(t2.status, 200);
+  assert.equal(t2.body.id, t1.body.id);
+  assert.equal((await db!.select().from(performedSets).where(eq(performedSets.sessionId, s1.body.id))).length, 1);
 });

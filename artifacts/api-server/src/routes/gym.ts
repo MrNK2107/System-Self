@@ -164,21 +164,20 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
           .limit(1);
         planId = active?.id ?? null;
       }
+      // The clientId is the idempotency key; once its stored response is pruned, return the session.
       const [dup] = await tx
-        .select({ id: workoutSessions.id })
+        .select()
         .from(workoutSessions)
         .where(and(eq(workoutSessions.userId, userId), eq(workoutSessions.clientId, body.clientId)))
         .limit(1);
-      if (dup) {
-        return { status: 409, body: { error: "clientId already used for a session", code: "duplicate_client_id" } };
-      }
+      if (dup) return { status: 200, body: toSessionDto(dup) };
       const tz = await userTimezone(tx, userId);
       const [session] = await tx
         .insert(workoutSessions)
         .values({ userId, planId, startedAt: now, localDate: localDate(now, tz), clientId: body.clientId })
         .returning();
       return { status: 201, body: toSessionDto(session!) };
-    });
+    }, { preferClientId: true });
   });
 
   router.post("/gym/sessions/:id/sets", async (req, res) => {
@@ -225,7 +224,7 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
           completed: set!.completed,
         },
       };
-    });
+    }, { preferClientId: true });
   });
 
   router.post("/gym/sessions/:id/complete", async (req, res) => {
