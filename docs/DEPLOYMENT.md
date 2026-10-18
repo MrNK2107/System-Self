@@ -6,13 +6,14 @@ Source of truth: `artifacts/api-server/src/lib/env.ts` (template: `artifacts/api
 Required in production:
 - `NODE_ENV=production`
 - `DATABASE_URL=postgres://<user>:<password>@<host>:5432/<db>`
-- `JWT_SECRET=<random, at least 32 chars>` (startup fails in production if unset or left at the dev default; generate with `openssl rand -base64 48`)
+- `JWT_SECRET=<random, at least 32 chars>` (generate with `openssl rand -base64 48`). The built-in dev secret is used only when `NODE_ENV` is explicitly `development` or `test`; in every other case (including an unset `NODE_ENV`) startup fails unless `JWT_SECRET` is set, and any value containing `change-me` (such as the `.env.example` placeholder) is rejected.
+- `RESEND_API_KEY=...` and `MAIL_FROM="SYSTEM // SELF <no-reply@your-domain>"`. Startup fails without `RESEND_API_KEY` unless `MAILER=log` is set explicitly; the log mailer then writes mails to the logs with every 6-digit code replaced by `******` (codes are shown only when `NODE_ENV` is `development` or `test`), so users cannot verify email or reset passwords in that mode.
+- `TRUST_PROXY=<hops>` when the API runs behind a reverse proxy or load balancer (see below).
 
 Recommended:
 - `PORT=3001`
 - `CORS_ORIGIN=https://your-app-domain.com` (comma-separated allowlist; unset means `*`)
 - `GEMINI_API_KEY=...` (without it, or when Gemini fails after retries and the fallback model, the API serves template output with `meta.model = "template"`)
-- `RESEND_API_KEY=...` and `MAIL_FROM="SYSTEM // SELF <no-reply@your-domain>"` (without a key a log mailer prints verification and reset codes to the logs)
 
 Optional tuning (defaults shown):
 - `ACCESS_TOKEN_TTL_SEC=900`
@@ -24,6 +25,9 @@ Optional tuning (defaults shown):
 - `RATE_LIMIT_WINDOW_MS=60000`
 - `RATE_LIMIT_MAX=60`
 - `LOG_LEVEL=info` (defaults to `silent` when `NODE_ENV=test`)
+
+### Reverse proxies (`TRUST_PROXY`)
+Rate limits are keyed by client IP. Behind a proxy (Render, Fly, Nginx, a cloud load balancer) every request arrives from the proxy's IP, so all clients would share one bucket and the auth limiters would lock everyone out together. Set `TRUST_PROXY` to the number of proxy hops in front of the API (usually `1`) so Express takes the client IP from `X-Forwarded-For`. Accepted values: unset or `false` (default, direct exposure; `X-Forwarded-For` is ignored), an integer hop count, or `true` (trust every hop; only when the network guarantees clients cannot reach the API directly, because clients can then forge `X-Forwarded-For`). Never set it when the API is exposed directly. `/api/healthz` and `/api/readyz` are exempt from the global rate limiter so health probes are never throttled.
 
 The static-token variables (`AUTH_ENABLED`, `API_AUTH_TOKENS`, `API_AUTH_REVOKED_TOKENS`, `ADMIN_API_TOKENS`, `AUTH_ROTATION_WARNING_DAYS`) no longer exist and are ignored.
 

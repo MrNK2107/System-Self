@@ -1,9 +1,25 @@
 import { z } from "zod";
 
+// Public, insecure secret used only when NODE_ENV is explicitly "development" or "test".
 const DEV_JWT_SECRET = "dev-insecure-secret-change-me-0123456789";
+// Public placeholder values that must never sign production tokens (keep in sync with .env.example).
+const PUBLIC_JWT_SECRETS = new Set([DEV_JWT_SECRET, "dev-only-secret-change-me-at-least-32-characters"]);
+
+const trustProxy = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v, ctx): boolean | number => {
+    if (v === undefined || v === "" || v === "false") return false;
+    if (v === "true") return true;
+    if (/^\d+$/.test(v)) return Number(v);
+    ctx.addIssue({ code: "custom", message: 'TRUST_PROXY must be "true", "false" or a hop count' });
+    return z.NEVER;
+  });
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  // No default: an unset NODE_ENV is treated as production-like for secrets and mail.
+  NODE_ENV: z.enum(["development", "test", "production"]).optional(),
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   GEMINI_API_KEY: z.string().min(1).optional(),
   GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
@@ -13,19 +29,51 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().optional(),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  TRUST_PROXY: trustProxy,
+  MAILER: z.enum(["log", "resend"]).optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
   MAIL_FROM: z.string().min(1).default("SYSTEM // SELF <no-reply@systemself.app>"),
   DATABASE_URL: z.string().min(1).optional(),
-  JWT_SECRET: z.string().min(32).default(DEV_JWT_SECRET),
+  JWT_SECRET: z.string().min(32).optional(),
   ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().min(1).default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(30),
-}).superRefine((v, ctx) => {
-  if (v.NODE_ENV === "production" && v.JWT_SECRET === DEV_JWT_SECRET) {
-    ctx.addIssue({ code: "custom", path: ["JWT_SECRET"], message: "JWT_SECRET must be set in production" });
-  }
 });
 
-export const env = envSchema.parse(process.env);
+export type Env = Omit<z.infer<typeof envSchema>, "JWT_SECRET"> & { JWT_SECRET: string };
+
+export function isDevOrTest(nodeEnv: string | undefined): boolean {
+  return nodeEnv === "development" || nodeEnv === "test";
+}
+
+/** Pure: validates an environment source. Throws a ZodError naming the offending variable. */
+export function parseEnv(source: NodeJS.ProcessEnv): Env {
+  return envSchema
+    .superRefine((v, ctx) => {
+      const relaxed = isDevOrTest(v.NODE_ENV);
+      if (!relaxed) {
+        if (!v.JWT_SECRET) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["JWT_SECRET"],
+            message: "JWT_SECRET is required unless NODE_ENV is development or test",
+          });
+        } else if (/change-me/i.test(v.JWT_SECRET) || PUBLIC_JWT_SECRETS.has(v.JWT_SECRET)) {
+          ctx.addIssue({ code: "custom", path: ["JWT_SECRET"], message: "JWT_SECRET is a public placeholder" });
+        }
+        if (!v.RESEND_API_KEY && v.MAILER !== "log") {
+          ctx.addIssue({
+            code: "custom",
+            path: ["RESEND_API_KEY"],
+            message: "RESEND_API_KEY is required outside development/test (or set MAILER=log explicitly)",
+          });
+        }
+      }
+    })
+    .transform((v): Env => ({ ...v, JWT_SECRET: v.JWT_SECRET ?? DEV_JWT_SECRET }))
+    .parse(source);
+}
+
+export const env = parseEnv(process.env);
 
 export function resolveCorsOrigins() {
   if (!env.CORS_ORIGIN) {
