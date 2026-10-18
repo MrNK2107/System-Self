@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { generateQuestsResponseSchema, generatedQuestsPayloadSchema } from "./schemas";
 import {
   MESSAGE_TYPES,
-  generateQuestsResponseSchema,
-  generatedQuestsPayloadSchema,
-  systemMessageRequestSchema,
-  systemMessageResponseSchema,
-} from "./schemas";
-import { NOTICE_KINDS, NoticeSchema } from "@workspace/contracts";
+  MessageRequestSchema as systemMessageRequestSchema,
+  MessageResponseSchema as systemMessageResponseSchema,
+  NOTICE_KINDS,
+  NoticeSchema,
+} from "@workspace/contracts";
 
 test("systemMessageRequestSchema accepts every message type and bounds extraContext", () => {
   assert.equal(MESSAGE_TYPES.length, 15);

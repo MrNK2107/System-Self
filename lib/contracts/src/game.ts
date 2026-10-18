@@ -335,3 +335,146 @@ export const SetCreateRequestSchema = z.object({
 });
 
 export const SessionCompleteRequestSchema = z.object({ clientId: ClientIdSchema.optional() });
+
+export const ExerciseSchema = z.object({
+  id: z.string(),
+  userId: z.string().nullable(),
+  name: z.string(),
+  primaryBodyPart: z.string(),
+  secondaryBodyParts: z.array(z.string()),
+  isBig5: z.boolean(),
+});
+
+export const PlanSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  goal: z.string(),
+  days: z.array(PlanDaySchema),
+  isActive: z.boolean(),
+  createdAt: z.string(),
+});
+export type GymPlan = z.infer<typeof PlanSchema>;
+
+export const SessionSchema = z.object({
+  id: z.string(),
+  planId: z.string().nullable(),
+  clientId: z.string(),
+  localDate: z.string(),
+  startedAt: z.string(),
+  completedAt: z.string().nullable(),
+  points: z.number(),
+});
+export type GymSession = z.infer<typeof SessionSchema>;
+
+export const SetSchema = z.object({
+  id: z.number().int(),
+  sessionId: z.string(),
+  exerciseId: z.string(),
+  setIndex: z.number().int(),
+  reps: z.number().int(),
+  weight: z.number(),
+  completed: z.boolean(),
+});
+export type GymSet = z.infer<typeof SetSchema>;
+
+export const PersonalRecordSchema = z.object({
+  exerciseId: z.string(),
+  value: z.number(),
+  reps: z.number().int(),
+  weight: z.number(),
+  achievedAt: z.string(),
+});
+
+export const GymResponseSchema = z.object({
+  exercises: z.array(ExerciseSchema),
+  plans: z.array(PlanSchema),
+  activePlanId: z.string().nullable(),
+  recentSessions: z.array(SessionSchema),
+  personalRecords: z.array(PersonalRecordSchema),
+  bodyPartScores: z.array(z.object({ bodyPart: z.string(), points: z.number(), updatedAt: z.string() })),
+});
+
+export const SessionCompleteResponseSchema = z.object({
+  session: SessionSchema,
+  points: z.number(),
+  byBodyPart: z.record(z.string(), z.number()),
+  newPrs: z.array(PersonalRecordSchema.extend({ name: z.string(), previous: z.number().nullable() })),
+  results: z.array(ScoreResultSchema),
+  notices: z.array(NoticeSchema),
+});
+
+// --- quest generation, messages, debriefs, recaps --------------------------
+
+export const QuestGenerateResponseSchema = z.object({
+  active: z.array(QuestSchema),
+  generated: z.boolean(),
+});
+
+export const MESSAGE_TYPES = [
+  "morning_briefing",
+  "nightly_debrief",
+  "quest_assignment",
+  "rank_change",
+  "shadow_self",
+  "milestone",
+  "failure_response",
+  "streak_break",
+  "shadow_confrontation",
+  "rival_taunt",
+  "chain_complete",
+  "domain_milestone",
+  "forbidden_log",
+  "rank_up_prep",
+  "weekly_debrief",
+] as const;
+export const MessageTypeSchema = z.enum(MESSAGE_TYPES);
+export type MessageType = z.infer<typeof MessageTypeSchema>;
+
+/** The server builds all context itself; the client only names the message and may add a short note. */
+export const MessageRequestSchema = z.object({
+  type: MessageTypeSchema,
+  extraContext: z.string().max(500).optional(),
+  clientId: ClientIdSchema.optional(),
+});
+
+export const AiMetaSchema = z.object({
+  promptVersion: z.string().min(1),
+  model: z.string().min(1),
+  attempts: z.number().int().min(1),
+});
+
+export const MessageResponseSchema = z.object({ message: z.string(), meta: AiMetaSchema });
+
+export const DebriefSchema = z.object({
+  date: z.string(),
+  deltas: ScoresRecordSchema,
+  questCompleted: z.number().int(),
+  questTotal: z.number().int(),
+  verdict: z.enum(["ACCEPTABLE", "INSUFFICIENT", "PATHETIC"]),
+  text: z.string(),
+  acknowledged: z.boolean(),
+});
+
+export const DebriefTodayResponseSchema = z.discriminatedUnion("available", [
+  z.object({ available: z.literal(false), availableAt: z.string() }),
+  z.object({ available: z.literal(true), debrief: DebriefSchema }),
+]);
+
+export const WeeklyRecapSchema = z.object({
+  weekStart: z.string(),
+  domainDeltas: ScoresRecordSchema,
+  questsCompleted: z.number().int(),
+  questsFailed: z.number().int(),
+  questsRefused: z.number().int(),
+  logsCount: z.number().int(),
+  forbiddenLogs: z.number().int(),
+  peakDomain: RankedDomainSchema.nullable(),
+  chainsCompleted: z.number().int(),
+  achievementsUnlocked: z.number().int(),
+});
+
+export const WeeklyDebriefResponseSchema = z.object({
+  weekStart: z.string(),
+  debrief: z.string(),
+  meta: AiMetaSchema,
+});

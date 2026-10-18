@@ -7,6 +7,7 @@ import { dailySnapshots, profiles, scoreEvents, shadowSelves, userDayState, user
 import { GameStateSchema } from "@workspace/contracts";
 import { createApp } from "../app-factory";
 import type { Mailer } from "../lib/mailer";
+import { assertContract } from "./game-test-helpers";
 
 const db = getTestDb();
 const skip = db ? false : "TEST_DATABASE_URL not set";
@@ -58,7 +59,7 @@ test("onboarding sets scores rating*4, rank E, no shadow, returns GameState", { 
   const { token, id } = await register(a);
   const res = await request(a).post("/api/onboarding").set("Authorization", `Bearer ${token}`).send(body());
   assert.equal(res.status, 201);
-  const state = GameStateSchema.parse(res.body);
+  const state = assertContract(GameStateSchema, res.body);
   assert.equal(state.profile.rank, "E");
   assert.equal(state.profile.onboarded, true);
   assert.equal(state.profile.dayNumber, 1);
@@ -133,7 +134,7 @@ test("GET /state after onboarding returns GameState and never a hidden key (deep
   const created = await request(a).post("/api/onboarding").set("Authorization", `Bearer ${token}`).send(body());
   const res = await request(a).get("/api/state").set("Authorization", `Bearer ${token}`);
   assert.equal(res.status, 200);
-  GameStateSchema.parse(res.body);
+  assertContract(GameStateSchema, res.body);
   assert.equal(findKey(res.body, "hidden"), false);
   assert.equal(findKey(created.body, "hidden"), false);
   assert.ok(["up", "stable", "down"].includes(res.body.trajectory));

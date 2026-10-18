@@ -4,8 +4,15 @@ import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { notices, questChains, quests } from "@workspace/db";
+import {
+  ChainStartResponseSchema,
+  ChainTemplatesResponseSchema,
+  QuestCompleteResponseSchema,
+  QuestListResponseSchema,
+  QuestRefuseResponseSchema,
+} from "@workspace/contracts";
 import { createQuests } from "../services/quests";
-import { app, auth, db, score, setup, skip, assertStoredNoticesMatchContract } from "./game-test-helpers";
+import { app, auth, db, score, setup, skip, assertContract, assertStoredNoticesMatchContract } from "./game-test-helpers";
 
 after(async () => {
   await closeTestDb();
@@ -37,6 +44,7 @@ test("complete quest gives +3 DISCIPLINE; again is 409", { skip }, async () => {
   const before = (await score(id, "DISCIPLINE")).score;
   const res = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
   assert.equal(res.status, 200);
+  assertContract(QuestCompleteResponseSchema, res.body);
   assert.equal(res.body.quest.status, "complete");
   assert.equal(res.body.results[0].domain, "DISCIPLINE");
   assert.equal(res.body.results[0].actualDelta, 3);
@@ -72,6 +80,7 @@ test("refuse: 1st free, 2nd -1.5, 3rd 409 refusal_limit", { skip }, async () => 
   assert.equal(r1.body.quest.refusalReason, "too tired");
   const r2 = await request(a).post(`/api/quests/${qs[1]!.id}/refuse`).set(auth(token)).send({});
   assert.equal(r2.status, 200);
+  assertContract(QuestRefuseResponseSchema, r2.body);
   assert.equal(r2.body.penalty, 1.5);
   assert.equal(r2.body.results[0].actualDelta, -1.5);
   const r3 = await request(a).post(`/api/quests/${qs[2]!.id}/refuse`).set(auth(token)).send({});
@@ -92,6 +101,7 @@ test("GET /quests returns active and recently resolved", { skip }, async () => {
   await request(a).post(`/api/quests/${q1.id}/complete`).set(auth(token)).send({});
   const res = await request(a).get("/api/quests").set(auth(token));
   assert.equal(res.status, 200);
+  assertContract(QuestListResponseSchema, res.body);
   assert.deepEqual(res.body.active.map((q: { id: string }) => q.id), [q2.id]);
   assert.deepEqual(res.body.recent.map((q: { id: string }) => q.id), [q1.id]);
 });
@@ -101,12 +111,14 @@ test("chain: start -> step-0 quest; complete steps; chain_complete notice at the
   const { token, id } = await setup(a);
   const tpl = await request(a).get("/api/chains/templates").set(auth(token));
   assert.equal(tpl.status, 200);
+  assertContract(ChainTemplatesResponseSchema, tpl.body);
   assert.equal(tpl.body.templates.length, 4);
   assert.equal(tpl.body.templates[0].templateKey, "physical_protocol");
   assert.deepEqual(tpl.body.active, []);
 
   const start = await request(a).post("/api/chains").set(auth(token)).send({ templateKey: "physical_protocol" });
   assert.equal(start.status, 201);
+  assertContract(ChainStartResponseSchema, start.body);
   assert.equal(start.body.quest.title, "[PHYSICAL PROTOCOL] BASELINE ASSESSMENT");
   assert.equal(start.body.quest.type, "arc");
   assert.equal(start.body.quest.chainStep, 0);
@@ -123,6 +135,7 @@ test("chain: start -> step-0 quest; complete steps; chain_complete notice at the
   for (let step = 0; step < 3; step++) {
     const done = await request(a).post(`/api/quests/${questId}/complete`).set(auth(token)).send({});
     assert.equal(done.status, 200);
+    assertContract(QuestCompleteResponseSchema, done.body);
     const chainRows = await db!.select().from(questChains).where(eq(questChains.userId, id));
     if (step < 2) {
       assert.equal(chainRows[0]!.currentStep, step + 1);

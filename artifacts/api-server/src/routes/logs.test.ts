@@ -5,7 +5,8 @@ import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { scoreEvents } from "@workspace/db";
 import { localDate } from "@workspace/engine";
-import { app, auth, db, score, setup, skip, TZ, assertStoredNoticesMatchContract } from "./game-test-helpers";
+import { LogListResponseSchema, LogResponseSchema, NoticeListResponseSchema } from "@workspace/contracts";
+import { app, auth, db, score, setup, skip, TZ, assertContract, assertStoredNoticesMatchContract } from "./game-test-helpers";
 
 after(async () => {
   await closeTestDb();
@@ -23,6 +24,7 @@ test("log BODY gives +2.5, streak 1 and a first_log achievement notice", { skip 
   const before = (await score(id, "BODY")).score;
   const res = await request(a).post("/api/logs").set(auth(token)).send({ clientId: "c1", domain: "BODY", logType: "workout" });
   assert.equal(res.status, 201);
+  assertContract(LogResponseSchema, res.body);
   assert.equal(res.body.log.domain, "BODY");
   assert.equal(res.body.log.isRetroactive, false);
   assert.equal(res.body.results[0].actualDelta, 2.5);
@@ -128,6 +130,7 @@ test("GET /logs paginates newest first", { skip }, async () => {
   }
   const p1 = await request(a).get("/api/logs?limit=2").set(auth(token));
   assert.equal(p1.status, 200);
+  assertContract(LogListResponseSchema, p1.body);
   assert.deepEqual(p1.body.items.map((l: { clientId: string }) => l.clientId), ["p2", "p1"]);
   assert.ok(p1.body.nextCursor);
   const p2 = await request(a).get(`/api/logs?limit=2&cursor=${encodeURIComponent(p1.body.nextCursor)}`).set(auth(token));
@@ -142,6 +145,7 @@ test("notices seen are not returned again", { skip }, async () => {
   await request(a).post("/api/logs").set(auth(token)).send({ clientId: "n1", domain: "BODY", logType: "x" });
   const list = await request(a).get("/api/notices").set(auth(token));
   assert.equal(list.status, 200);
+  assertContract(NoticeListResponseSchema, list.body);
   assert.ok(list.body.items.length >= 1);
   const ids = list.body.items.map((n: { id: string }) => n.id);
   const seen = await request(a).post("/api/notices/seen").set(auth(token)).send({ ids });

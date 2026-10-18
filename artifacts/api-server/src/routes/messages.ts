@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import type { Db } from "@workspace/db";
 import type { AiDeps } from "../lib/ai";
-import { systemMessageRequestSchema } from "../lib/schemas";
+import { MessageRequestSchema } from "@workspace/contracts";
 import { findReplay, readKey, withIdempotency, type HandlerResult } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
 import { buildWeeklyRecap } from "../services/recap";
@@ -34,7 +34,7 @@ export function messagesRoutes(db: Db, ai: AiDeps): IRouter {
    *     have won - then store and return.
    */
   router.post("/messages", async (req, res) => {
-    const { type, extraContext } = systemMessageRequestSchema.parse(req.body ?? {});
+    const { type, extraContext } = MessageRequestSchema.parse(req.body ?? {});
     const userId = req.user!.id;
     const now = new Date();
 

@@ -5,9 +5,16 @@ import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { dailySnapshots, debriefs, generatedQuestBatches, logs, profiles, quests, scoreEvents, systemMessages } from "@workspace/db";
 import { RANKED_DOMAINS, addDays, debriefVerdict, endOfLocalDay, localDate, type RankedDomain } from "@workspace/engine";
+import {
+  DebriefTodayResponseSchema,
+  MessageResponseSchema,
+  QuestGenerateResponseSchema,
+  WeeklyDebriefResponseSchema,
+  WeeklyRecapSchema,
+} from "@workspace/contracts";
 import { env } from "../lib/env";
 import { createQuests } from "../services/quests";
-import { app, auth, db, score, setup, skip, TZ, assertStoredNoticesMatchContract } from "./game-test-helpers";
+import { app, auth, db, score, setup, skip, TZ, assertContract, assertStoredNoticesMatchContract } from "./game-test-helpers";
 
 after(async () => {
   await closeTestDb();
@@ -38,6 +45,7 @@ test("generate returns 3 dailies + 1 weekly + 1 arc on an empty board, with loca
   const { token } = await setup(a);
   const res = await request(a).post("/api/quests/generate").set(auth(token)).send({});
   assert.equal(res.status, 200);
+  assertContract(QuestGenerateResponseSchema, res.body);
   assert.equal(res.body.generated, true);
   assert.deepEqual(typesOf(res.body.active), ["arc", "daily", "daily", "daily", "weekly"]);
   const t = today();
@@ -139,6 +147,7 @@ test("messages: morning_briefing is cached per day (same text, one AI call)", { 
   const first = await withKey(send);
   const second = await withKey(send);
   assert.equal(first.status, 200);
+  assertContract(MessageResponseSchema, first.body);
   assert.equal(first.body.message, "Call 1. Execute.");
   assert.equal(second.body.message, first.body.message);
   assert.equal(calls, 1);
@@ -188,6 +197,7 @@ test("debrief: unavailable before nightlyTime, available after, verdict matches 
   await setNightly(id, "23:59");
   const early = await request(a).get("/api/debrief/today").set(auth(token));
   assert.equal(early.status, 200);
+  assertContract(DebriefTodayResponseSchema, early.body);
   assert.equal(early.body.available, false);
   assert.ok(Date.parse(early.body.availableAt) > Date.now());
 
@@ -199,6 +209,7 @@ test("debrief: unavailable before nightlyTime, available after, verdict matches 
 
   await setNightly(id, "00:00");
   const res = await request(a).get("/api/debrief/today").set(auth(token));
+  assertContract(DebriefTodayResponseSchema, res.body);
   assert.equal(res.body.available, true);
   const d = res.body.debrief;
   assert.equal(d.date, today());
@@ -267,6 +278,7 @@ test("recap counts only the last 7 local days", { skip }, async () => {
 
   const res = await request(a).get("/api/recap/weekly").set(auth(token));
   assert.equal(res.status, 200);
+  assertContract(WeeklyRecapSchema, res.body);
   assert.equal(res.body.weekStart, addDays(t, -6));
   assert.equal(res.body.domainDeltas.BODY, 5);
   assert.equal(res.body.domainDeltas.MIND, 1);
@@ -283,6 +295,7 @@ test("recap counts only the last 7 local days", { skip }, async () => {
 
   const deb = await request(a).get("/api/recap/weekly/debrief").set(auth(token));
   assert.equal(deb.status, 200);
+  assertContract(WeeklyDebriefResponseSchema, deb.body);
   assert.ok(deb.body.debrief.length > 0);
 });
 
@@ -311,6 +324,7 @@ test("messages: nightly_debrief is the debrief row, so text and verdict match GE
   await setNightly(id, "00:00");
   const msg = await withKey(() => request(a).post("/api/messages").set(auth(token)).send({ type: "nightly_debrief" }));
   assert.equal(msg.status, 200);
+  assertContract(MessageResponseSchema, msg.body);
   const deb = await request(a).get("/api/debrief/today").set(auth(token));
   assert.equal(deb.body.debrief.text, msg.body.message);
   assert.equal(calls, 1);

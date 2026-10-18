@@ -3,7 +3,8 @@ import { logs, quests, users, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, addDays, type RankedDomain } from "@workspace/engine";
 import { generateOrTemplate, type AiDeps } from "../lib/ai";
 import { templateQuests, templateSystemMessage, type TemplateQuest } from "../lib/ai-fallback";
-import { generatedQuestsPayloadSchema, type MessageType } from "../lib/schemas";
+import type { MessageType } from "@workspace/contracts";
+import { generatedQuestsPayloadSchema } from "../lib/schemas";
 import type { WeeklyRecap } from "./recap";
 import { buildGameState } from "./state";
 

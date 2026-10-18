@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MESSAGE_TYPES } from "./schemas";
+import { MESSAGE_TYPES } from "@workspace/contracts";
 import { templateQuests, templateSystemMessage } from "./ai-fallback";
 import { aiAvailable, generateOrTemplate, generateWithFallback } from "./ai";
 import { env } from "./env";

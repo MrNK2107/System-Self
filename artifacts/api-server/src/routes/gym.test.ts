@@ -5,7 +5,14 @@ import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { bodyPartScores, logs, personalRecords, workoutSessions } from "@workspace/db";
 import { addDays, localDate } from "@workspace/engine";
-import { app, auth, db, score, setup, skip, TZ, assertStoredNoticesMatchContract } from "./game-test-helpers";
+import {
+  GymResponseSchema,
+  PlanSchema,
+  SessionCompleteResponseSchema,
+  SessionSchema,
+  SetSchema,
+} from "@workspace/contracts";
+import { app, auth, db, score, setup, skip, TZ, assertContract, assertStoredNoticesMatchContract } from "./game-test-helpers";
 
 after(async () => {
   await closeTestDb();
@@ -30,6 +37,7 @@ const TUE = 2;
 async function startSession(a: ReturnType<typeof app>, token: string, clientId: string) {
   const res = await request(a).post("/api/gym/sessions").set(auth(token)).send({ clientId });
   assert.equal(res.status, 201);
+  assertContract(SessionSchema, res.body);
   return res.body.id as string;
 }
 
@@ -47,6 +55,7 @@ async function addSet(
     .set(auth(token))
     .send({ exerciseId, reps, weight, completed });
   assert.equal(res.status, 201);
+  assertContract(SetSchema, res.body);
   return res.body;
 }
 
@@ -55,6 +64,7 @@ test("first GET creates the default plan", { skip }, async () => {
   const { token } = await setup(a);
   const res = await request(a).get("/api/gym").set(auth(token));
   assert.equal(res.status, 200);
+  assertContract(GymResponseSchema, res.body);
   assert.equal(res.body.plans.length, 1);
   const plan = res.body.plans[0];
   assert.equal(plan.name, "Starter Strength");
@@ -79,6 +89,7 @@ test("complete MON session with all sets -> 17.3 BODY, gym_session log, PR for s
   }
   const res = await request(a).post(`/api/gym/sessions/${sid}/complete`).set(auth(token)).send({});
   assert.equal(res.status, 200);
+  assertContract(SessionCompleteResponseSchema, res.body);
   assert.equal(res.body.points, 17.3);
   assert.equal(res.body.session.points, 17.3);
   assert.ok(res.body.session.completedAt);
@@ -110,6 +121,7 @@ test("complete MON session with all sets -> 17.3 BODY, gym_session log, PR for s
   assert.equal((await score(id, "BODY")).streak, 1);
 
   const get = await request(a).get("/api/gym").set(auth(token));
+  assertContract(GymResponseSchema, get.body);
   assert.equal(get.body.recentSessions.length, 1);
   assert.equal(get.body.bodyPartScores.length, 3);
 });
@@ -192,6 +204,7 @@ test("plans: create validates exercises and limits; PATCH isActive deactivates o
 
   const ok = await request(a).post("/api/gym/plans").set(auth(token)).send({ name: "Mine", goal: "g", days: [day] });
   assert.equal(ok.status, 201);
+  assertContract(PlanSchema, ok.body);
   assert.equal(ok.body.isActive, false);
 
   const patched = await request(a)
@@ -199,6 +212,7 @@ test("plans: create validates exercises and limits; PATCH isActive deactivates o
     .set(auth(token))
     .send({ isActive: true, name: "Mine 2" });
   assert.equal(patched.status, 200);
+  assertContract(PlanSchema, patched.body);
   assert.equal(patched.body.name, "Mine 2");
   const after = await request(a).get("/api/gym").set(auth(token));
   assert.equal(after.body.activePlanId, ok.body.id);
