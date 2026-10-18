@@ -22,14 +22,18 @@ const userIdCol = () =>
     .references(() => users.id, { onDelete: "cascade" });
 
 // Seeded exercises (ex_*, userId null) are inserted by the migration.
-export const exercises = pgTable("exercises", {
-  id: text("id").primaryKey(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  primaryBodyPart: text("primary_body_part").notNull(),
-  secondaryBodyParts: jsonb("secondary_body_parts").$type<string[]>().notNull().default([]),
-  isBig5: boolean("is_big5").notNull().default(false),
-});
+export const exercises = pgTable(
+  "exercises",
+  {
+    id: text("id").primaryKey(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    primaryBodyPart: text("primary_body_part").notNull(),
+    secondaryBodyParts: jsonb("secondary_body_parts").$type<string[]>().notNull().default([]),
+    isBig5: boolean("is_big5").notNull().default(false),
+  },
+  (t) => [index("exercises_user_idx").on(t.userId)],
+);
 
 export interface PlanBlock {
   exerciseId: string;
@@ -43,15 +47,19 @@ export interface PlanDay {
   blocks: PlanBlock[];
 }
 
-export const workoutPlans = pgTable("workout_plans", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: userIdCol(),
-  name: text("name").notNull(),
-  goal: text("goal").notNull(),
-  days: jsonb("days").$type<PlanDay[]>().notNull(),
-  isActive: boolean("is_active").notNull().default(false),
-  createdAt: ts("created_at").defaultNow().notNull(),
-});
+export const workoutPlans = pgTable(
+  "workout_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: userIdCol(),
+    name: text("name").notNull(),
+    goal: text("goal").notNull(),
+    days: jsonb("days").$type<PlanDay[]>().notNull(),
+    isActive: boolean("is_active").notNull().default(false),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("workout_plans_user_idx").on(t.userId)],
+);
 
 export const workoutSessions = pgTable(
   "workout_sessions",

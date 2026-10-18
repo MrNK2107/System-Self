@@ -14,7 +14,7 @@ import { errorHandler, notFoundHandler } from "./middlewares/errors";
 const HEALTH_PATHS = new Set(["/api/healthz", "/api/readyz"]);
 
 export function createApp(
-  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; trustProxy?: boolean | number } = {},
+  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; trustProxy?: boolean | number } = {},
 ): Express {
   const db = deps.db === undefined ? defaultDb : deps.db;
   const mailer = deps.mailer ?? createMailer();
@@ -73,7 +73,7 @@ export function createApp(
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  app.use("/api", createRouter({ db, mailer, ai: deps.ai }));
+  app.use("/api", createRouter({ db, mailer, ai: deps.ai, now: deps.now }));
   app.use(notFoundHandler);
   app.use(errorHandler);
 

@@ -11,7 +11,7 @@ export const db = getTestDb();
 export const skip = db ? false : "TEST_DATABASE_URL not set";
 const mailer: Mailer = { async send() {} };
 
-export const app = (extra: { ai?: AiDeps } = {}) => createApp({ db, mailer, ...extra });
+export const app = (extra: { ai?: AiDeps; now?: () => Date } = {}) => createApp({ db, mailer, ...extra });
 export const TZ = "Asia/Kolkata";
 export const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 

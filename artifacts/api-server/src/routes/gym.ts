@@ -1,0 +1,323 @@
+import { Router, type IRouter } from "express";
+import { and, asc, count, eq, ne, sql } from "drizzle-orm";
+import {
+  bodyPartScores,
+  exercises,
+  logs,
+  performedSets,
+  personalRecords,
+  users,
+  workoutPlans,
+  workoutSessions,
+  type Db,
+} from "@workspace/db";
+import { computeGymPoints, localDate } from "@workspace/engine";
+import {
+  PlanCreateRequestSchema,
+  PlanPatchRequestSchema,
+  SessionCompleteRequestSchema,
+  SessionCreateRequestSchema,
+  SetCreateRequestSchema,
+} from "@workspace/contracts";
+import { withIdempotency, type HandlerResult } from "../services/idempotency";
+import { rollOverDue } from "../services/rollover";
+import { applyChanges } from "../services/scoring";
+import { withUserLock, type Tx } from "../services/user-lock";
+import {
+  applyPersonalRecords,
+  bestBig5Lifts,
+  ensureDefaultPlan,
+  listPlans,
+  planExerciseIds,
+  recentSessions,
+  toPlanDto,
+  toSessionDto,
+  unknownExerciseIds,
+  visibleExercises,
+  weekdayOf,
+} from "../services/gym";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const notFound = (what: string): HandlerResult => ({ status: 404, body: { error: `${what} not found` } });
+const invalidExercise = (ids: string[]): HandlerResult => ({
+  status: 400,
+  body: { error: `Unknown exercise: ${ids.join(", ")}`, code: "invalid_exercise" },
+});
+
+async function userTimezone(tx: Pick<Tx, "select">, userId: string): Promise<string> {
+  const [u] = await tx.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
+  return u!.tz;
+}
+
+/** The user's own session row, or null (also for malformed ids). */
+async function ownSession(tx: Tx, userId: string, id: string) {
+  if (!UUID.test(id)) return null;
+  const [s] = await tx
+    .select()
+    .from(workoutSessions)
+    .where(and(eq(workoutSessions.id, id), eq(workoutSessions.userId, userId)))
+    .limit(1);
+  return s ?? null;
+}
+
+export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter {
+  const router = Router();
+
+  router.get("/gym", async (req, res) => {
+    const userId = req.user!.id;
+    const body = await withUserLock(db, userId, async (tx) => {
+      await ensureDefaultPlan(tx, userId);
+      const plans = await listPlans(tx, userId);
+      const exerciseRows = await tx.select().from(exercises).where(visibleExercises(userId)).orderBy(asc(exercises.id));
+      const sessions = await recentSessions(tx, userId, 20);
+      const prs = await tx.select().from(personalRecords).where(eq(personalRecords.userId, userId));
+      const parts = await tx.select().from(bodyPartScores).where(eq(bodyPartScores.userId, userId));
+      return {
+        exercises: exerciseRows,
+        plans: plans.map(toPlanDto),
+        activePlanId: plans.find((p) => p.isActive)?.id ?? null,
+        recentSessions: sessions.map(toSessionDto),
+        personalRecords: prs.map((r) => ({
+          exerciseId: r.exerciseId,
+          value: r.value,
+          reps: r.reps,
+          weight: r.weight,
+          achievedAt: r.achievedAt.toISOString(),
+        })),
+        bodyPartScores: parts.map((p) => ({ bodyPart: p.bodyPart, points: p.points, updatedAt: p.updatedAt.toISOString() })),
+      };
+    });
+    res.json(body);
+  });
+
+  router.post("/gym/plans", async (req, res) => {
+    const body = PlanCreateRequestSchema.parse(req.body ?? {});
+    const userId = req.user!.id;
+    await withIdempotency(db, req, res, "POST /gym/plans", async (tx) => {
+      const unknown = await unknownExerciseIds(tx, userId, planExerciseIds(body.days));
+      if (unknown.length > 0) return invalidExercise(unknown);
+      const [plan] = await tx
+        .insert(workoutPlans)
+        .values({ userId, name: body.name, goal: body.goal, days: body.days, isActive: false })
+        .returning();
+      return { status: 201, body: toPlanDto(plan!) };
+    });
+  });
+
+  router.patch("/gym/plans/:id", async (req, res) => {
+    const planId = String(req.params.id);
+    const body = PlanPatchRequestSchema.parse(req.body ?? {});
+    const userId = req.user!.id;
+    await withIdempotency(db, req, res, `PATCH /gym/plans/${planId}`, async (tx) => {
+      if (!UUID.test(planId)) return notFound("Plan");
+      const [plan] = await tx
+        .select()
+        .from(workoutPlans)
+        .where(and(eq(workoutPlans.id, planId), eq(workoutPlans.userId, userId)))
+        .limit(1);
+      if (!plan) return notFound("Plan");
+      if (body.days) {
+        const unknown = await unknownExerciseIds(tx, userId, planExerciseIds(body.days));
+        if (unknown.length > 0) return invalidExercise(unknown);
+      }
+      if (body.isActive === true) {
+        await tx
+          .update(workoutPlans)
+          .set({ isActive: false })
+          .where(and(eq(workoutPlans.userId, userId), ne(workoutPlans.id, planId)));
+      }
+      const [updated] = await tx
+        .update(workoutPlans)
+        .set({
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.goal !== undefined && { goal: body.goal }),
+          ...(body.days !== undefined && { days: body.days }),
+          ...(body.isActive !== undefined && { isActive: body.isActive }),
+        })
+        .where(eq(workoutPlans.id, planId))
+        .returning();
+      return { status: 200, body: toPlanDto(updated!) };
+    });
+  });
+
+  router.post("/gym/sessions", async (req, res) => {
+    const body = SessionCreateRequestSchema.parse(req.body ?? {});
+    const userId = req.user!.id;
+    await withIdempotency(db, req, res, "POST /gym/sessions", async (tx) => {
+      const now = clock();
+      await rollOverDue(tx, userId, now);
+      let planId: string | null = null;
+      if (body.planId) {
+        const [plan] = await tx
+          .select({ id: workoutPlans.id })
+          .from(workoutPlans)
+          .where(and(eq(workoutPlans.id, body.planId), eq(workoutPlans.userId, userId)))
+          .limit(1);
+        if (!plan) return notFound("Plan");
+        planId = plan.id;
+      } else {
+        const [active] = await tx
+          .select({ id: workoutPlans.id })
+          .from(workoutPlans)
+          .where(and(eq(workoutPlans.userId, userId), eq(workoutPlans.isActive, true)))
+          .limit(1);
+        planId = active?.id ?? null;
+      }
+      const [dup] = await tx
+        .select({ id: workoutSessions.id })
+        .from(workoutSessions)
+        .where(and(eq(workoutSessions.userId, userId), eq(workoutSessions.clientId, body.clientId)))
+        .limit(1);
+      if (dup) {
+        return { status: 409, body: { error: "clientId already used for a session", code: "duplicate_client_id" } };
+      }
+      const tz = await userTimezone(tx, userId);
+      const [session] = await tx
+        .insert(workoutSessions)
+        .values({ userId, planId, startedAt: now, localDate: localDate(now, tz), clientId: body.clientId })
+        .returning();
+      return { status: 201, body: toSessionDto(session!) };
+    });
+  });
+
+  router.post("/gym/sessions/:id/sets", async (req, res) => {
+    const sessionId = String(req.params.id);
+    const body = SetCreateRequestSchema.parse(req.body ?? {});
+    const userId = req.user!.id;
+    await withIdempotency(db, req, res, `POST /gym/sessions/${sessionId}/sets`, async (tx) => {
+      await rollOverDue(tx, userId, clock());
+      const session = await ownSession(tx, userId, sessionId);
+      if (!session) return notFound("Session");
+      if (session.completedAt) {
+        return { status: 409, body: { error: "Session already completed", code: "already_completed" } };
+      }
+      const unknown = await unknownExerciseIds(tx, userId, [body.exerciseId]);
+      if (unknown.length > 0) return invalidExercise(unknown);
+      let setIndex = body.setIndex;
+      if (setIndex === undefined) {
+        const [row] = await tx
+          .select({ n: count() })
+          .from(performedSets)
+          .where(and(eq(performedSets.sessionId, session.id), eq(performedSets.exerciseId, body.exerciseId)));
+        setIndex = row?.n ?? 0;
+      }
+      const [set] = await tx
+        .insert(performedSets)
+        .values({
+          sessionId: session.id,
+          exerciseId: body.exerciseId,
+          setIndex,
+          reps: body.reps,
+          weight: body.weight,
+          completed: body.completed,
+        })
+        .returning();
+      return {
+        status: 201,
+        body: {
+          id: set!.id,
+          sessionId: set!.sessionId,
+          exerciseId: set!.exerciseId,
+          setIndex: set!.setIndex,
+          reps: set!.reps,
+          weight: set!.weight,
+          completed: set!.completed,
+        },
+      };
+    });
+  });
+
+  router.post("/gym/sessions/:id/complete", async (req, res) => {
+    const sessionId = String(req.params.id);
+    SessionCompleteRequestSchema.parse(req.body ?? {});
+    const userId = req.user!.id;
+    await withIdempotency(db, req, res, `POST /gym/sessions/${sessionId}/complete`, async (tx) => {
+      const now = clock();
+      await rollOverDue(tx, userId, now); // roll missed dates before this write lands
+      const session = await ownSession(tx, userId, sessionId);
+      if (!session) return notFound("Session");
+      if (session.completedAt) {
+        return { status: 409, body: { error: "Session already completed", code: "already_completed" } };
+      }
+      const today = localDate(now, await userTimezone(tx, userId));
+
+      // The plan day is picked by the weekday of the session's own local date.
+      const weekday = weekdayOf(session.localDate);
+      let blocks: { exerciseId: string; sets: number }[] = [];
+      if (session.planId) {
+        const [plan] = await tx.select().from(workoutPlans).where(eq(workoutPlans.id, session.planId)).limit(1);
+        blocks = plan?.days.find((d) => d.weekday === weekday)?.blocks ?? [];
+      }
+      const sets = await tx
+        .select()
+        .from(performedSets)
+        .where(eq(performedSets.sessionId, session.id))
+        .orderBy(asc(performedSets.id));
+      const exerciseRows = await tx.select().from(exercises).where(visibleExercises(userId));
+      const byId = new Map(exerciseRows.map((e) => [e.id, e]));
+
+      const { totalPoints, byBodyPart } = computeGymPoints(sets, blocks, (id) => byId.get(id)?.primaryBodyPart);
+      const newPrs = await applyPersonalRecords(
+        tx,
+        userId,
+        bestBig5Lifts(sets, (id) => byId.get(id)?.isBig5 ?? false),
+        (id) => byId.get(id)?.name ?? id,
+        now,
+      );
+
+      const [done] = await tx
+        .update(workoutSessions)
+        .set({ completedAt: now, points: totalPoints })
+        .where(and(eq(workoutSessions.id, session.id), sql`${workoutSessions.completedAt} is null`))
+        .returning();
+      if (!done) return { status: 409, body: { error: "Session already completed", code: "already_completed" } };
+
+      let results: Awaited<ReturnType<typeof applyChanges>>["results"] = [];
+      let notices: Awaited<ReturnType<typeof applyChanges>>["notices"] = [];
+      if (totalPoints > 0) {
+        for (const [bodyPart, points] of Object.entries(byBodyPart)) {
+          await tx
+            .insert(bodyPartScores)
+            .values({ userId, bodyPart, points, updatedAt: now })
+            .onConflictDoUpdate({
+              target: [bodyPartScores.userId, bodyPartScores.bodyPart],
+              set: { points: sql`${bodyPartScores.points} + ${points}`, updatedAt: now },
+            });
+        }
+        // The log row makes the session count as activity for "zero logs" and streak logic; its delta is
+        // the gym change below, so it is inserted without a separate score change.
+        await tx.insert(logs).values({
+          userId,
+          clientId: `gym:${session.id}`,
+          domain: "BODY",
+          logType: "gym_session",
+          data: { sessionId: session.id, points: totalPoints },
+          occurredAt: now,
+          localDate: today,
+        });
+        const applied = await applyChanges(
+          tx,
+          userId,
+          [{ domain: "BODY", delta: totalPoints, bonus: false, activity: true, reason: "gym", refId: session.id }],
+          { localDate: today, now },
+        );
+        results = applied.results;
+        notices = applied.notices;
+      }
+      return {
+        status: 200,
+        body: {
+          session: toSessionDto(done),
+          points: totalPoints,
+          byBodyPart,
+          newPrs,
+          results,
+          notices,
+        },
+      };
+    });
+  });
+
+  return router;
+}

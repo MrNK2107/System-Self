@@ -7,6 +7,7 @@ import { adminRoutes } from "./admin";
 import { authRoutes } from "./auth";
 import { chainsRoutes } from "./chains";
 import { debriefRoutes } from "./debrief";
+import { gymRoutes } from "./gym";
 import { healthRoutes } from "./health";
 import { historyRoutes } from "./history";
 import { logsRoutes } from "./logs";
@@ -17,7 +18,7 @@ import { questsRoutes } from "./quests";
 import { stateRoutes } from "./state";
 import { systemRoutes } from "./system";
 
-export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps }): IRouter {
+export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps; now?: () => Date }): IRouter {
   const { db, mailer } = deps;
   const ai = deps.ai ?? {};
   const router: IRouter = Router();
@@ -28,7 +29,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps 
   router.use(authRoutes({ db, mailer, requireAuth }));
 
   // Private surfaces. requireAuth is mounted per prefix so unknown /api paths fall through to 404.
-  router.use(["/system", "/admin", "/onboarding", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap"], requireAuth);
+  router.use(["/system", "/admin", "/onboarding", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym"], requireAuth);
   router.use(systemRoutes(db));
   router.use(historyRoutes(db, ai));
   if (db) {
@@ -41,6 +42,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps 
     router.use(noticesRoutes(db));
     router.use(messagesRoutes(db, ai));
     router.use(debriefRoutes(db, ai));
+    router.use(gymRoutes(db, deps.now));
   }
   return router;
 }

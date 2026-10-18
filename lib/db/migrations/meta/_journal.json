@@ -57,6 +57,13 @@
       "when": 1792357986797,
       "tag": "0007_spotty_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792358901830,
+      "tag": "0008_stormy_tana_nile",
+      "breakpoints": true
     }
   ]
 }

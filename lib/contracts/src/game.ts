@@ -252,3 +252,56 @@ export const NoticesSeenRequestSchema = z.object({
   clientId: ClientIdSchema.optional(),
 });
 
+
+// --- gym -------------------------------------------------------------------
+
+export const WeekdaySchema = z.enum(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]);
+
+export const PlanBlockSchema = z.object({
+  exerciseId: z.string().min(1).max(100),
+  sets: z.number().int().min(1).max(20),
+  repRange: z.string().min(1).max(20),
+  restSec: z.number().int().min(0).max(1800),
+  notes: z.string().max(500).optional(),
+});
+
+export const PlanDaySchema = z.object({
+  weekday: WeekdaySchema,
+  blocks: z.array(PlanBlockSchema).max(12),
+});
+
+const PlanDaysSchema = z
+  .array(PlanDaySchema)
+  .max(7)
+  .refine((d) => new Set(d.map((x) => x.weekday)).size === d.length, { message: "Weekdays must be unique" });
+
+export const PlanCreateRequestSchema = z.object({
+  name: z.string().min(1).max(80),
+  goal: z.string().max(200),
+  days: PlanDaysSchema,
+  clientId: ClientIdSchema.optional(),
+});
+
+export const PlanPatchRequestSchema = z.object({
+  name: z.string().min(1).max(80).optional(),
+  goal: z.string().max(200).optional(),
+  days: PlanDaysSchema.optional(),
+  isActive: z.boolean().optional(),
+  clientId: ClientIdSchema.optional(),
+});
+
+export const SessionCreateRequestSchema = z.object({
+  clientId: ClientIdSchema,
+  planId: z.string().uuid().optional(),
+});
+
+export const SetCreateRequestSchema = z.object({
+  exerciseId: z.string().min(1).max(100),
+  reps: z.number().int().min(0).max(200),
+  weight: z.number().min(0).max(1000),
+  completed: z.boolean(),
+  setIndex: z.number().int().min(0).max(1000).optional(),
+  clientId: ClientIdSchema.optional(),
+});
+
+export const SessionCompleteRequestSchema = z.object({ clientId: ClientIdSchema.optional() });
