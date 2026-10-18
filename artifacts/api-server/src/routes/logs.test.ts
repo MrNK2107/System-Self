@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { scoreEvents } from "@workspace/db";
+import { domainScores, scoreEvents } from "@workspace/db";
 import { localDate } from "@workspace/engine";
-import { LogListResponseSchema, LogResponseSchema, NoticeListResponseSchema } from "@workspace/contracts";
+import { GameStateSchema, LogListResponseSchema, LogResponseSchema, NoticeListResponseSchema } from "@workspace/contracts";
 import { app, auth, db, score, setup, skip, TZ, assertContract, assertStoredNoticesMatchContract } from "./game-test-helpers";
 
 after(async () => {
@@ -163,4 +163,20 @@ test("data limit counts UTF-8 bytes, not characters", { skip }, async () => {
     .set(auth(token))
     .send({ clientId: "mb", domain: "BODY", logType: "x", data: { blob: "é".repeat(2100) } });
   assert.equal(res.status, 400);
+});
+
+test("GET /state lists unlocked achievements and milestones", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  await db!.update(domainScores).set({ score: 59 }).where(and(eq(domainScores.userId, id), eq(domainScores.domain, "BODY")));
+  const log = await request(a).post("/api/logs").set(auth(token)).send({ clientId: "m1", domain: "BODY", logType: "x" });
+  assert.equal(log.status, 201);
+  const res = await request(a).get("/api/state").set(auth(token));
+  assert.equal(res.status, 200);
+  const state = assertContract(GameStateSchema, res.body);
+  assert.ok(state.achievements.some((x) => x.id === "first_log" && !Number.isNaN(Date.parse(x.unlockedAt))));
+  assert.deepEqual(
+    state.milestones.map(({ domain, tier }) => ({ domain, tier })),
+    [{ domain: "BODY", tier: 60 }],
+  );
 });

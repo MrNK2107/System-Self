@@ -2,7 +2,7 @@ import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import { Router, type IRouter } from "express";
 import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { z, ZodError } from "zod";
-import { generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages, users, type Db } from "@workspace/db";
+import { generatedQuestBatches, generatedQuests, quests, systemMessages, users, type Db } from "@workspace/db";
 import { addDays, localDate } from "@workspace/engine";
 import type { AiDeps } from "../lib/ai";
 import { buildUserContext, generateMessage } from "../services/ai-context";
@@ -31,6 +31,9 @@ const questHistoryQuerySchema = z.object({
 const completionSummaryQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(90).default(14),
 });
+
+const RESOLVED_STATUSES = ["complete", "failed", "refused"] as const;
+type ResolvedStatus = (typeof RESOLVED_STATUSES)[number];
 
 export function historyRoutes(db: Db | null, ai: AiDeps = {}): IRouter {
 const router = Router();
@@ -152,62 +155,55 @@ router.get("/recap/weekly/debrief", async (req, res) => {
 });
 
 router.get("/system/completions/summary", async (req, res) => {
-  try {
-    if (!db) return res.status(503).json(DB_UNAVAILABLE);
-    const query = completionSummaryQuerySchema.parse(req.query);
-    const from = new Date();
-    from.setDate(from.getDate() - query.days);
+  if (!db) return res.status(503).json(DB_UNAVAILABLE);
+  const query = completionSummaryQuerySchema.parse(req.query);
+  const userId = req.user!.id;
+  const [user] = await db.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) return res.status(404).json({ error: "User not found" });
+  // The last `days` local days, today included, by the quest's resolution date.
+  const to = localDate(new Date(), user.tz);
+  const from = addDays(to, -(query.days - 1));
+  const rows = await db
+    .select({
+      domain: quests.domain,
+      status: quests.status,
+      day: quests.resolvedLocalDate,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(quests)
+    .where(
+      and(
+        eq(quests.userId, userId),
+        inArray(quests.status, RESOLVED_STATUSES),
+        gte(quests.resolvedLocalDate, from),
+        lte(quests.resolvedLocalDate, to),
+      ),
+    )
+    .groupBy(quests.domain, quests.status, quests.resolvedLocalDate);
 
-    const totals = await db
-      .select({
-        status: questCompletionEvents.status,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.userId, req.user!.id), gte(questCompletionEvents.completedAt, from)))
-      .groupBy(questCompletionEvents.status);
-
-    const byDomain = await db
-      .select({
-        domain: questCompletionEvents.domain,
-        status: questCompletionEvents.status,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.userId, req.user!.id), gte(questCompletionEvents.completedAt, from)))
-      .groupBy(questCompletionEvents.domain, questCompletionEvents.status);
-
-    const daily = await db
-      .select({
-        day: sql<string>`to_char(${questCompletionEvents.completedAt}, 'YYYY-MM-DD')`,
-        status: questCompletionEvents.status,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.userId, req.user!.id), gte(questCompletionEvents.completedAt, from)))
-      .groupBy(sql`to_char(${questCompletionEvents.completedAt}, 'YYYY-MM-DD')`, questCompletionEvents.status)
-      .orderBy(sql`to_char(${questCompletionEvents.completedAt}, 'YYYY-MM-DD') asc`);
-
-    const attempts = totals.reduce((sum, row) => sum + row.count, 0);
-    const completed = totals.find((r) => r.status === "complete")?.count ?? 0;
-
-    return res.json({
-      username: req.user!.username,
-      windowDays: query.days,
-      from: from.toISOString(),
-      to: new Date().toISOString(),
-      attempts,
-      completed,
-      completionRate: attempts > 0 ? Math.round((completed / attempts) * 100) : 0,
-      totals,
-      byDomain,
-      daily,
-    });
-  } catch (error) {
-    if (error instanceof ZodError) throw error; // validation -> 400 via errorHandler
-    req.log.error({ error }, "Failed to fetch completion summary");
-    return res.status(500).json({ error: "Failed to fetch completion summary" });
-  }
+  const sum = (pick: (r: (typeof rows)[number]) => string) => {
+    const totals = new Map<string, { key: string; status: ResolvedStatus; count: number }>();
+    for (const r of rows) {
+      const key = pick(r);
+      const id = `${key}|${r.status}`;
+      const cur = totals.get(id) ?? { key, status: r.status as ResolvedStatus, count: 0 };
+      cur.count += r.count;
+      totals.set(id, cur);
+    }
+    return [...totals.values()].sort((a, b) => (a.key === b.key ? a.status.localeCompare(b.status) : a.key.localeCompare(b.key)));
+  };
+  const attempts = rows.reduce((n, r) => n + r.count, 0);
+  const completed = rows.filter((r) => r.status === "complete").reduce((n, r) => n + r.count, 0);
+  return res.json({
+    windowDays: query.days,
+    from,
+    to,
+    attempts,
+    completed,
+    completionRate: attempts > 0 ? Math.round((completed / attempts) * 100) : 0,
+    byDomain: sum((r) => r.domain).map(({ key, status, count }) => ({ domain: key, status, count })),
+    daily: sum((r) => r.day!).map(({ key, status, count }) => ({ day: key, status, count })),
+  });
 });
 
 return router;

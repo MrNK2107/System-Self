@@ -141,6 +141,8 @@ export const GameStateSchema = z.object({
     })
     .nullable(),
   unseenNotices: z.array(NoticeSchema),
+  achievements: z.array(z.object({ id: z.string(), unlockedAt: z.string() })),
+  milestones: z.array(z.object({ domain: RankedDomainSchema, tier: z.number().int(), unlockedAt: z.string() })),
   today: z.string(),
 });
 export type GameState = z.infer<typeof GameStateSchema>;
@@ -477,4 +479,20 @@ export const WeeklyDebriefResponseSchema = z.object({
   weekStart: z.string(),
   debrief: z.string(),
   meta: AiMetaSchema,
+});
+
+// --- stats -----------------------------------------------------------------
+
+const StatusCountSchema = { status: z.enum(["complete", "failed", "refused"]), count: z.number().int() };
+
+/** GET /api/system/completions/summary: the requester's resolved quests over the last `windowDays` local days. */
+export const CompletionSummarySchema = z.object({
+  windowDays: z.number().int(),
+  from: z.string(),
+  to: z.string(),
+  attempts: z.number().int(),
+  completed: z.number().int(),
+  completionRate: z.number().int(),
+  byDomain: z.array(z.object({ domain: z.string(), ...StatusCountSchema })),
+  daily: z.array(z.object({ day: z.string(), ...StatusCountSchema })),
 });

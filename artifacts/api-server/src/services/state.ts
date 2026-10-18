@@ -1,7 +1,9 @@
 import { and, asc, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import {
+  achievements,
   dailySnapshots,
   domainScores,
+  milestones,
   notices,
   profiles,
   quests,
@@ -85,6 +87,17 @@ export async function buildGameState(db: Pick<Db, "select">, userId: string, now
     .where(and(eq(notices.userId, userId), isNull(notices.seenAt)))
     .orderBy(asc(notices.createdAt));
 
+  const achievementRows = await db
+    .select()
+    .from(achievements)
+    .where(eq(achievements.userId, userId))
+    .orderBy(asc(achievements.unlockedAt), asc(achievements.achievementId));
+  const milestoneRows = await db
+    .select()
+    .from(milestones)
+    .where(eq(milestones.userId, userId))
+    .orderBy(asc(milestones.unlockedAt), asc(milestones.domain), asc(milestones.tier));
+
   const rank = profile.rank as Rank;
   return {
     profile: {
@@ -105,6 +118,12 @@ export async function buildGameState(db: Pick<Db, "select">, userId: string, now
     trajectory: trajectory(snapshots, hidden),
     shadow,
     unseenNotices: unseen.map(toNotice),
+    achievements: achievementRows.map((a) => ({ id: a.achievementId, unlockedAt: a.unlockedAt.toISOString() })),
+    milestones: milestoneRows.map((m) => ({
+      domain: m.domain as RankedDomain,
+      tier: m.tier,
+      unlockedAt: m.unlockedAt.toISOString(),
+    })),
     today,
   };
 }
