@@ -24,7 +24,7 @@ interface Props {
 }
 
 export function StreakBrokenModal({ visible, data, onAcknowledge }: Props) {
-  const { user, domainScores, shadowSelf, trajectory, quests } = useApp();
+  const { user } = useApp();
   const { generateMessage } = useSystemAI();
 
   const [aiText, setAiText] = useState(data.aiText || "");
@@ -51,28 +51,13 @@ export function StreakBrokenModal({ visible, data, onAcknowledge }: Props) {
   // Fetch AI text if missing
   useEffect(() => {
     if (!visible || aiLoaded || !user) return;
-    const scores = {
-      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
-    };
-    generateMessage({
-      messageType: "streak_break",
-      username: user.username,
-      rank: user.rank,
-      domainScores: scores,
-      trajectory,
-      shadowActive: shadowSelf.active,
-      shadowGap: shadowSelf.gap,
-      questCount: quests.length,
-      completedQuestCount: quests.filter(q => q.status === "complete").length,
-      primaryGoal: user.primaryGoal,
-      dayNumber: user.dayNumber,
-    }).then(text => {
+    let cancelled = false;
+    generateMessage("streak_break").then(text => {
+      if (cancelled) return;
       setAiText(text);
       setAiLoaded(true);
     });
+    return () => { cancelled = true; };
   }, [visible, aiLoaded, user]);
 
   useEffect(() => {

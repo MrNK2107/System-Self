@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Platform,
   ScrollView,
@@ -15,7 +15,11 @@ import { useAuth } from "@/context/AuthContext";
 import { useApp, ACHIEVEMENT_DEFS, MILESTONE_TITLES, type Domain, type MilestoneTier } from "@/context/AppContext";
 import { DomainBar } from "@/components/DomainBar";
 import { RankBadge } from "@/components/RankBadge";
-import { useSystemAI } from "@/hooks/useSystemAI";
+import { useQuery } from "@tanstack/react-query";
+import { useGameUserId } from "@/hooks/useGameState";
+import { api } from "@/lib/api/client";
+import { completionSummaryKey, debriefKey } from "@/lib/game/keys";
+import { fetchCompletionSummary, fetchDebriefToday } from "@/lib/game/messages";
 import { SystemMessage } from "@/components/SystemMessage";
 import { StreakCalendar } from "@/components/StreakCalendar";
 import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
@@ -44,21 +48,28 @@ export default function StatsScreen() {
       setSigningOut(false);
     }
   };
-  const { generateMessage, loading } = useSystemAI();
-  const [debrief, setDebrief] = useState("");
-  const [debriefLoading, setDebriefLoading] = useState(false);
+  const userId = useGameUserId();
   const [showAchievements, setShowAchievements] = useState(false);
   const [showMilestones, setShowMilestones] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
-  const [perfLoading, setPerfLoading] = useState(false);
-  const [perfError, setPerfError] = useState<string | null>(null);
-  const [perfSummary, setPerfSummary] = useState<{
-    attempts: number;
-    completed: number;
-    completionRate: number;
-    byDomain: { domain: Domain; status: string; count: number }[];
-    daily: { day: string; status: string; count: number }[];
-  } | null>(null);
+
+  const perfQ = useQuery({
+    queryKey: completionSummaryKey(userId, 14),
+    queryFn: () => fetchCompletionSummary(api, 14),
+    enabled: !!userId,
+  });
+  const perfSummary = perfQ.data ?? null;
+  const perfLoading = perfQ.isFetching;
+  const perfError = perfQ.isError && !perfSummary ? "Performance feed unavailable." : null;
+  const fetchPerformance = () => void perfQ.refetch();
+
+  const debriefQ = useQuery({ queryKey: debriefKey(userId), queryFn: () => fetchDebriefToday(api), enabled: !!userId });
+  const debriefData = debriefQ.data;
+  const debrief = debriefData?.available ? debriefData.debrief.text : "";
+  const debriefOpensAt =
+    debriefData && !debriefData.available
+      ? new Date(debriefData.availableAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+      : null;
 
   const rank = user?.rank ?? "E";
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
@@ -75,70 +86,8 @@ export default function StatsScreen() {
   // Rank-up prep: show when within last 20% of current rank
   const showRankUpPrep = nextRank && progressToNext >= 75;
 
-  // P3-T6: debrief and completion summary move to the server endpoints.
-  const requestDebrief = async () => {
-    if (!user || debriefLoading) return;
-    setDebriefLoading(true);
-    const scores = {
-      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
-    };
-    const msg = await generateMessage({
-      messageType: "nightly_debrief",
-      username: user.username,
-      rank,
-      domainScores: scores,
-      trajectory,
-      shadowActive: shadowSelf.active,
-      shadowGap: shadowSelf.gap,
-      questCount: quests.length,
-      completedQuestCount: completedQuests,
-      primaryGoal: user.primaryGoal,
-      dayNumber: user.dayNumber,
-    });
-    setDebrief(msg);
-    setDebriefLoading(false);
-  };
-
   const unlockedAchievements = achievements.filter(a => a.unlockedAt !== null);
   const unlockedMilestones = milestones.filter(m => m.unlockedAt !== null);
-
-  const fetchPerformance = async () => {
-    if (!user) return;
-    setPerfLoading(true);
-    setPerfError(null);
-    try {
-      const baseUrl = process.env.EXPO_PUBLIC_DOMAIN
-        ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
-        : "";
-      const token = process.env.EXPO_PUBLIC_API_TOKEN;
-      const res = await fetch(
-        `${baseUrl}/api/system/completions/summary?username=${encodeURIComponent(user.username)}&days=14`,
-        {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        },
-      );
-      if (!res.ok) throw new Error(`API ${res.status}`);
-      const data = await res.json();
-      setPerfSummary({
-        attempts: Number(data.attempts ?? 0),
-        completed: Number(data.completed ?? 0),
-        completionRate: Number(data.completionRate ?? 0),
-        byDomain: Array.isArray(data.byDomain) ? data.byDomain : [],
-        daily: Array.isArray(data.daily) ? data.daily : [],
-      });
-    } catch {
-      setPerfError("Performance feed unavailable");
-    } finally {
-      setPerfLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void fetchPerformance();
-  }, [user?.username]);
 
   const weakestExecutionDomain = useMemo(() => {
     if (!perfSummary || perfSummary.byDomain.length === 0) return null;
@@ -314,7 +263,12 @@ export default function StatsScreen() {
             </TouchableOpacity>
           </View>
           {perfError ? (
-            <Text style={[styles.calendarTeaser, { color: colors.destructive }]}>{perfError}</Text>
+            <View style={styles.expandHeader}>
+              <Text style={[styles.calendarTeaser, { color: colors.destructive }]}>{perfError}</Text>
+              <TouchableOpacity onPress={fetchPerformance} activeOpacity={0.7}>
+                <Text style={[styles.refreshMini, { color: colors.primary }]}>RETRY</Text>
+              </TouchableOpacity>
+            </View>
           ) : perfSummary ? (
             <>
               <View style={styles.statsRow}>
@@ -517,13 +471,13 @@ export default function StatsScreen() {
         {/* Nightly Debrief */}
         <TouchableOpacity
           style={[styles.debriefBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-          onPress={requestDebrief}
+          onPress={() => void debriefQ.refetch()}
           activeOpacity={0.8}
-          disabled={debriefLoading}
+          disabled={debriefQ.isFetching}
         >
           <Feather name="moon" size={16} color={colors.mutedForeground} />
           <Text style={[styles.debriefBtnText, { color: colors.mutedForeground }]}>
-            {debriefLoading ? "GENERATING VERDICT..." : "REQUEST NIGHTLY DEBRIEF"}
+            {debriefQ.isFetching ? "CHECKING..." : "CHECK TODAY'S DEBRIEF"}
           </Text>
         </TouchableOpacity>
 
@@ -531,6 +485,12 @@ export default function StatsScreen() {
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <SystemMessage message={debrief} animate label="NIGHTLY DEBRIEF" />
           </View>
+        ) : debriefOpensAt ? (
+          <Text style={[styles.calendarTeaser, { color: colors.mutedForeground }]}>
+            The debrief opens at {debriefOpensAt}.
+          </Text>
+        ) : debriefQ.isError ? (
+          <Text style={[styles.calendarTeaser, { color: colors.destructive }]}>The System is out of reach.</Text>
         ) : null}
 
         {/* Settings */}

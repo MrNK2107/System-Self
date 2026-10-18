@@ -974,19 +974,10 @@ export default function RivalsScreen() {
             onPress={async () => {
               const rival = rivals[Math.floor(Math.random() * rivals.length)];
               if (!rival || !user) return;
-              const scores = {
-                BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-                MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-                WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-                DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
-              };
               const msg = await generateRivalTaunt({
                 rivalCodename: rival.codename,
                 rivalRank: rival.rank,
                 rivalTrajectory: rival.trajectory,
-                username: user.username,
-                userRank: user.rank,
-                domainScores: scores,
               });
               await addRivalTaunt({ rivalCodename: rival.codename, message: msg });
             }}

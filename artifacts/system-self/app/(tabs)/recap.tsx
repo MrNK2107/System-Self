@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from "react";
+import React, { useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Platform,
   RefreshControl,
@@ -12,9 +13,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
-// P3-T6: weekly recap moves to GET /api/recap/weekly (+ /debrief); getWeeklyRecapData is a placeholder.
-import { useApp, ACHIEVEMENT_DEFS, type Domain, type WeeklyRecapData } from "@/context/AppContext";
-import { useSystemAI } from "@/hooks/useSystemAI";
+import { useQuery } from "@tanstack/react-query";
+import { useApp, ACHIEVEMENT_DEFS, type Domain } from "@/context/AppContext";
+import { useGameUserId } from "@/hooks/useGameState";
+import { api } from "@/lib/api/client";
+import { weeklyDebriefKey, weeklyRecapKey } from "@/lib/game/keys";
+import { fetchWeeklyDebrief, fetchWeeklyRecap } from "@/lib/game/messages";
 import { SystemMessage } from "@/components/SystemMessage";
 import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
 
@@ -48,59 +52,54 @@ const deltaStyles = StyleSheet.create({
 export default function RecapScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, domainScores, shadowSelf, trajectory, quests, challenges,
-          achievements, questChains, getWeeklyRecapData, getShadowPhase } = useApp();
-  const { generateMessage, loading: aiLoading } = useSystemAI();
+  const { user, shadowSelf, achievements, questChains, getShadowPhase } = useApp();
+  const userId = useGameUserId();
 
-  const [recap, setRecap] = useState<WeeklyRecapData | null>(null);
-  const [aiVerdict, setAiVerdict] = useState("");
-  const [verdictLoaded, setVerdictLoaded] = useState(false);
+  const recapQ = useQuery({ queryKey: weeklyRecapKey(userId), queryFn: () => fetchWeeklyRecap(api), enabled: !!userId });
+  const verdictQ = useQuery({
+    queryKey: weeklyDebriefKey(userId),
+    queryFn: () => fetchWeeklyDebrief(api),
+    enabled: !!userId,
+    staleTime: 5 * 60_000,
+  });
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    const data = getWeeklyRecapData();
-    setRecap(data);
-    const scores = {
-      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
-    };
-    const msg = await generateMessage({
-      messageType: "nightly_debrief",
-      username: user.username,
-      rank: user.rank,
-      domainScores: scores,
-      trajectory,
-      shadowActive: shadowSelf.active,
-      shadowGap: shadowSelf.gap,
-      questCount: quests.length,
-      completedQuestCount: quests.filter(q => q.status === "complete").length,
-      primaryGoal: user.primaryGoal,
-      dayNumber: user.dayNumber,
-    });
-    setAiVerdict(msg);
-    setVerdictLoaded(true);
-  }, [user, getWeeklyRecapData, domainScores, trajectory, shadowSelf, quests]);
-
-  React.useEffect(() => { if (user && !recap) load(); }, [user]);
-
   const onRefresh = async () => {
     setRefreshing(true);
-    setVerdictLoaded(false);
-    setAiVerdict("");
-    await load();
-    setRefreshing(false);
+    try {
+      await Promise.all([recapQ.refetch(), verdictQ.refetch()]);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   if (!user) return null;
 
-  const currentRecap = recap ?? getWeeklyRecapData();
+  const currentRecap = recapQ.data;
+  if (!currentRecap) {
+    return (
+      <View style={[styles.container, styles.stateCenter, { backgroundColor: colors.background }]}>
+        {recapQ.isError ? (
+          <>
+            <Text style={[styles.stateLine, { color: colors.mutedForeground }]}>
+              The weekly record is out of reach. Check your connection.
+            </Text>
+            <TouchableOpacity onPress={() => void recapQ.refetch()} accessibilityRole="button" style={styles.retryBtn}>
+              <Text style={[styles.retryText, { color: colors.primary }]}>RETRY</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <ActivityIndicator color={colors.primary} />
+        )}
+      </View>
+    );
+  }
+  const aiVerdict = verdictQ.data?.debrief ?? "";
   const maxDelta = Math.max(...DOMAINS.map(d => currentRecap.domainDeltas[d]), 0.1);
+  const peakDomain = currentRecap.peakDomain;
   const unlockedAchievements = achievements.filter(a => a.unlockedAt !== null);
   const weekDate = new Date(currentRecap.weekStart + "T12:00:00").toLocaleDateString(undefined, {
     month: "short", day: "numeric",
@@ -149,17 +148,17 @@ export default function RecapScreen() {
           </View>
           <View style={[styles.summaryDiv, { backgroundColor: colors.border }]} />
           <View style={styles.summaryItem}>
-            <Text style={[styles.summaryVal, { color: colors.primary, fontFamily: "SpaceMono" }]}>
-              {currentRecap.challengeWins}
+            <Text style={[styles.summaryVal, { color: colors.destructive, fontFamily: "SpaceMono" }]}>
+              {currentRecap.questsFailed}
             </Text>
-            <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>WINS</Text>
+            <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>FAILED</Text>
           </View>
           <View style={[styles.summaryDiv, { backgroundColor: colors.border }]} />
           <View style={styles.summaryItem}>
-            <Text style={[styles.summaryVal, { color: colors.destructive, fontFamily: "SpaceMono" }]}>
-              {currentRecap.challengeLosses}
+            <Text style={[styles.summaryVal, { color: colors.mutedForeground, fontFamily: "SpaceMono" }]}>
+              {currentRecap.questsRefused}
             </Text>
-            <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>LOSSES</Text>
+            <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>REFUSED</Text>
           </View>
         </View>
 
@@ -167,11 +166,13 @@ export default function RecapScreen() {
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.cardHeader}>
             <Text style={[styles.cardLabel, { color: colors.mutedForeground }]}>DOMAIN ACTIVITY THIS WEEK</Text>
-            <View style={[styles.peakBadge, { borderColor: DOMAIN_COLORS[currentRecap.peakDomain] + "50" }]}>
-              <Text style={[styles.peakText, { color: DOMAIN_COLORS[currentRecap.peakDomain] }]}>
-                PEAK: {currentRecap.peakDomain}
-              </Text>
-            </View>
+            {peakDomain && (
+              <View style={[styles.peakBadge, { borderColor: DOMAIN_COLORS[peakDomain] + "50" }]}>
+                <Text style={[styles.peakText, { color: DOMAIN_COLORS[peakDomain] }]}>
+                  PEAK: {peakDomain}
+                </Text>
+              </View>
+            )}
           </View>
           <View style={styles.barsWrap}>
             {DOMAINS.map(d => (
@@ -179,7 +180,7 @@ export default function RecapScreen() {
             ))}
           </View>
           <Text style={[styles.note, { color: colors.mutedForeground }]}>
-            Activity based on logs recorded in the last 7 days.
+            Score movement over the current week, as recorded by the System.
           </Text>
         </View>
 
@@ -226,7 +227,7 @@ export default function RecapScreen() {
             <View style={styles.chainRows}>
               {questChains.slice(-4).map(chain => {
                 const domColor = DOMAIN_COLORS[chain.domain];
-                const progress = (Math.min(chain.steps.length, chain.currentStep) / chain.steps.length) * 100;
+                const progress = chain.totalSteps > 0 ? (Math.min(chain.totalSteps, chain.currentStep) / chain.totalSteps) * 100 : 0;
                 return (
                   <View key={chain.id} style={styles.chainRow}>
                     <View style={styles.chainLeft}>
@@ -244,7 +245,7 @@ export default function RecapScreen() {
                     <Text style={[styles.chainStatus, {
                       color: chain.status === "complete" ? domColor : colors.mutedForeground,
                     }]}>
-                      {chain.status === "complete" ? "DONE" : `${chain.currentStep}/${chain.steps.length}`}
+                      {chain.status === "complete" ? "DONE" : `${chain.currentStep}/${chain.totalSteps}`}
                     </Text>
                   </View>
                 );
@@ -337,18 +338,18 @@ export default function RecapScreen() {
         {/* AI Weekly Verdict */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.cardLabel, { color: colors.mutedForeground }]}>SYSTEM WEEKLY VERDICT</Text>
-          {aiLoading && !aiVerdict ? (
+          {verdictQ.isPending ? (
             <Text style={[styles.loading, { color: colors.mutedForeground }]}>Generating assessment...</Text>
           ) : aiVerdict ? (
             <SystemMessage message={aiVerdict} animate={!refreshing} label="THE SYSTEM" />
           ) : (
             <TouchableOpacity
-              onPress={load}
+              onPress={() => void verdictQ.refetch()}
               style={[styles.generateBtn, { borderColor: colors.border }]}
               activeOpacity={0.7}
             >
               <Text style={[styles.generateText, { color: colors.mutedForeground }]}>
-                REQUEST WEEKLY ASSESSMENT
+                RETRY
               </Text>
             </TouchableOpacity>
           )}
@@ -360,6 +361,10 @@ export default function RecapScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  stateCenter: { alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
+  stateLine: { fontSize: 13, lineHeight: 20, textAlign: "center" },
+  retryBtn: { paddingVertical: 8, paddingHorizontal: 16 },
+  retryText: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 3 },
   scroll: { paddingHorizontal: 20, gap: 12 },
 
   headerRow: {

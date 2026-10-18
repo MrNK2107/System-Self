@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   Animated,
   ActivityIndicator,
-  AppState,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -19,10 +18,19 @@ import { DomainBar } from "@/components/DomainBar";
 import { RankBadge } from "@/components/RankBadge";
 import { SystemMessage } from "@/components/SystemMessage";
 import { LogModal } from "@/components/LogModal";
-import { useSystemAI } from "@/hooks/useSystemAI";
+import { useQuery } from "@tanstack/react-query";
+import { useGameUserId } from "@/hooks/useGameState";
+import { api } from "@/lib/api/client";
+import { briefingKey } from "@/lib/game/keys";
+import { fallbackMessage, msUntilLocalMidnight, tryFetchMessage } from "@/lib/game/messages";
 import { NightlyDebriefModal } from "@/components/NightlyDebriefModal";
 import { useNightlyDebrief } from "@/hooks/useNightlyDebrief";
 import { ShadowConfrontationModal } from "@/components/ShadowConfrontationModal";
+
+function localDateString(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
 
 function ShadowAlertBanner({ onConfront }: { onConfront: () => void }) {
   const colors = useColors();
@@ -144,14 +152,10 @@ const shadowStyles = StyleSheet.create({
 export default function Dashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const userId = useGameUserId();
   const { user, domainScores, quests, shadowSelf, trajectory, loading, loadError, refresh } = useApp();
-  const { generateMessage, loading: aiLoading } = useSystemAI();
-  const { checkAndTriggerDebrief, pendingDebrief, acknowledgeDebrief } = useNightlyDebrief();
+  const { pendingDebrief, acknowledgeDebrief, debriefText } = useNightlyDebrief();
 
-  const [briefing, setBriefing] = useState<string>("");
-  const [briefingLoaded, setBriefingLoaded] = useState(false);
-  const [systemIntel, setSystemIntel] = useState<string>("");
-  const [systemIntelLoaded, setSystemIntelLoaded] = useState(false);
   const [logVisible, setLogVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [confrontVisible, setConfrontVisible] = useState(false);
@@ -160,81 +164,24 @@ export default function Dashboard() {
   const activeQuests = quests.filter(q => q.status === "active");
   const completedToday = quests.filter(q => q.status === "complete").length;
 
-  // Check for nightly debrief on mount and when app foregrounds
-  useEffect(() => {
-    if (!user) return;
-    checkAndTriggerDebrief();
-    const sub = AppState.addEventListener("change", state => {
-      if (state === "active") checkAndTriggerDebrief();
-    });
-    return () => sub.remove();
-  }, [user, checkAndTriggerDebrief]);
-
-  // P3-T6: messages move to POST /api/messages (the server builds the context itself).
-  const loadBriefing = useCallback(async () => {
-    if (!user || briefingLoaded) return;
-    const scores: { BODY: number; MIND: number; WEALTH: number; DISCIPLINE: number } = {
-      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 0,
-      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 0,
-      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 0,
-      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 0,
-    };
-    const msg = await generateMessage({
-      messageType: "morning_briefing",
-      username: user.username,
-      rank,
-      domainScores: scores,
-      trajectory,
-      shadowActive: shadowSelf.active,
-      shadowGap: shadowSelf.gap,
-      questCount: activeQuests.length,
-      completedQuestCount: completedToday,
-      primaryGoal: user.primaryGoal,
-      dayNumber: user.dayNumber,
-    });
-    setBriefing(msg);
-    setBriefingLoaded(true);
-  }, [user, briefingLoaded, domainScores, trajectory, shadowSelf, activeQuests.length, completedToday, rank]);
-
-  const loadSystemIntel = useCallback(async () => {
-    if (!user || systemIntelLoaded) return;
-    const scores: { BODY: number; MIND: number; WEALTH: number; DISCIPLINE: number } = {
-      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 0,
-      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 0,
-      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 0,
-      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 0,
-    };
-    const msg = await generateMessage({
-      messageType: "nightly_debrief",
-      username: user.username,
-      rank,
-      domainScores: scores,
-      trajectory,
-      shadowActive: shadowSelf.active,
-      shadowGap: shadowSelf.gap,
-      questCount: activeQuests.length,
-      completedQuestCount: completedToday,
-      primaryGoal: user.primaryGoal,
-      dayNumber: user.dayNumber,
-    });
-    setSystemIntel(msg);
-    setSystemIntelLoaded(true);
-  }, [user, systemIntelLoaded, domainScores, trajectory, shadowSelf, activeQuests.length, completedToday, rank]);
-
-  useEffect(() => {
-    loadBriefing();
-  }, [loadBriefing]);
-
-  useEffect(() => {
-    loadSystemIntel();
-  }, [loadSystemIntel]);
+  // One briefing call per local day: the server caches it per day too, so a refresh shows the same text.
+  const briefingQ = useQuery({
+    queryKey: briefingKey(userId, localDateString()),
+    queryFn: async () => {
+      const text = await tryFetchMessage(api, "morning_briefing");
+      if (text === null) throw new Error("briefing unavailable");
+      return text;
+    },
+    enabled: !!user,
+    staleTime: msUntilLocalMidnight(),
+    retry: false,
+  });
+  const briefing = briefingQ.data ?? (briefingQ.isError ? fallbackMessage("morning_briefing") : "");
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await refresh();
-      setBriefingLoaded(false);
-      setSystemIntelLoaded(false);
     } finally {
       setRefreshing(false);
     }
@@ -327,7 +274,7 @@ export default function Dashboard() {
         {/* SYSTEM Briefing */}
         <View style={[styles.briefingCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>MORNING BRIEFING</Text>
-          {aiLoading && !briefing ? (
+          {briefingQ.isPending && !briefing ? (
             <ActivityIndicator color={colors.primary} size="small" />
           ) : briefing ? (
             <SystemMessage message={briefing} animate={!refreshing} label="THE SYSTEM" />
@@ -336,21 +283,15 @@ export default function Dashboard() {
           )}
         </View>
 
-        {/* SYSTEM INTEL */}
-        <View style={[styles.intelCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.intelHeader}>
-            <Text style={[styles.intelLabel, { color: colors.mutedForeground }]}>SYSTEM INTEL</Text>
-            <View style={[styles.lockPill, { borderColor: colors.border }]}>
-              <Feather name="lock" size={9} color={colors.mutedForeground} />
-              <Text style={[styles.lockText, { color: colors.mutedForeground }]}>LOCKED</Text>
+        {/* Nightly debrief text, once the debrief has opened */}
+        {debriefText ? (
+          <View style={[styles.intelCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.intelHeader}>
+              <Text style={[styles.intelLabel, { color: colors.mutedForeground }]}>NIGHTLY DEBRIEF</Text>
             </View>
+            <SystemMessage message={debriefText} animate={!refreshing} label="THE SYSTEM" />
           </View>
-          {systemIntel ? (
-            <SystemMessage message={systemIntel} animate={!refreshing} label="THE SYSTEM" />
-          ) : (
-            <Text style={[styles.placeholder, { color: colors.mutedForeground }]}>Decrypting transmission...</Text>
-          )}
-        </View>
+        ) : null}
 
         {/* Domain Scores */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>

@@ -185,16 +185,3 @@ export interface ChallengeRecord {
   losses: number;
   draws: number;
 }
-
-export interface WeeklyRecapData {
-  weekStart: string;
-  domainDeltas: Record<Domain, number>;
-  questsCompleted: number;
-  challengeWins: number;
-  challengeLosses: number;
-  logsCount: number;
-  peakDomain: Domain;
-  forbiddenLogs: number;
-  chainsCompleted: number;
-  achievementsUnlocked: number;
-}

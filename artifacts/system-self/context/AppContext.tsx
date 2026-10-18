@@ -3,7 +3,7 @@
 // Rivals, challenges and taunts are still simulated on the device until P5 (useLocalRivals).
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQueryClient } from "@tanstack/react-query";
-import { BASE_LOG_DELTAS, streakMultiplier } from "@workspace/engine";
+import { streakMultiplier } from "@workspace/engine";
 import type { OutboxItem } from "@/lib/api/outbox";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
@@ -64,7 +64,6 @@ import type {
   ShadowSelf,
   Trajectory,
   User,
-  WeeklyRecapData,
 } from "@/lib/game/types";
 
 export type * from "@/lib/game/types";
@@ -127,9 +126,6 @@ interface AppContextType {
   failedCount: number;
   retryFailed: () => Promise<void>;
   discardFailed: () => Promise<void>;
-
-  // P3-T6: recap moves to GET /api/recap/weekly; this is a display-only placeholder until then.
-  getWeeklyRecapData: () => WeeklyRecapData;
 
   // Local until P5.
   rivals: ReturnType<typeof useLocalRivals>["rivals"];
@@ -294,31 +290,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const getShadowRank = useCallback(() => shadowSelf.rank, [shadowSelf]);
   const getShadowPhase = useCallback(() => shadowSelf.phase, [shadowSelf]);
 
-  // P3-T6: replaced by GET /api/recap/weekly. Counts only; the domain deltas are a display estimate.
-  const getWeeklyRecapData = useCallback((): WeeklyRecapData => {
-    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const weekAgoIso = new Date(weekAgo).toISOString();
-    const recent = logs.filter((l) => l.timestamp >= weekAgoIso);
-    const domainDeltas = {} as Record<Domain, number>;
-    for (const d of DOMAINS) {
-      domainDeltas[d] = parseFloat((recent.filter((l) => l.domain === d).length * BASE_LOG_DELTAS[d]).toFixed(1));
-    }
-    const peakDomain = DOMAINS.reduce((best, d) => (domainDeltas[d] > domainDeltas[best] ? d : best), "DISCIPLINE" as Domain);
-    const resolved = rivalsState.challenges.filter((c) => c.outcome !== null);
-    return {
-      weekStart: weekAgoIso.split("T")[0]!,
-      domainDeltas,
-      questsCompleted: quests.filter((q) => q.status === "complete").length,
-      challengeWins: resolved.filter((c) => c.outcome === "win").length,
-      challengeLosses: resolved.filter((c) => c.outcome === "loss").length,
-      logsCount: recent.length,
-      peakDomain,
-      forbiddenLogs: recent.filter((l) => l.forbidden).length,
-      chainsCompleted: 0,
-      achievementsUnlocked: achievements.filter((a) => a.unlockedAt && new Date(a.unlockedAt).getTime() >= weekAgo).length,
-    };
-  }, [logs, quests, achievements, rivalsState.challenges]);
-
   const value = useMemo<AppContextType>(
     () => ({
       user,
@@ -351,14 +322,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       failedCount: outboxSnap.failed.length,
       retryFailed,
       discardFailed,
-      getWeeklyRecapData,
       ...rivalsState,
     }),
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
       state, stateQ.isError, stateQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
       getShadowPhase, addLog, completeQuest, refuseQuest, startQuestChain, generateQuests, syncBlocked, online,
-      pendingCount, outboxSnap.failed.length, retryFailed, discardFailed, getWeeklyRecapData, rivalsState,
+      pendingCount, outboxSnap.failed.length, retryFailed, discardFailed, rivalsState,
     ],
   );
 

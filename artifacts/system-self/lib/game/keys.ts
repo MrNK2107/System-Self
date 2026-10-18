@@ -9,6 +9,17 @@ export const chainsKey = (userId: string | null) => ["chains", userId] as const;
 /** Further unseen notices (GET /api/notices), fetched only when the state says there are more. */
 export const noticesKey = (userId: string | null) => ["notices", userId] as const;
 
+/** Today's morning briefing (POST /api/messages). The date is the device's local date; the server caches it per day. */
+export const briefingKey = (userId: string | null, date: string) => ["briefing", userId, date] as const;
+/** GET /api/debrief/today. */
+export const debriefKey = (userId: string | null) => ["debrief-today", userId] as const;
+/** GET /api/recap/weekly. */
+export const weeklyRecapKey = (userId: string | null) => ["recap-weekly", userId] as const;
+/** GET /api/recap/weekly/debrief. */
+export const weeklyDebriefKey = (userId: string | null) => ["recap-weekly-debrief", userId] as const;
+/** GET /api/system/completions/summary. */
+export const completionSummaryKey = (userId: string | null, days: number) => ["completion-summary", userId, days] as const;
+
 /** The slice of QueryClient that invalidateGame needs. */
 export interface Invalidator {
   invalidateQueries(filters: { queryKey: readonly unknown[] }): Promise<void> | void;

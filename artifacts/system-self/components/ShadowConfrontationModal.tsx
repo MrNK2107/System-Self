@@ -151,23 +151,13 @@ export function ShadowConfrontationModal({ visible, onClose }: Props) {
     if (!visible || aiLoaded || !user) return;
     setAiText("");
     setAiLoaded(false);
-    const scores = userScoreMap;
-    generateMessage({
-      messageType: "shadow_confrontation",
-      username: user.username,
-      rank: user.rank,
-      domainScores: scores,
-      trajectory,
-      shadowActive: shadowSelf.active,
-      shadowGap: Number(totalGap.toFixed(2)),
-      questCount: quests.length,
-      completedQuestCount: quests.filter(q => q.status === "complete").length,
-      primaryGoal: user.primaryGoal,
-      dayNumber: user.dayNumber,
-    }).then(text => {
+    let cancelled = false;
+    generateMessage("shadow_confrontation").then(text => {
+      if (cancelled) return;
       setAiText(text);
       setAiLoaded(true);
     });
+    return () => { cancelled = true; };
   }, [visible]);
 
   // Reset AI state when closed

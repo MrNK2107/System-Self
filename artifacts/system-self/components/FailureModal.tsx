@@ -21,7 +21,7 @@ const MAX_TITLES = 4;
 
 export function FailureModal({ visible, failures, onAcknowledge }: Props) {
   const quest = failures[0] ?? null;
-  const { user, domainScores, shadowSelf, trajectory, quests } = useApp();
+  const { user } = useApp();
   const { generateMessage } = useSystemAI();
 
   const overlayOpacity = useRef(new Animated.Value(0)).current;
@@ -90,33 +90,20 @@ export function FailureModal({ visible, failures, onAcknowledge }: Props) {
       Animated.timing(btnOpacity, { toValue: 1, duration: 400, useNativeDriver: false }).start();
     }, 3200));
 
-    // Fetch AI failure message. P3-T6: POST /api/messages.
+    // Fetch AI failure message (POST /api/messages; the fallback string on any failure).
+    let cancelled = false;
     if (user) {
-      const scores = {
-        BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 0,
-        MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 0,
-        WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 0,
-        DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 0,
-      };
-      generateMessage({
-        messageType: "failure_response",
-        username: user.username,
-        rank: user.rank,
-        domainScores: scores,
-        trajectory,
-        shadowActive: shadowSelf.active,
-        shadowGap: shadowSelf.gap,
-        questCount: quests.length,
-        completedQuestCount: quests.filter(q => q.status === "complete").length,
-        primaryGoal: user.primaryGoal,
-        dayNumber: user.dayNumber,
-      }).then(msg => {
+      generateMessage("failure_response").then(msg => {
+        if (cancelled) return;
         setAiText(msg);
         setAiLoaded(true);
       });
     }
 
-    return () => timers.forEach(clearTimeout);
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
   }, [visible, failures]);
 
   // Typewriter
