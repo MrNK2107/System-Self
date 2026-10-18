@@ -44,7 +44,7 @@ const TEMPLATES: Record<string, Template[]> = {
   chain_complete: [(c) => `Chain complete. Day ${c.dayNumber}, rank ${c.rank}. The next chain begins now.`],
   domain_milestone: [(c) => `A domain milestone is logged. Rank ${c.rank}. The weakest domain is still waiting.`],
   forbidden_log: [(c) => `Forbidden entry recorded on day ${c.dayNumber}. The gap to your shadow is ${gap(c)} points.`],
-  rank_up_prep: [(c) => `Rank ${c.rank} is within reach. Hold your trajectory ${trend(c)} to cross the line.`],
+  rank_up_prep: [(c) => `Your trajectory is ${trend(c)}. Rank ${c.rank} is within reach.`],
 };
 
 export function templateSystemMessage(messageType: string, ctx: TemplateContext): string {

@@ -13,7 +13,7 @@ function migrateOnce(url: string): void {
   const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "migrate.ts");
   const r = spawnSync(process.execPath, ["--import", "tsx", script], {
     env: { ...process.env, DATABASE_URL: url },
-    stdio: "inherit",
+    stdio: ["ignore", "ignore", "inherit"],
   });
   if (r.status !== 0) throw new Error("test database migration failed");
 }

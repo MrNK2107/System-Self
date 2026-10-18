@@ -67,6 +67,17 @@ Core vars:
 - `RATE_LIMIT_WINDOW_MS`
 - `RATE_LIMIT_MAX`
 - `NODE_ENV`
+- `DATABASE_URL`
+- `JWT_SECRET`, `ACCESS_TOKEN_TTL_SEC`, `REFRESH_TOKEN_TTL_DAYS`
+- `RESEND_API_KEY`, `MAIL_FROM`
+
+Defaults: `GEMINI_MODEL=gemini-2.5-flash`, `GEMINI_FALLBACK_MODEL=gemini-2.5-flash-lite`. `JWT_SECRET` must be set (32+ chars) in production. See `artifacts/api-server/.env.example`.
+
+### 4.2.1 Authentication
+- Accounts: `POST /api/auth/register`, `/login`, `GET /api/auth/me`, `DELETE /api/auth/account`. Passwords are hashed with argon2.
+- Sessions: short-lived JWT access tokens (`jose`, HS256, `ACCESS_TOKEN_TTL_SEC`) sent as `Authorization: Bearer`, plus opaque refresh tokens stored hashed in Postgres. `POST /api/auth/refresh` rotates the token on every use; presenting an already-rotated token revokes the whole family. `POST /api/auth/logout` revokes the family.
+- Email codes: verification (`/auth/email/verify/request`, `/auth/email/verify`) and password reset (`/auth/password/forgot`, `/auth/password/reset`) use short-lived single-use codes with atomic attempt counting, delivered through Resend (or a log mailer when no key is set). Password change/reset bumps `tokenVersion`, invalidating outstanding access tokens, and revokes all refresh tokens.
+- There are no static API tokens. All `/api/system/*` data is scoped to the authenticated user id; `username` query/body parameters are not trusted. Admin routes require `role = "admin"`.
 
 ### 4.3 AI Reliability Layer
 AI orchestration:
@@ -239,7 +250,7 @@ Implemented controls:
 - DB optional mode with graceful `503` behavior
 
 Known gaps / future hardening:
-- Authentication and authorization (currently no user auth boundary).
+- Per-user authentication and authorization are implemented (see 4.2.1); remaining work is MFA and session management UI.
 - Signed event ingestion to prevent spoofed completion events.
 - Idempotency token support for completion event posts.
 - Field-level encryption for sensitive profile data (if introduced).
@@ -257,19 +268,22 @@ Recommended next:
 ## 11. Deployment Requirements
 ### 11.1 Required Environment
 - `DATABASE_URL`
-- `GEMINI_API_KEY`
+- `JWT_SECRET`
 
 Recommended:
+- `GEMINI_API_KEY` (template output is served without it)
+- `RESEND_API_KEY`, `MAIL_FROM`
 - `GEMINI_MODEL`
 - `GEMINI_FALLBACK_MODEL`
 - `CORS_ORIGIN`
 - rate limit variables
 
 ### 11.2 Deployment Order
-1. Apply DB schema:
+1. Apply versioned DB migrations (`lib/db/migrations`):
 ```bash
-pnpm --filter @workspace/db push
+pnpm --filter @workspace/db migrate
 ```
+Schema changes are authored with `pnpm --filter @workspace/db generate` (drizzle-kit) and committed as SQL. `push` is dev-only and must not be used against shared or production databases. Migration `0002_*.sql` is hand-edited with `DELETE FROM` for the AI tables and must not be replayed against a populated pre-0002 database (see `docs/DEPLOYMENT.md`).
 2. Build and run API:
 ```bash
 pnpm --filter @workspace/api-server build
@@ -304,7 +318,9 @@ pnpm --filter @workspace/api-server start
 Because this repository uses workspace tooling, run locally:
 ```bash
 pnpm install
-pnpm --filter @workspace/db push
+docker compose up -d postgres
+export TEST_DATABASE_URL=postgres://system_self:system_self@localhost:5432/system_self_test
+pnpm --filter @workspace/db test
 pnpm --filter @workspace/api-server typecheck
 pnpm --filter @workspace/api-server test
 ```
@@ -326,9 +342,10 @@ Major implemented changes:
 - Added completion-event ingestion and adaptive completion-rate logic.
 - Added history/recap/debrief/completion summary analytics endpoints.
 - Added mobile performance card and stats-to-quests domain deep-link.
+- Added accounts (argon2, JWT access + rotating refresh tokens, email codes), user-scoped data, versioned migrations, and Postgres-backed CI.
 
 ## 15. Suggested Next Enhancements
-1. Add auth + per-user server-side identity enforcement.
+1. Add MFA and session management for accounts.
 2. Add completion event idempotency key and server de-duplication.
 3. Add denormalized daily analytics table for faster dashboards.
 4. Add scheduled weekly recap materialization jobs.

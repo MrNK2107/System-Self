@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { env } from "./env";
+import { logger } from "./logger";
 
 export interface AiCallOptions {
   systemInstruction: string;
@@ -91,4 +92,20 @@ export async function generateWithFallback(
   }
 
   throw lastError ?? new Error("Model call failed");
+}
+
+/**
+ * Like generateWithFallback, but never throws: when Gemini still fails after retries and the
+ * fallback model, logs a warning and resolves with model "template" so callers substitute a template.
+ */
+export async function generateOrTemplate(
+  options: AiCallOptions,
+  call: ModelCaller = callModel,
+): Promise<AiCallResult> {
+  try {
+    return await generateWithFallback(options, call);
+  } catch (error) {
+    logger.warn({ err: error instanceof Error ? error.message : String(error) }, "AI generation failed; using template");
+    return { text: "", model: "template", attempts: env.GEMINI_RETRY_COUNT + 1 };
+  }
 }

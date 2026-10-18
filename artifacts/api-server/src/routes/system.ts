@@ -10,7 +10,7 @@ import {
   generateSystemMessageResponseSchema,
   questCompletionEventBodySchema,
 } from "../lib/schemas";
-import { generateWithFallback } from "../lib/ai";
+import { generateOrTemplate } from "../lib/ai";
 import { templateQuests, templateSystemMessage } from "../lib/ai-fallback";
 
 const MESSAGE_PROMPT_VERSION = "system-message-v2";
@@ -186,7 +186,7 @@ const router = Router();
 router.post("/system/message", validateBody(generateSystemMessageBodySchema), async (req, res) => {
   try {
     const { prompt } = buildUserPrompt({ ...req.body, username: req.user!.username });
-    const ai = await generateWithFallback({
+    const ai = await generateOrTemplate({
       systemInstruction: SYSTEM_PROMPT,
       prompt: `Prompt-Version: ${MESSAGE_PROMPT_VERSION}\n${prompt}`,
       maxOutputTokens: 300,
@@ -348,25 +348,32 @@ Return ONLY valid JSON in this exact format:
   ]
 }`;
 
-    const ai = await generateWithFallback({
+    const ai = await generateOrTemplate({
       systemInstruction: SYSTEM_PROMPT,
       prompt: `Prompt-Version: ${QUESTS_PROMPT_VERSION}\n${prompt}`,
       maxOutputTokens: 1200,
       temperature: 0.4,
     });
     let parsed: unknown;
+    let model = ai.model;
     if (ai.model === "template") {
       parsed = { quests: templateQuests({ weakestDomain }) };
     } else {
-      const jsonMatch = extractJsonObject(ai.text || "{}");
-      if (!jsonMatch) throw new Error("No JSON in response");
-      parsed = JSON.parse(jsonMatch);
+      try {
+        const jsonMatch = extractJsonObject(ai.text || "{}");
+        if (!jsonMatch) throw new Error("No JSON in response");
+        parsed = JSON.parse(jsonMatch);
+      } catch (parseError) {
+        req.log.warn({ err: parseError instanceof Error ? parseError.message : String(parseError) }, "Unparseable AI quests; using template");
+        parsed = { quests: templateQuests({ weakestDomain }) };
+        model = "template";
+      }
     }
     const payload = generateQuestsResponseSchema.parse({
       ...(parsed as object),
       meta: {
         promptVersion: QUESTS_PROMPT_VERSION,
-        model: ai.model,
+        model,
         attempts: ai.attempts,
       },
     });

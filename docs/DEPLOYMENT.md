@@ -1,69 +1,61 @@
 # Deployment Checklist
 
 ## 1. Environment
-Set these variables in each environment:
+Source of truth: `artifacts/api-server/src/lib/env.ts` (template: `artifacts/api-server/.env.example`).
+
+Required in production:
 - `NODE_ENV=production`
+- `DATABASE_URL=postgres://<user>:<password>@<host>:5432/<db>`
+- `JWT_SECRET=<random, at least 32 chars>` (startup fails in production if unset or left at the dev default; generate with `openssl rand -base64 48`)
+
+Recommended:
 - `PORT=3001`
-- `GEMINI_API_KEY=...`
-- `GEMINI_MODEL=gemini-1.5-flash`
-- `CORS_ORIGIN=https://your-app-domain.com`
+- `CORS_ORIGIN=https://your-app-domain.com` (comma-separated allowlist; unset means `*`)
+- `GEMINI_API_KEY=...` (without it, or when Gemini fails after retries and the fallback model, the API serves template output with `meta.model = "template"`)
+- `RESEND_API_KEY=...` and `MAIL_FROM="SYSTEM // SELF <no-reply@your-domain>"` (without a key a log mailer prints verification and reset codes to the logs)
+
+Optional tuning (defaults shown):
+- `ACCESS_TOKEN_TTL_SEC=900`
+- `REFRESH_TOKEN_TTL_DAYS=30`
+- `GEMINI_MODEL=gemini-2.5-flash`
+- `GEMINI_FALLBACK_MODEL=gemini-2.5-flash-lite`
+- `GEMINI_RETRY_COUNT=2`
+- `GEMINI_RETRY_BASE_MS=250`
 - `RATE_LIMIT_WINDOW_MS=60000`
 - `RATE_LIMIT_MAX=60`
-- `AUTH_ENABLED=true`
-- `API_AUTH_TOKENS=<token>:<username>[,<token2>:<username2>]`
- - Optional token expiry format:
-   - `<token>|<ISO_UTC_TIMESTAMP>:<username>`
- - `API_AUTH_REVOKED_TOKENS=<token>[,<token2>]`
- - `AUTH_ROTATION_WARNING_DAYS=7`
+- `LOG_LEVEL=info` (defaults to `silent` when `NODE_ENV=test`)
+
+The static-token variables (`AUTH_ENABLED`, `API_AUTH_TOKENS`, `API_AUTH_REVOKED_TOKENS`, `ADMIN_API_TOKENS`, `AUTH_ROTATION_WARNING_DAYS`) no longer exist and are ignored.
 
 ## 2. Health Checks
 - Liveness: `GET /api/healthz`
-- Readiness: `GET /api/readyz`
+- Readiness: `GET /api/readyz` (503 when the database is unavailable; reports `ai: "gemini" | "template"`)
 
-## 3. Build + Start
+## 3. Database Migrations + Build + Start
+Production schema changes are applied with versioned migrations, never `push`:
 ```bash
-pnpm --filter @workspace/db push
+pnpm --filter @workspace/db migrate      # applies lib/db/migrations/*.sql using DATABASE_URL
 pnpm --filter @workspace/api-server build
 pnpm --filter @workspace/api-server start
 ```
+Authoring a schema change: edit `lib/db/src/schema`, run `pnpm --filter @workspace/db generate`, review and commit the SQL. `pnpm --filter @workspace/db push` is for throwaway local databases only.
+
+Warning: `lib/db/migrations/0002_*.sql` was hand-edited to begin with `DELETE FROM` statements for the AI tables (`generated_quests`, `generated_quest_batches`, `quest_completion_events`, `system_messages`), because legacy rows were keyed by username and could not be attributed to a user. This was safe only because no production data existed. Never replay this migration against a populated database that still has the pre-0002 schema; it would delete that data. Databases already past 0002 are unaffected (migrations run once).
 
 ## 4. Pre-Release Validation
+- `docker compose up -d postgres` and set `TEST_DATABASE_URL=postgres://system_self:system_self@localhost:5432/system_self_test`
+- `pnpm run typecheck`
+- `pnpm --filter @workspace/db test`
 - `pnpm --filter @workspace/api-server typecheck`
 - `pnpm --filter @workspace/api-server test`
-- Verify mobile app can call `/api/system/message` and `/api/system/quests`.
-- Verify mobile requests include `Authorization: Bearer <token>` where token maps to the same username in API query/body.
+- Verify the mobile app can register/login, refresh, and call `/api/system/message` and `/api/system/quests` with `Authorization: Bearer <accessToken>`.
 
-## 8. Token Rotation Procedure
-1. Add a new token to `API_AUTH_TOKENS` for the same username.
-2. Keep old token active temporarily (optional expiry recommended).
-3. Roll out client config with new `EXPO_PUBLIC_API_TOKEN`.
-4. Monitor for old-token traffic.
-5. Revoke old token by adding it to `API_AUTH_REVOKED_TOKENS`.
-
-## 9. Admin Token Observability
-- Configure `ADMIN_API_TOKENS` for operator-only access.
-- Endpoint:
-  - `GET /api/admin/auth/tokens`
-- Returns token fingerprints and status metadata only (no raw token values):
-  - `isExpired`, `expiringSoon`, `isRevoked`, `tokenType`, `username`
-
-## 10. Auth Audit Logging
-Security-relevant auth events are logged in structured form:
-- missing/invalid/revoked/expired token attempts
-- ownership check failures
-- admin endpoint access/forbidden attempts
-- token-expiring-soon warnings
-
-Sensitive handling:
-- Raw token values are never logged.
-- Logs include short SHA-256 token fingerprints for traceability.
-- Verify history endpoints:
-  - `GET /api/system/messages?username=<name>`
-  - `GET /api/system/quests/history?username=<name>`
-  - `GET /api/system/recap/weekly?username=<name>`
-  - `GET /api/system/recap/weekly/debrief?username=<name>`
-  - `GET /api/system/completions/summary?username=<name>&days=14`
-  - `POST /api/system/quest-completion`
+## 5. Auth Operations
+- Accounts use email + password (argon2). Sessions are short-lived JWT access tokens plus rotating refresh tokens (`/api/auth/refresh`); reuse of a rotated token revokes its family.
+- Rotate `JWT_SECRET`: deploying a new value invalidates all access tokens; clients recover via refresh only if the refresh token store is intact (refresh tokens are opaque and not signed with `JWT_SECRET`).
+- Password change/reset bumps the user's `tokenVersion` and revokes all refresh tokens.
+- Operator access: users with `role = "admin"` can use `/api/admin/users`.
+- Raw tokens and codes are never logged; the `authorization` and `cookie` headers are redacted.
 
 ## 6. Query Options
 - Messages:
@@ -81,7 +73,6 @@ Sensitive handling:
 Send a completion event when a quest is completed/failed/refused:
 ```json
 {
-  "username": "nanda",
   "questId": "quest-123",
   "status": "complete",
   "domain": "DISCIPLINE",
@@ -92,7 +83,7 @@ Send a completion event when a quest is completed/failed/refused:
 ```
 Idempotency:
 - Send `Idempotency-Key` header (recommended) and/or `idempotencyKey` in body.
-- Server deduplicates completion events by `(username, idempotencyKey)`.
+- Server deduplicates completion events by `(userId, idempotencyKey)`.
 - App currently uses deterministic key: `questId:status:domain:questType`.
 
 App behavior:
@@ -100,7 +91,7 @@ App behavior:
 - `failed` is emitted automatically by the quest scheduler when active daily quests expire.
 - Failed events are de-duplicated client-side so each quest id is sent once.
 
-## 5. Rollout
+## 8. Rollout
 - Deploy to staging first.
 - Run smoke checks on staging.
 - Promote to production.

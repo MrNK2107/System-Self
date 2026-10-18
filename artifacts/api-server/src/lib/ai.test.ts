@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateSystemMessageBodySchema } from "./schemas";
 import { templateQuests, templateSystemMessage } from "./ai-fallback";
-import { aiAvailable, generateWithFallback } from "./ai";
+import { aiAvailable, generateOrTemplate, generateWithFallback } from "./ai";
 import { env } from "./env";
 
 const ctx = { rank: "C", dayNumber: 12, shadowGap: 7.5, trajectory: "down" as const };
@@ -63,6 +63,35 @@ test("generateWithFallback with a key uses the injected caller and falls back to
     assert.equal(result.text, "hello");
     assert.equal(result.model, env.GEMINI_FALLBACK_MODEL);
     assert.equal(models.length, 2);
+  } finally {
+    env.GEMINI_API_KEY = saved;
+  }
+});
+
+test("generateOrTemplate resolves with model 'template' when every model call fails", async () => {
+  const saved = env.GEMINI_API_KEY;
+  env.GEMINI_API_KEY = "test-key";
+  const models: string[] = [];
+  try {
+    const result = await generateOrTemplate(OPTIONS, async (model) => {
+      models.push(model);
+      throw new Error("400 bad request");
+    });
+    assert.equal(result.model, "template");
+    assert.equal(result.text, "");
+    assert.equal(models.length, 2, "primary and fallback model were both tried");
+  } finally {
+    env.GEMINI_API_KEY = saved;
+  }
+});
+
+test("generateOrTemplate passes through a successful model result", async () => {
+  const saved = env.GEMINI_API_KEY;
+  env.GEMINI_API_KEY = "test-key";
+  try {
+    const result = await generateOrTemplate(OPTIONS, async () => "hello");
+    assert.equal(result.text, "hello");
+    assert.equal(result.model, env.GEMINI_MODEL);
   } finally {
     env.GEMINI_API_KEY = saved;
   }

@@ -3,7 +3,7 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages, type Db } from "@workspace/db";
-import { generateWithFallback } from "../lib/ai";
+import { generateOrTemplate } from "../lib/ai";
 
 const messageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -225,7 +225,7 @@ Style:
 - 4-6 sentences
 - Include one verdict word at the end: Acceptable, Insufficient, or Pathetic`;
 
-    const ai = await generateWithFallback({
+    const ai = await generateOrTemplate({
       systemInstruction: "You are THE SYSTEM. Output only the debrief text.",
       prompt,
       maxOutputTokens: 220,
