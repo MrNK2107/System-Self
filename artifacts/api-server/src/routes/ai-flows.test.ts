@@ -399,3 +399,27 @@ test("uncached message types are limited to 20 per local day (429 message_limit)
   // cached types are not subject to the cap
   assert.equal((await request(a).post("/api/messages").set(auth(token)).send({ type: "morning_briefing" })).status, 200);
 });
+
+test("generate: a model call that runs past midnight dates the batch and expiries on the new local day", { skip }, async (t) => {
+  const d = "2026-03-10";
+  t.mock.timers.enable({ apis: ["Date"], now: new Date(`${d}T23:59:30+05:30`) });
+  const a = app({
+    ai: {
+      call: async () => {
+        t.mock.timers.setTime(Date.parse(`${addDays(d, 1)}T00:00:30+05:30`));
+        return fakeQuests;
+      },
+    },
+  });
+  const { token } = await setup(a);
+  const res = await withKey(() => request(a).post("/api/quests/generate").set(auth(token)).send({}));
+  t.mock.timers.reset();
+  assert.equal(res.status, 200);
+  assert.equal(res.body.generated, true);
+  const next = addDays(d, 1);
+  const dailies = res.body.active.filter((q: { type: string }) => q.type === "daily");
+  assert.equal(dailies.length, 3);
+  for (const q of dailies) assert.equal(q.expiresAt, endOfLocalDay(next, TZ).toISOString());
+  const [batch] = await db!.select().from(generatedQuestBatches);
+  assert.equal(batch!.localDate, next);
+});

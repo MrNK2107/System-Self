@@ -81,6 +81,7 @@ test("refuse: 1st free, 2nd -1.5, 3rd 409 refusal_limit", { skip }, async () => 
   const r2 = await request(a).post(`/api/quests/${qs[1]!.id}/refuse`).set(auth(token)).send({});
   assert.equal(r2.status, 200);
   assertContract(QuestRefuseResponseSchema, r2.body);
+  assert.deepEqual(r2.body.notices, []);
   assert.equal(r2.body.penalty, 1.5);
   assert.equal(r2.body.results[0].actualDelta, -1.5);
   const r3 = await request(a).post(`/api/quests/${qs[2]!.id}/refuse`).set(auth(token)).send({});

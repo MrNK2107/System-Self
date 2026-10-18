@@ -3,6 +3,7 @@ import { Router, type IRouter, type Request, type RequestHandler } from "express
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { users, type Db, type User } from "@workspace/db";
+import { TimezoneSchema } from "@workspace/contracts";
 import { hashPassword, verifyPassword } from "../lib/auth/passwords";
 import { signAccessToken } from "../lib/auth/tokens";
 import {
@@ -28,19 +29,8 @@ const username = z
 const newPassword = z.string().min(10).max(128);
 const anyPassword = z.string().min(1).max(128);
 const code = z.string().regex(/^\d{6}$/, "Code must be 6 digits");
-// Canonical IANA spelling as resolved by the runtime (e.g. "america/new_york" -> "America/New_York").
-const timezone = z
-  .string()
-  .min(1)
-  .max(64)
-  .transform((tz, ctx) => {
-    try {
-      return new Intl.DateTimeFormat("en-US", { timeZone: tz }).resolvedOptions().timeZone;
-    } catch {
-      ctx.addIssue({ code: "custom", message: "Unknown timezone" });
-      return z.NEVER;
-    }
-  });
+// Canonical IANA spelling as resolved by the runtime (shared with onboarding).
+const timezone = TimezoneSchema;
 
 const registerSchema = z.object({
   email,

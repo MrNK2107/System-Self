@@ -137,6 +137,9 @@ export async function applyChanges(
       .where(eq(userDayState.userId, userId));
   }
 
+  // Penalties and decay only lower scores, so nothing new can unlock: skip the scan.
+  if (changes.every((c) => c.delta <= 0)) return { results, notices: [] };
+
   const created: Notice[] = [];
   const addNotice = async <K extends NoticeKind>(kind: K, payload: NoticePayload<K>) => {
     created.push(await insertNotice(tx, userId, kind, payload, ctx.now));

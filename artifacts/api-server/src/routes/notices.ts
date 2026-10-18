@@ -1,22 +1,16 @@
 import { Router, type IRouter } from "express";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { notices, type Db } from "@workspace/db";
 import { NoticesSeenRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
-import { toNotice } from "../services/scoring";
+import { unseenNotices } from "../services/state";
 
 export function noticesRoutes(db: Db): IRouter {
   const router = Router();
 
   router.get("/notices", async (req, res) => {
-    const rows = await db
-      .select()
-      .from(notices)
-      .where(and(eq(notices.userId, req.user!.id), isNull(notices.seenAt)))
-      .orderBy(asc(notices.createdAt), asc(notices.id));
-    res.json({
-      items: rows.map(toNotice),
-    });
+    const { items, hasMore } = await unseenNotices(db, req.user!.id);
+    res.json({ items, hasMore });
   });
 
   router.post("/notices/seen", async (req, res) => {

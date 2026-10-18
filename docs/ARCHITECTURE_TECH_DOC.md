@@ -164,10 +164,18 @@ Purpose:
 - `GET /api/system/recap/weekly/debrief`
   - Gemini-generated narrative debrief from weekly metrics
 - `GET /api/system/completions/summary`
-  - completion trends (`attempts`, `completed`, `completionRate`, domain/status and daily breakdowns)
+  - completion trends (`attempts`, `completed`, `completionRate`, domain/status and daily breakdowns) over the requester's resolved quests in the last `days` local days (by `resolvedLocalDate`)
 
 OpenAPI source:
 - `lib/api-spec/openapi.yaml`
+
+### 6.5 Game API
+The server game engine (`/api/state`, `/api/logs`, `/api/quests`, `/api/chains`, `/api/notices`, `/api/messages`, `/api/debrief`, `/api/recap`, `/api/gym`, `/api/onboarding`). Request and response schemas live in `lib/contracts` (`@workspace/contracts`); route tests parse every response with them.
+
+- **Not onboarded:** `GET /api/state` returns `404 { code: "not_onboarded" }`; every other game endpoint returns `409 { code: "not_onboarded" }`.
+- **Idempotency:** mutating endpoints accept an `Idempotency-Key` header or a `clientId` body field; a repeat returns the stored result with `200`. For `POST /api/logs` and gym session/set create the body `clientId` is the key (it wins over the header). Endpoints whose first response is `204` (`POST /api/notices/seen`, `POST /api/debrief/:date/ack`) replay as `200` with a `null` body.
+- **Rollover grace:** a local date (in `users.timezone`) is rolled over (quest expiry, streak breaks, decay, snapshot, rank, shadow) only 2h after it ends, so an offline log from before midnight that syncs shortly after still counts for its own date. `POST /api/logs` and gym session complete roll the dates before the log's date, apply it, then roll the rest.
+- **Notices:** `GET /api/notices` and `GameState.unseenNotices` return at most 50 unseen notices, oldest first, with `hasMore` / `hasMoreNotices`; mark them seen to get the next ones. Each notice kind has a fixed payload shape (`NoticeSchema`).
 
 ## 7. Adaptive Difficulty Loop
 Adaptive quest generation currently consumes:

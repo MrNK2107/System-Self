@@ -4,7 +4,7 @@ import request from "supertest";
 import { eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "@workspace/db/testing";
 import { dailySnapshots, profiles, scoreEvents, shadowSelves, userDayState, users } from "@workspace/db";
-import { GameStateSchema } from "@workspace/contracts";
+import { GameStateSchema, canonicalTimezone } from "@workspace/contracts";
 import { createApp } from "../app-factory";
 import type { Mailer } from "../lib/mailer";
 import { assertContract } from "./game-test-helpers";
@@ -79,7 +79,7 @@ test("onboarding sets scores rating*4, rank E, no shadow, returns GameState", { 
   const [dayState] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
   assert.ok(dayState!.nextRolloverAt.getTime() > Date.now());
   const [u] = await db!.select().from(users).where(eq(users.id, id));
-  assert.equal(u!.timezone, "Asia/Kolkata");
+  assert.equal(u!.timezone, canonicalTimezone("Asia/Kolkata")); // the runtime spelling (ICU may say Asia/Calcutta)
 });
 
 test("second onboarding -> 409 already_onboarded", { skip }, async () => {
@@ -155,4 +155,17 @@ test("concurrent same-key onboarding -> {201, 200}, identical bodies, one profil
   assert.deepEqual(r1.body, r2.body);
   assert.equal((await db!.select().from(profiles).where(eq(profiles.userId, id))).length, 1);
   assert.equal((await db!.select().from(scoreEvents).where(eq(scoreEvents.userId, id))).length, 5);
+});
+
+test("onboarding stores the canonical spelling of the timezone", { skip }, async () => {
+  const a = app();
+  const { token, id } = await register(a);
+  const res = await request(a).post("/api/onboarding").set("Authorization", `Bearer ${token}`).send(body({ timezone: "america/new_york" }));
+  assert.equal(res.status, 201);
+  const [u] = await db!.select().from(users).where(eq(users.id, id));
+  assert.equal(u!.timezone, "America/New_York");
+  assert.equal(
+    (await request(a).post("/api/onboarding").set("Authorization", `Bearer ${token}`).send(body({ timezone: "Mars/Base" }))).status,
+    400,
+  );
 });

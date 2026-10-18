@@ -1,7 +1,7 @@
 import test, { after, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import {
   achievements,
@@ -608,4 +608,16 @@ test("PATCH /auth/me timezone first rolls the dates already due in the old zone"
   assert.equal(failed!.status, "failed");
   assert.equal(failed!.resolvedLocalDate, D0);
   assert.equal(uds.nextRolloverAt.getTime(), endOfLocalDay(addDays(D0, 1), "America/New_York").getTime() + GRACE_MS);
+});
+
+test("ensureRolledOver writes nothing when nothing is due and the schedule is unchanged", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  const now = at(addDays(D0, 1));
+  await ensureRolledOver(db!, id, now);
+  const version = async () =>
+    (await db!.execute(sql`select xmin::text as v from user_day_state where user_id = ${id}`)).rows[0]!.v;
+  const before = await version();
+  await ensureRolledOver(db!, id, now);
+  await ensureRolledOver(db!, id, at(addDays(D0, 1), "20:00"));
+  assert.equal(await version(), before);
 });

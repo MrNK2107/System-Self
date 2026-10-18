@@ -97,9 +97,15 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
     await withIdempotency(db, req, res, "POST /gym/plans", async (tx) => {
       const unknown = await unknownExerciseIds(tx, userId, planExerciseIds(body.days));
       if (unknown.length > 0) return invalidExercise(unknown);
+      // A user without an active plan (e.g. creating one before the first GET /gym) gets this one active.
+      const [active] = await tx
+        .select({ id: workoutPlans.id })
+        .from(workoutPlans)
+        .where(and(eq(workoutPlans.userId, userId), eq(workoutPlans.isActive, true)))
+        .limit(1);
       const [plan] = await tx
         .insert(workoutPlans)
-        .values({ userId, name: body.name, goal: body.goal, days: body.days, isActive: false })
+        .values({ userId, name: body.name, goal: body.goal, days: body.days, isActive: !active })
         .returning();
       return { status: 201, body: toPlanDto(plan!) };
     });

@@ -94,6 +94,8 @@ export const logs = pgTable(
   (t) => [
     uniqueIndex("logs_user_client_id_idx").on(t.userId, t.clientId),
     index("logs_user_occurred_at_idx").on(t.userId, t.occurredAt.desc()),
+    // Rollover inactivity (latest log date up to D) and the weekly recap filter by local date.
+    index("logs_user_local_date_idx").on(t.userId, t.localDate),
   ],
 );
 

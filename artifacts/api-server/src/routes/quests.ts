@@ -124,12 +124,15 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
     const generated = await generateQuestCandidates(ctx, step1.need, ai);
 
     await withIdempotency(db, req, res, GENERATE_ROUTE, async (tx) => {
+      // The model call may have run past midnight: date the batch and expiries from a fresh clock.
       const at = new Date();
       await rollOverDue(tx, userId, at);
+      const tz = (await userTimezone(tx, userId)) ?? ctx.timezone;
+      const today = localDate(at, tz);
       const [batch] = await tx
         .select({ id: generatedQuestBatches.id })
         .from(generatedQuestBatches)
-        .where(and(eq(generatedQuestBatches.userId, userId), eq(generatedQuestBatches.localDate, ctx.today)))
+        .where(and(eq(generatedQuestBatches.userId, userId), eq(generatedQuestBatches.localDate, today)))
         .limit(1);
       if (batch) return boardResult(tx, userId, at, false);
       const need = await questNeed(tx, userId, await activeBoard(tx, userId, at));
@@ -148,7 +151,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
           model: generated.model,
           promptVersion: generated.promptVersion,
           attempts: generated.attempts,
-          localDate: ctx.today,
+          localDate: today,
         })
         .returning({ id: generatedQuestBatches.id });
       const batchId = created!.id;
@@ -163,7 +166,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
           title: q.title,
           description: q.description,
           domain: q.domain,
-          expiresAt: endOfLocalDay(addDays(ctx.today, EXPIRY_DAYS[q.type]), ctx.timezone),
+          expiresAt: endOfLocalDay(addDays(today, EXPIRY_DAYS[q.type]), tz),
           batchId,
         })),
       );
@@ -307,7 +310,10 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
               { localDate: today, now },
             )
           : { results: [], notices: [] };
-      return { status: 200, body: { quest: toQuestDto(refused!), penalty: outcome.penalty, results: applied.results } };
+      return {
+        status: 200,
+        body: { quest: toQuestDto(refused!), penalty: outcome.penalty, results: applied.results, notices: applied.notices },
+      };
     });
   });
 

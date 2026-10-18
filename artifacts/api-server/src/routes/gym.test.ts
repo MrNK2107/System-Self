@@ -249,6 +249,20 @@ test("sets validate input and ownership; sessions replay by clientId", { skip },
   assert.equal(s1.body.setIndex, 1);
 });
 
+test("a plan created before the first GET /gym becomes the active plan; no default is added", { skip }, async () => {
+  const a = app();
+  const { token } = await setup(a);
+  const day = { weekday: "TUE", blocks: [{ exerciseId: "ex_squat", sets: 3, repRange: "5", restSec: 90 }] };
+  const created = await request(a).post("/api/gym/plans").set(auth(token)).send({ name: "Mine", goal: "g", days: [day] });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.isActive, true);
+  const get = await request(a).get("/api/gym").set(auth(token));
+  assert.deepEqual(get.body.plans.map((p: { id: string }) => p.id), [created.body.id]);
+  assert.equal(get.body.activePlanId, created.body.id);
+  const second = await request(a).post("/api/gym/plans").set(auth(token)).send({ name: "Two", goal: "g", days: [day] });
+  assert.equal(second.body.isActive, false);
+});
+
 test("session and set create replay by clientId even with a different Idempotency-Key", { skip }, async () => {
   const a = app();
   const { token } = await setup(a);

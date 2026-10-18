@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { domainScores, idempotencyKeys, scoreEvents } from "@workspace/db";
+import { domainScores, idempotencyKeys, notices, scoreEvents } from "@workspace/db";
 import { localDate } from "@workspace/engine";
 import { GameStateSchema, LogListResponseSchema, LogResponseSchema, NoticeListResponseSchema } from "@workspace/contracts";
 import { app, auth, db, score, setup, skip, TZ, assertContract, assertStoredNoticesMatchContract } from "./game-test-helpers";
@@ -208,4 +208,42 @@ test("same clientId with a different or absent Idempotency-Key replays the log w
   assert.equal(late.body.log.id, first.body.log.id);
   assert.deepEqual([late.body.results, late.body.notices], [[], []]);
   assert.equal((await db!.select().from(scoreEvents).where(and(eq(scoreEvents.userId, id), eq(scoreEvents.reason, "log")))).length, 1);
+});
+
+test("GET /notices and GameState return at most 50 unseen notices, oldest first, with hasMore", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const base = Date.parse("2026-01-01T00:00:00Z");
+  await db!.insert(notices).values(
+    Array.from({ length: 55 }, (_, i) => ({
+      userId: id,
+      kind: "shadow_resolved",
+      payload: { codename: `S${i}` },
+      createdAt: new Date(base + i * 1000),
+    })),
+  );
+  const list = await request(a).get("/api/notices").set(auth(token));
+  assertContract(NoticeListResponseSchema, list.body);
+  assert.equal(list.body.items.length, 50);
+  assert.equal(list.body.items[0].payload.codename, "S0");
+  assert.equal(list.body.hasMore, true);
+  const state = await request(a).get("/api/state").set(auth(token));
+  assertContract(GameStateSchema, state.body);
+  assert.equal(state.body.unseenNotices.length, 50);
+  assert.equal(state.body.unseenNotices[0].payload.codename, "S0");
+  assert.equal(state.body.hasMoreNotices, true);
+
+  const seen = () =>
+    request(a)
+      .post("/api/notices/seen")
+      .set(auth(token))
+      .set("Idempotency-Key", "seen-1")
+      .send({ ids: list.body.items.map((n: { id: string }) => n.id) });
+  assert.equal((await seen()).status, 204);
+  const replay = await seen(); // a 204 route replays as 200 null
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body, null);
+  const rest = await request(a).get("/api/notices").set(auth(token));
+  assert.equal(rest.body.items.length, 5);
+  assert.equal(rest.body.hasMore, false);
 });

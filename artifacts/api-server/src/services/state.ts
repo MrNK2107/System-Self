@@ -27,8 +27,22 @@ import {
   type Rank,
   type RankedDomain,
 } from "@workspace/engine";
-import type { GameState } from "@workspace/contracts";
+import { NOTICE_PAGE_SIZE, type GameState, type Notice } from "@workspace/contracts";
 import { toNotice, toShadowState } from "./scoring";
+
+/** The oldest NOTICE_PAGE_SIZE unseen notices, and whether more are waiting. */
+export async function unseenNotices(
+  db: Pick<Db, "select">,
+  userId: string,
+): Promise<{ items: Notice[]; hasMore: boolean }> {
+  const rows = await db
+    .select()
+    .from(notices)
+    .where(and(eq(notices.userId, userId), isNull(notices.seenAt)))
+    .orderBy(asc(notices.createdAt), asc(notices.id))
+    .limit(NOTICE_PAGE_SIZE + 1);
+  return { items: rows.slice(0, NOTICE_PAGE_SIZE).map(toNotice), hasMore: rows.length > NOTICE_PAGE_SIZE };
+}
 
 /** Builds the client-facing game state. The hidden score is used internally but never included. */
 export async function buildGameState(db: Pick<Db, "select">, userId: string, now: Date): Promise<GameState | null> {
@@ -81,11 +95,7 @@ export async function buildGameState(db: Pick<Db, "select">, userId: string, now
     };
   }
 
-  const unseen = await db
-    .select()
-    .from(notices)
-    .where(and(eq(notices.userId, userId), isNull(notices.seenAt)))
-    .orderBy(asc(notices.createdAt));
+  const unseen = await unseenNotices(db, userId);
 
   const achievementRows = await db
     .select()
@@ -117,7 +127,8 @@ export async function buildGameState(db: Pick<Db, "select">, userId: string, now
     tierProgress: tierProgress(hidden, rank),
     trajectory: trajectory(snapshots, hidden),
     shadow,
-    unseenNotices: unseen.map(toNotice),
+    unseenNotices: unseen.items,
+    hasMoreNotices: unseen.hasMore,
     achievements: achievementRows.map((a) => ({ id: a.achievementId, unlockedAt: a.unlockedAt.toISOString() })),
     milestones: milestoneRows.map((m) => ({
       domain: m.domain as RankedDomain,

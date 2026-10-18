@@ -2,7 +2,7 @@ import test, { after, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "@workspace/db/testing";
-import { domainScores, logs, notices, scoreEvents, userDayState, users } from "@workspace/db";
+import { achievements, domainScores, logs, notices, scoreEvents, userDayState, users } from "@workspace/db";
 import { RANKED_DOMAINS } from "@workspace/engine";
 import { applyChanges } from "./scoring";
 import { withUserLock } from "./user-lock";
@@ -136,4 +136,23 @@ test("backdated activity does not move lastActivityDate backwards", { skip }, as
   await run("2026-01-08");
   const [state] = await db!.select().from(userDayState).where(eq(userDayState.userId, userId));
   assert.equal(state!.lastActivityDate, "2026-01-10");
+});
+
+test("only non-positive changes skip the achievement and milestone scan", { skip }, async () => {
+  const userId = await seedUser({ body: 40 });
+  // A log exists, so first_log is unlockable - but a decay step must not be what unlocks it.
+  await db!.insert(logs).values({
+    userId,
+    clientId: "c-decay",
+    domain: "BODY",
+    logType: "workout",
+    occurredAt: new Date("2026-01-10T10:00:00Z"),
+    localDate: "2026-01-10",
+  });
+  const decay = RANKED_DOMAINS.map((domain) => ({ domain, delta: -0.3, bonus: false, activity: false, reason: "decay" as const }));
+  const out = await withUserLock(db!, userId, (tx) =>
+    applyChanges(tx, userId, decay, { localDate: "2026-01-10", now: new Date("2026-01-10T10:00:00Z") }),
+  );
+  assert.deepEqual(out.notices, []);
+  assert.equal((await db!.select().from(achievements).where(eq(achievements.userId, userId))).length, 0);
 });

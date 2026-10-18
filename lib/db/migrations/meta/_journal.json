@@ -64,6 +64,13 @@
       "when": 1792358901830,
       "tag": "0008_stormy_tana_nile",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792360615754,
+      "tag": "0009_yellow_blindfold",
+      "breakpoints": true
     }
   ]
 }

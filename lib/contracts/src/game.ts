@@ -11,17 +11,28 @@ export const IdentitySettingSchema = z.enum(["anonymous", "semi-public", "public
 
 const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:MM");
 
-const IanaTimezoneSchema = z.string().refine(
-  (tz) => {
-    try {
-      new Intl.DateTimeFormat("en-CA", { timeZone: tz });
-      return true;
-    } catch {
-      return false;
+/** The runtime's canonical spelling of an IANA zone ("america/new_york" -> "America/New_York"), or null if unknown. */
+export function canonicalTimezone(tz: string): string | null {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: tz }).resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+}
+
+/** An IANA timezone, transformed to its canonical spelling. */
+export const TimezoneSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .transform((tz, ctx) => {
+    const canonical = canonicalTimezone(tz);
+    if (canonical === null) {
+      ctx.addIssue({ code: "custom", message: "Unknown timezone" });
+      return z.NEVER;
     }
-  },
-  { message: "Unknown timezone" },
-);
+    return canonical;
+  });
 
 const RatingSchema = z.number().int().min(1).max(10);
 
@@ -39,7 +50,7 @@ export const OnboardingRequestSchema = z.object({
   identitySetting: IdentitySettingSchema,
   morningTime: HHMM,
   nightlyTime: HHMM,
-  timezone: IanaTimezoneSchema,
+  timezone: TimezoneSchema,
   clientId: z.string().min(1).max(200).optional(),
 });
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
@@ -140,7 +151,9 @@ export const GameStateSchema = z.object({
       rank: RankSchema,
     })
     .nullable(),
+  /** At most NOTICE_PAGE_SIZE, oldest first; `hasMoreNotices` when more are unseen. */
   unseenNotices: z.array(NoticeSchema),
+  hasMoreNotices: z.boolean(),
   achievements: z.array(z.object({ id: z.string(), unlockedAt: z.string() })),
   milestones: z.array(z.object({ domain: RankedDomainSchema, tier: z.number().int(), unlockedAt: z.string() })),
   today: z.string(),
@@ -240,6 +253,7 @@ export const QuestRefuseResponseSchema = z.object({
   quest: QuestSchema,
   penalty: z.number(),
   results: z.array(ScoreResultSchema),
+  notices: z.array(NoticeSchema),
 });
 
 export const CHAIN_TEMPLATE_KEYS = ["physical_protocol", "mind_sharpening", "wealth_accumulation", "discipline_forge"] as const;
@@ -277,7 +291,9 @@ export const ChainStartResponseSchema = z.object({
   quest: QuestSchema,
 });
 
-export const NoticeListResponseSchema = z.object({ items: z.array(NoticeSchema) });
+/** Unseen notices, oldest first, at most NOTICE_PAGE_SIZE; `hasMore` when older ones are waiting behind them. */
+export const NOTICE_PAGE_SIZE = 50;
+export const NoticeListResponseSchema = z.object({ items: z.array(NoticeSchema), hasMore: z.boolean() });
 
 export const NoticesSeenRequestSchema = z.object({
   ids: z.array(z.string().uuid()).max(100),
