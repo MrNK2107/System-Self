@@ -67,6 +67,7 @@ async function buildAll() {
       "@google/*",
       "googleapis",
       "firebase-admin",
+      "@node-rs/*",
       "@parcel/watcher",
       "@sentry/profiling-node",
       "@tree-sitter/*",

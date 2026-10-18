@@ -1,11 +1,13 @@
 import { z } from "zod";
 
+const DEV_JWT_SECRET = "dev-insecure-secret-change-me-0123456789";
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   GEMINI_API_KEY: z.string().min(1).optional(),
-  GEMINI_MODEL: z.string().default("gemini-1.5-flash"),
-  GEMINI_FALLBACK_MODEL: z.string().default("gemini-1.5-flash-8b"),
+  GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
+  GEMINI_FALLBACK_MODEL: z.string().default("gemini-2.5-flash-lite"),
   GEMINI_RETRY_COUNT: z.coerce.number().int().min(0).max(5).default(2),
   GEMINI_RETRY_BASE_MS: z.coerce.number().int().min(50).default(250),
   CORS_ORIGIN: z.string().optional(),
@@ -19,6 +21,14 @@ const envSchema = z.object({
   API_AUTH_TOKENS: z.string().optional(),
   API_AUTH_REVOKED_TOKENS: z.string().optional(),
   ADMIN_API_TOKENS: z.string().optional(),
+  DATABASE_URL: z.string().min(1).optional(),
+  JWT_SECRET: z.string().min(32).default(DEV_JWT_SECRET),
+  ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().min(1).default(900),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(30),
+}).superRefine((v, ctx) => {
+  if (v.NODE_ENV === "production" && v.JWT_SECRET === DEV_JWT_SECRET) {
+    ctx.addIssue({ code: "custom", path: ["JWT_SECRET"], message: "JWT_SECRET must be set in production" });
+  }
 });
 
 export const env = envSchema.parse(process.env);
