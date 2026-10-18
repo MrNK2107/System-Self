@@ -23,6 +23,7 @@ import { createQuests } from "./quests";
 import { claimDueUsers, ensureRolledOver, rolloverDate } from "./rollover";
 import { withUserLock } from "./user-lock";
 import { runLoop, runWorkerTick } from "../jobs/run-loop";
+import { signAccessToken } from "../lib/auth/tokens";
 
 after(async () => {
   await closeTestDb();
@@ -36,10 +37,16 @@ beforeEach(async () => {
 const D0 = "2026-01-01";
 const at = (date: string, hhmm = "12:00") => new Date(`${date}T${hhmm}:00+05:30`);
 
-/** Onboards a user via the routes, then pins their onboarding day to D0. */
+/**
+ * Onboards a user via the routes, then pins their onboarding day to D0. rankSince is set well before D0
+ * so seeded history before D0 counts towards rank windows (they only use snapshots after rankSince's date).
+ */
 async function onboardAtD0(who: { email?: string; username?: string } = {}) {
   const { token, id } = await setup(app(), who);
-  await db!.update(profiles).set({ onboardedAt: at(D0, "09:00"), rankSince: at(D0, "09:00") }).where(eq(profiles.userId, id));
+  await db!
+    .update(profiles)
+    .set({ onboardedAt: at(D0, "09:00"), rankSince: at(addDays(D0, -30)) })
+    .where(eq(profiles.userId, id));
   await db!.update(dailySnapshots).set({ localDate: D0 }).where(eq(dailySnapshots.userId, id));
   await db!.update(userDayState).set({ nextRolloverAt: endOfLocalDay(D0, TZ) }).where(eq(userDayState.userId, id));
   return { token, id };
@@ -193,7 +200,7 @@ test("14 snapshots in tier D → promotion E→D with rank_change notice and ran
 
   const [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
   assert.equal(p!.rank, "D");
-  assert.equal(p!.rankSince.getTime(), now.getTime());
+  assert.equal(p!.rankSince.getTime(), endOfLocalDay(D0, TZ).getTime() - 1); // last instant of D0
   assert.match(p!.codename, /^VECTOR \/\/ /);
   const rc = await noticesOf(id, "rank_change");
   assert.equal(rc.length, 1);
@@ -233,17 +240,16 @@ test("rank freeze blocks demotion (and decay); without it the rank drops", { ski
   assert.deepEqual(rc[0]!.payload, { from: "C", to: "D", kind: "demotion" });
 });
 
-test("shadow activates after 5 inactive days", { skip }, async () => {
+test("shadow activates after 5 inactive days, at the end of that date during a catch-up", { skip }, async () => {
   const { id } = await onboardAtD0();
   await ensureRolledOver(db!, id, at(addDays(D0, 4))); // D0..D0+3: k up to 4
   assert.equal((await db!.select().from(shadowSelves).where(eq(shadowSelves.userId, id))).length, 0);
 
-  const now = at(addDays(D0, 5));
-  await ensureRolledOver(db!, id, now); // D0+4: k = 5
+  await ensureRolledOver(db!, id, at(addDays(D0, 8))); // D0+4 (k = 5) .. D0+7 in one catch-up
   const [sh] = await db!.select().from(shadowSelves).where(eq(shadowSelves.userId, id));
   assert.equal(sh!.active, true);
   assert.equal(sh!.codename, "SHADOW // ALICE_1");
-  assert.equal(sh!.activatedAt!.getTime(), now.getTime());
+  assert.equal(sh!.activatedAt!.getTime(), endOfLocalDay(addDays(D0, 4), TZ).getTime());
   const n = await noticesOf(id, "shadow_activated");
   assert.equal(n.length, 1);
   assert.equal(typeof (n[0]!.payload as { gap: number }).gap, "number");
@@ -264,7 +270,7 @@ test("active shadow resolves once every domain is at or above it", { skip }, asy
   await ensureRolledOver(db!, id, now);
   const [sh] = await db!.select().from(shadowSelves).where(eq(shadowSelves.userId, id));
   assert.equal(sh!.active, false);
-  assert.equal(sh!.resolvedAt!.getTime(), now.getTime());
+  assert.equal(sh!.resolvedAt!.getTime(), endOfLocalDay(D0, TZ).getTime());
   assert.equal((await noticesOf(id, "shadow_resolved")).length, 1);
 });
 
@@ -282,6 +288,105 @@ test("snapshot hidden score uses the 30-day completion multiplier", { skip }, as
   const base = { BODY: 20, MIND: 24, WEALTH: 16, SOCIAL: 28, DISCIPLINE: 12 };
   assert.equal(snap!.hidden, hiddenScore(base, 1.1));
   assert.deepEqual(snap!.scores, base);
+});
+
+test("completion multiplier 0.85 for 2 of 5 completed; a quest resolved on D-30 is outside the window", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  const outcomes: [string, string][] = [
+    ["complete", D0],
+    ["complete", addDays(D0, -29)], // oldest day inside [D-29, D]
+    ["failed", addDays(D0, -1)],
+    ["refused", addDays(D0, -2)],
+    ["failed", addDays(D0, -3)],
+    ["complete", addDays(D0, -30)], // excluded; counting it would give 3/6 = 0.5 -> 1.0
+  ];
+  for (const [status, date] of outcomes) {
+    const q = await dailyQuest(id, at(addDays(D0, 5)));
+    await db!.update(quests).set({ status, resolvedLocalDate: date }).where(eq(quests.id, q.id));
+  }
+  await ensureRolledOver(db!, id, at(addDays(D0, 1)));
+  const [snap] = await db!
+    .select()
+    .from(dailySnapshots)
+    .where(and(eq(dailySnapshots.userId, id), eq(dailySnapshots.localDate, D0)));
+  const base = { BODY: 20, MIND: 24, WEALTH: 16, SOCIAL: 28, DISCIPLINE: 12 };
+  assert.equal(snap!.hidden, hiddenScore(base, 0.85));
+});
+
+test("rank windows restart after a promotion: hidden 60 from E -> D on day 14, C only 14 days later", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  await setScores(id, 60); // tier B every day
+  for (const d of range(D0, 28)) await addLog(id, d); // active every day: no decay, no shadow
+  const rankOf = async () => (await db!.select().from(profiles).where(eq(profiles.userId, id)))[0]!.rank;
+
+  await ensureRolledOver(db!, id, at(addDays(D0, 13))); // D0..D0+12: 13 snapshots
+  assert.equal(await rankOf(), "E");
+  await ensureRolledOver(db!, id, at(addDays(D0, 14))); // D0+13: 14th snapshot
+  assert.equal(await rankOf(), "D");
+  await ensureRolledOver(db!, id, at(addDays(D0, 15))); // D0+14: must not cascade to C
+  assert.equal(await rankOf(), "D");
+  await ensureRolledOver(db!, id, at(addDays(D0, 27))); // through D0+26: 13 snapshots since the promotion
+  assert.equal(await rankOf(), "D");
+  await ensureRolledOver(db!, id, at(addDays(D0, 28))); // D0+27: 14th
+  assert.equal(await rankOf(), "C");
+  const rc = (await noticesOf(id, "rank_change")).map((n) => n.payload);
+  assert.deepEqual(rc, [
+    { from: "E", to: "D", kind: "promotion" },
+    { from: "D", to: "C", kind: "promotion" },
+  ]);
+});
+
+test("user_day_state without a profile is pushed back a day instead of re-leased", { skip }, async () => {
+  const reg = await request(app()).post("/api/auth/register").send({
+    email: "np@example.com",
+    password: "correct horse battery",
+    username: "no_profile",
+    birthYear: 1990,
+    acceptTerms: true,
+    timezone: TZ,
+  });
+  assert.equal(reg.status, 201);
+  const id = reg.body.user.id as string;
+  const now = at(addDays(D0, 1));
+  await db!.insert(userDayState).values({ userId: id, nextRolloverAt: endOfLocalDay(D0, TZ) });
+  const { processed } = await runWorkerTick(db!, now);
+  assert.equal(processed, 1);
+  const [uds] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
+  assert.equal(uds!.nextRolloverAt.getTime(), now.getTime() + 86_400_000);
+  assert.equal(uds!.lastRolledDate, null);
+});
+
+test("POST /logs catches up missed dates first: streak break applied, earlier snapshots exclude the new log", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const today = localDate(new Date(), TZ);
+  const d0 = addDays(today, -4);
+  await db!.update(profiles).set({ onboardedAt: at(d0, "09:00") }).where(eq(profiles.userId, id));
+  await db!.update(userDayState).set({ lastRolledDate: d0 }).where(eq(userDayState.userId, id));
+  await db!
+    .update(domainScores)
+    .set({ streak: 2, lastLogDate: d0 })
+    .where(and(eq(domainScores.userId, id), eq(domainScores.domain, "BODY")));
+  await addLog(id, d0);
+
+  const res = await request(a).post("/api/logs").set(auth(token)).send({ clientId: "late", domain: "BODY", logType: "x" });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.results[0].streak, 1); // broken on d0+1, restarted today
+
+  const breaks = await eventsOf(id, "streak_break");
+  assert.equal(breaks.length, 1);
+  assert.equal(breaks[0]!.localDate, addDays(d0, 1));
+  const snaps = await db!
+    .select()
+    .from(dailySnapshots)
+    .where(eq(dailySnapshots.userId, id))
+    .orderBy(asc(dailySnapshots.localDate));
+  assert.deepEqual(
+    snaps.map((s) => s.localDate).filter((d) => d > d0 && d < today),
+    range(addDays(d0, 1), 3),
+  );
+  const lastSnap = snaps.find((s) => s.localDate === addDays(today, -1))!.scores as Record<string, number>;
+  assert.equal(Math.round((lastSnap.BODY! + 2.5) * 10) / 10, (await score(id, "BODY")).score);
 });
 
 test("catch-up after 10 days processes 10 dates in order", { skip }, async () => {
@@ -353,27 +458,45 @@ test("runWorkerTick prunes idempotency keys older than 7 days", { skip }, async 
   assert.deepEqual(keys, ["fresh"]);
 });
 
-test("PATCH /auth/me timezone recomputes nextRolloverAt", { skip }, async () => {
+test("PATCH /auth/me timezone recomputes nextRolloverAt", { skip }, async (t) => {
   const a = app();
-  const { token, id } = await setup(a);
+  const { id } = await setup(a);
+  // Fixed instant: 2026-10-20 15:00Z = 20:30 Kolkata / 11:00 New York (same local date, far from midnight).
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-20T15:00:00Z") });
+  const { token } = await signAccessToken({ id, role: "user", tokenVersion: 0 }); // valid at the mocked time
   const res = await request(a).patch("/api/auth/me").set(auth(token)).send({ timezone: "America/New_York" });
+  t.mock.timers.reset();
   assert.equal(res.status, 200);
   const [uds] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
-  const expected = endOfLocalDay(localDate(new Date(), "America/New_York"), "America/New_York");
-  assert.equal(uds!.nextRolloverAt.getTime(), expected.getTime());
+  assert.equal(uds!.nextRolloverAt.toISOString(), "2026-10-21T04:00:00.000Z"); // NY midnight (EDT)
 });
 
 test("aborted worker: tick releases unprocessed claims and runLoop exits without waiting a full tick", { skip }, async () => {
   const { id } = await onboardAtD0();
   const now = at(addDays(D0, 1));
   const aborted = AbortSignal.abort();
-  assert.deepEqual(await runWorkerTick(db!, now, aborted), { processed: 0 });
+  assert.deepEqual(await runWorkerTick(db!, now, aborted), { processed: 0, claimed: 1 });
   assert.deepEqual(await claimDueUsers(db!, 10, now), [id]); // released, so claimable again
 
   const controller = new AbortController();
   const started = Date.now();
-  const loop = runLoop(db!, { tickMs: 60_000, signal: controller.signal });
+  const loop = runLoop(db!, { tickMs: 60_000, signal: controller.signal, clock: () => now });
   setTimeout(() => controller.abort(), 50);
   await loop;
   assert.ok(Date.now() - started < 5_000);
+});
+
+test("runLoop re-ticks immediately after a full batch instead of sleeping", { skip }, async () => {
+  const ids: string[] = [];
+  for (let i = 0; i < 3; i++) ids.push((await onboardAtD0({ email: `b${i}@example.com`, username: `batch_${i}` })).id);
+  const now = at(addDays(D0, 1));
+  const controller = new AbortController();
+  const loop = runLoop(db!, { tickMs: 60_000, signal: controller.signal, batchSize: 1, clock: () => now });
+  const deadline = Date.now() + 10_000;
+  const rolled = async () =>
+    (await db!.select().from(userDayState)).filter((u) => ids.includes(u.userId) && u.lastRolledDate === D0).length;
+  while ((await rolled()) < 3 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  controller.abort();
+  await loop;
+  assert.equal(await rolled(), 3, "all 3 users rolled within one tick interval (batch size 1)");
 });

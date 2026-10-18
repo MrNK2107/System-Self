@@ -8,12 +8,17 @@ export const WORKER_BATCH_SIZE = 200;
 export const IDEMPOTENCY_KEY_TTL_MS = 7 * 86_400_000;
 
 /**
- * One worker pass: claims up to WORKER_BATCH_SIZE due users and rolls each over, then prunes idempotency
- * keys older than 7 days. If `signal` aborts mid-batch, the current user finishes and the remaining
- * claimed users are released (made due again) for the next worker.
+ * One worker pass: claims up to `batchSize` due users and rolls each over, then prunes idempotency keys
+ * older than 7 days. If `signal` aborts mid-batch, the current user finishes and the remaining claimed
+ * users are released (made due again) for the next worker.
  */
-export async function runWorkerTick(db: Db, now: Date, signal?: AbortSignal): Promise<{ processed: number }> {
-  const ids = await claimDueUsers(db, WORKER_BATCH_SIZE, now);
+export async function runWorkerTick(
+  db: Db,
+  now: Date,
+  signal?: AbortSignal,
+  batchSize = WORKER_BATCH_SIZE,
+): Promise<{ processed: number; claimed: number }> {
+  const ids = await claimDueUsers(db, batchSize, now);
   let processed = 0;
   for (const [i, userId] of ids.entries()) {
     if (signal?.aborted) {
@@ -32,19 +37,30 @@ export async function runWorkerTick(db: Db, now: Date, signal?: AbortSignal): Pr
     }
   }
   await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(now.getTime() - IDEMPOTENCY_KEY_TTL_MS)));
-  return { processed };
+  return { processed, claimed: ids.length };
 }
 
-/** Runs worker ticks every `tickMs` until `signal` aborts; resolves after the in-flight tick finishes. */
-export async function runLoop(db: Db, opts: { tickMs: number; signal: AbortSignal }): Promise<void> {
+/**
+ * Runs worker ticks until `signal` aborts; resolves after the in-flight tick finishes. Sleeps `tickMs`
+ * between ticks, except after a full batch (more users are probably due), when it re-ticks at once.
+ */
+export async function runLoop(
+  db: Db,
+  opts: { tickMs: number; signal: AbortSignal; batchSize?: number; clock?: () => Date },
+): Promise<void> {
+  const batchSize = opts.batchSize ?? WORKER_BATCH_SIZE;
+  const clock = opts.clock ?? (() => new Date());
   while (!opts.signal.aborted) {
     const started = Date.now();
+    let fullBatch = false;
     try {
-      const { processed } = await runWorkerTick(db, new Date(), opts.signal);
+      const { processed, claimed } = await runWorkerTick(db, clock(), opts.signal, batchSize);
+      fullBatch = claimed >= batchSize;
       logger.info({ processed, ms: Date.now() - started }, "Worker tick");
     } catch (err) {
       logger.error({ err }, "Worker tick failed");
     }
+    if (fullBatch) continue;
     try {
       await sleep(Math.max(0, opts.tickMs - (Date.now() - started)), undefined, { signal: opts.signal });
     } catch {

@@ -4,6 +4,7 @@ import { logs, profiles, users, type Db } from "@workspace/db";
 import { localDate, logChanges } from "@workspace/engine";
 import { LogListQuerySchema, LogRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
+import { rollOverDue } from "../services/rollover";
 import { applyChanges } from "../services/scoring";
 
 const RETROACTIVE_LIMIT_MS = 48 * 3600_000;
@@ -45,6 +46,7 @@ export function logsRoutes(db: Db): IRouter {
 
     await withIdempotency(db, req, res, "POST /logs", async (tx) => {
       const now = new Date();
+      await rollOverDue(tx, userId, now); // roll missed dates before this write lands
       const occurredAt = body.occurredAt ? new Date(body.occurredAt) : now;
       if (now.getTime() - occurredAt.getTime() > RETROACTIVE_LIMIT_MS) {
         return { status: 422, body: { error: "Log is too old", code: "retroactive_limit" } };

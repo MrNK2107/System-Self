@@ -35,6 +35,7 @@ import {
   type RankedDomain,
 } from "@workspace/engine";
 import type { Notice } from "@workspace/contracts";
+import { logger } from "../lib/logger";
 import { abandonChain } from "./quests";
 import { applyChanges, insertNotice, toShadowState, type ScoreChange } from "./scoring";
 import { withUserLock, type Tx } from "./user-lock";
@@ -45,6 +46,7 @@ export const MAX_CATCH_UP_DAYS = 30;
 export const CLAIM_LEASE_MS = 10 * 60_000;
 // Shadow activation looks at the last 7 snapshots and the 30 preceding each of them.
 const SNAPSHOT_WINDOW = 37;
+const DAY_MS = 86_400_000;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -96,6 +98,10 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
 
   const tz = user.timezone;
   const opts = { localDate: date, now };
+  // Effective instant of this date's rollover: the end of D, or now if D is still running. Shadow timing
+  // uses it so a catch-up that activates the shadow on an older date starts it at that date's end.
+  const dayEnd = endOfLocalDay(date, tz);
+  const at = new Date(Math.min(now.getTime(), dayEnd.getTime()));
   const freezeActive = freezeActiveOn(date, profile.rankFreezeUntil);
   const out: Notice[] = [];
 
@@ -103,7 +109,7 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   const expired = await tx
     .select()
     .from(quests)
-    .where(and(eq(quests.userId, userId), eq(quests.status, "active"), lte(quests.expiresAt, endOfLocalDay(date, tz))))
+    .where(and(eq(quests.userId, userId), eq(quests.status, "active"), lte(quests.expiresAt, dayEnd)))
     .orderBy(asc(quests.expiresAt), asc(quests.createdAt));
   const failChanges: ScoreChange[] = [];
   const failNotices: { questId: string; title: string; type: string; penalty: number }[] = [];
@@ -181,11 +187,19 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
     .orderBy(desc(dailySnapshots.localDate))
     .limit(SNAPSHOT_WINDOW);
   const snapshots = recent.reverse();
-  const transition = evaluateRankTransition(rank, snapshots, freezeActive);
+  // Windows restart after every rank change: only snapshots dated after the rankSince local date count.
+  const rankSinceDate = localDate(profile.rankSince, tz);
+  const transition = evaluateRankTransition(
+    rank,
+    snapshots.filter((s) => s.date > rankSinceDate),
+    freezeActive,
+  );
   if (transition) {
+    // The last instant of D (or now), so rankSince's local date is D and the next window starts on D+1.
+    const rankSince = new Date(Math.min(now.getTime(), dayEnd.getTime() - 1));
     await tx
       .update(profiles)
-      .set({ rank: transition.to, rankSince: now, codename: generateCodename(transition.to) })
+      .set({ rank: transition.to, rankSince, codename: generateCodename(transition.to) })
       .where(eq(profiles.userId, userId));
     out.push(
       await insertNotice(tx, userId, "rank_change", { from: rank, to: transition.to, kind: transition.kind }, now),
@@ -217,14 +231,14 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   const shadow = toShadowState(shadowRow);
   if (!shadow) {
     if (shouldActivateShadow(snapshots, k)) {
-      const next = initShadow(scores, user.username, now);
-      const gap = round2(shadowGap(next, scores, now));
+      const next = initShadow(scores, user.username, at);
+      const gap = round2(shadowGap(next, scores, at));
       const values = {
         active: true,
         codename: next.codename,
         initialScores: next.initialScores,
         gainRates: next.gainRates,
-        activatedAt: now,
+        activatedAt: at,
         resolvedAt: null,
         gapAtActivation: gap,
       };
@@ -234,8 +248,8 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
         .onConflictDoUpdate({ target: shadowSelves.userId, set: values });
       out.push(await insertNotice(tx, userId, "shadow_activated", { gap }, now));
     }
-  } else if (isShadowResolved(shadow, scores, now)) {
-    await tx.update(shadowSelves).set({ active: false, resolvedAt: now }).where(eq(shadowSelves.userId, userId));
+  } else if (isShadowResolved(shadow, scores, at)) {
+    await tx.update(shadowSelves).set({ active: false, resolvedAt: at }).where(eq(shadowSelves.userId, userId));
     out.push(await insertNotice(tx, userId, "shadow_resolved", { codename: shadow.codename }, now));
   }
 
@@ -244,38 +258,52 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
 }
 
 /**
- * Catches a user up: rolls every local date from the day after `lastRolledDate` (or the onboarding day)
- * through yesterday, in order, then schedules the next rollover at the end of today. Dates older than
- * the most recent MAX_CATCH_UP_DAYS collapse into one decay-only step.
+ * Catches a user up inside the caller's locked transaction: rolls every local date from the day after
+ * `lastRolledDate` (or the onboarding day) through yesterday, in order, then schedules the next rollover
+ * at the end of today. Dates older than the most recent MAX_CATCH_UP_DAYS collapse into one decay-only
+ * step. Mutating game routes call this first so a new write never lands before older dates are rolled
+ * (POST /logs, quest complete/refuse, POST /chains; POST /quests/generate must too when it lands in Task 8).
  */
-export async function ensureRolledOver(db: Db, userId: string, now: Date): Promise<void> {
-  await withUserLock(db, userId, async (tx) => {
-    const ctx = await loadContext(tx, userId);
-    if (!ctx) return;
-    const { user, profile, day } = ctx;
-    const tz = user.timezone;
-    const today = localDate(now, tz);
-    const yesterday = addDays(today, -1);
-    let start = day.lastRolledDate !== null ? addDays(day.lastRolledDate, 1) : localDate(profile.onboardedAt, tz);
-
-    if (daysBetween(start, yesterday) + 1 > MAX_CATCH_UP_DAYS) {
-      const lastCollapsed = addDays(yesterday, -MAX_CATCH_UP_DAYS);
-      if (!freezeActiveOn(lastCollapsed, profile.rankFreezeUntil)) {
-        await applyChanges(tx, userId, decayChanges(decayPerDomain(MAX_CATCH_UP_DAYS)), {
-          localDate: lastCollapsed,
-          now,
-        });
-      }
-      await tx.update(userDayState).set({ lastRolledDate: lastCollapsed }).where(eq(userDayState.userId, userId));
-      start = addDays(lastCollapsed, 1);
-    }
-    for (let d = start; d <= yesterday; d = addDays(d, 1)) await rolloverDate(tx, userId, d, now);
-
-    await tx
+export async function rollOverDue(tx: Tx, userId: string, now: Date): Promise<void> {
+  const ctx = await loadContext(tx, userId);
+  if (!ctx) {
+    // A day-state row without a user/profile cannot be rolled; back off a day instead of re-leasing forever.
+    const pushed = await tx
       .update(userDayState)
-      .set({ nextRolloverAt: endOfLocalDay(today, tz) })
-      .where(eq(userDayState.userId, userId));
-  });
+      .set({ nextRolloverAt: new Date(now.getTime() + DAY_MS) })
+      .where(eq(userDayState.userId, userId))
+      .returning({ userId: userDayState.userId });
+    if (pushed.length > 0) logger.warn({ userId }, "Rollover skipped: user_day_state without a profile");
+    return;
+  }
+  const { user, profile, day } = ctx;
+  const tz = user.timezone;
+  const today = localDate(now, tz);
+  const yesterday = addDays(today, -1);
+  let start = day.lastRolledDate !== null ? addDays(day.lastRolledDate, 1) : localDate(profile.onboardedAt, tz);
+
+  if (daysBetween(start, yesterday) + 1 > MAX_CATCH_UP_DAYS) {
+    const lastCollapsed = addDays(yesterday, -MAX_CATCH_UP_DAYS);
+    if (!freezeActiveOn(lastCollapsed, profile.rankFreezeUntil)) {
+      await applyChanges(tx, userId, decayChanges(decayPerDomain(MAX_CATCH_UP_DAYS)), {
+        localDate: lastCollapsed,
+        now,
+      });
+    }
+    await tx.update(userDayState).set({ lastRolledDate: lastCollapsed }).where(eq(userDayState.userId, userId));
+    start = addDays(lastCollapsed, 1);
+  }
+  for (let d = start; d <= yesterday; d = addDays(d, 1)) await rolloverDate(tx, userId, d, now);
+
+  await tx
+    .update(userDayState)
+    .set({ nextRolloverAt: endOfLocalDay(today, tz) })
+    .where(eq(userDayState.userId, userId));
+}
+
+/** rollOverDue in its own per-user locked transaction (GET /state and the worker). */
+export async function ensureRolledOver(db: Db, userId: string, now: Date): Promise<void> {
+  await withUserLock(db, userId, (tx) => rollOverDue(tx, userId, now));
 }
 
 /**

@@ -11,6 +11,7 @@ import {
 } from "@workspace/engine";
 import { QuestRefuseRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
+import { rollOverDue } from "../services/rollover";
 import { abandonChain, createQuests, toQuestDto } from "../services/quests";
 import { applyChanges, insertNotice } from "../services/scoring";
 import type { Tx } from "../services/user-lock";
@@ -57,6 +58,7 @@ export function questsRoutes(db: Db): IRouter {
     }
     await withIdempotency(db, req, res, `POST /quests/${questId}/complete`, async (tx) => {
       const now = new Date();
+      await rollOverDue(tx, userId, now); // roll missed dates before this write lands
       const [quest] = await tx
         .select()
         .from(quests)
@@ -133,6 +135,7 @@ export function questsRoutes(db: Db): IRouter {
     }
     await withIdempotency(db, req, res, `POST /quests/${questId}/refuse`, async (tx) => {
       const now = new Date();
+      await rollOverDue(tx, userId, now); // roll missed dates before this write lands
       const [quest] = await tx
         .select()
         .from(quests)

@@ -4,6 +4,7 @@ import { profiles, questChains, type Db } from "@workspace/db";
 import { CHAIN_TEMPLATES, chainStepQuest, findChainTemplate } from "@workspace/engine";
 import { ChainStartRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
+import { rollOverDue } from "../services/rollover";
 import { createQuests, toQuestDto } from "../services/quests";
 import { CHAIN_STEP_EXPIRY_MS } from "./quests";
 
@@ -32,6 +33,7 @@ export function chainsRoutes(db: Db): IRouter {
     const userId = req.user!.id;
     await withIdempotency(db, req, res, "POST /chains", async (tx) => {
       const now = new Date();
+      await rollOverDue(tx, userId, now); // roll missed dates before this write lands
       const template = findChainTemplate(body.templateKey)!;
       const [profile] = await tx.select({ id: profiles.userId }).from(profiles).where(eq(profiles.userId, userId));
       if (!profile) return { status: 409, body: { error: "Not onboarded", code: "not_onboarded" } };
