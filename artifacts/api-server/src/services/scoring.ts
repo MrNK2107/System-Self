@@ -1,4 +1,4 @@
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 import {
   achievements as achievementsTable,
   domainScores,
@@ -117,7 +117,11 @@ export async function applyChanges(
       .where(and(eq(domainScores.userId, userId), eq(domainScores.domain, d)));
   }
   if (anyActivity) {
-    await tx.update(userDayState).set({ lastActivityDate: ctx.localDate }).where(eq(userDayState.userId, userId));
+    // Only ever move forward: a backdated activity must not rewind the last-activity date.
+    await tx
+      .update(userDayState)
+      .set({ lastActivityDate: sql`GREATEST(${userDayState.lastActivityDate}, ${ctx.localDate}::date)` })
+      .where(eq(userDayState.userId, userId));
   }
 
   const created: (typeof noticesTable.$inferSelect)[] = [];
@@ -146,11 +150,13 @@ export async function applyChanges(
   }
 
   // Achievements.
-  const scores = Object.fromEntries(RANKED_DOMAINS.map((d) => [d, states.get(d)!.score])) as Record<
-    RankedDomain,
-    number
-  >;
-  const streaks = RANKED_DOMAINS.map((d) => states.get(d)!.streak);
+  const finalStates = RANKED_DOMAINS.map((d) => {
+    const s = states.get(d);
+    if (!s) throw new Error(`No domain_scores row for ${d}`);
+    return s;
+  });
+  const scores = Object.fromEntries(finalStates.map((s) => [s.domain, s.score])) as Record<RankedDomain, number>;
+  const streaks = finalStates.map((s) => s.streak);
   // Sequential: a transaction is a single connection and must not run concurrent queries.
   const [logsCount] = await tx.select({ n: count() }).from(logs).where(eq(logs.userId, userId));
   const [forbiddenLogs] = await tx
@@ -169,6 +175,7 @@ export async function applyChanges(
       logsCount: logsCount!.n,
       completedQuests: completedQuests!.n,
       forbiddenLogs: forbiddenLogs!.n,
+      // TODO(P5): count won named challenges once the challenges feature exists.
       challengeWins: 0,
       maxStreak: Math.max(...streaks),
       minStreak: Math.min(...streaks),

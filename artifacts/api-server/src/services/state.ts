@@ -29,7 +29,7 @@ import type { GameState } from "@workspace/contracts";
 import { toShadowState } from "./scoring";
 
 /** Builds the client-facing game state. The hidden score is used internally but never included. */
-export async function buildGameState(db: Db, userId: string, now: Date): Promise<GameState | null> {
+export async function buildGameState(db: Pick<Db, "select">, userId: string, now: Date): Promise<GameState | null> {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   const [profile] = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
   if (!user || !profile) return null;

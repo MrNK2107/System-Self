@@ -118,3 +118,18 @@ test("concurrent applyChanges (Promise.all of 2) on one user sum correctly", { s
   const events = await db!.select().from(scoreEvents).where(eq(scoreEvents.userId, userId));
   assert.equal(events.length, 2);
 });
+
+test("backdated activity does not move lastActivityDate backwards", { skip }, async () => {
+  const userId = await seedUser();
+  const run = (localDate: string) =>
+    withUserLock(db!, userId, (tx) =>
+      applyChanges(tx, userId, [{ domain: "BODY", delta: 2.5, bonus: false, activity: true, reason: "log" }], {
+        localDate,
+        now: new Date("2026-01-10T10:00:00Z"),
+      }),
+    );
+  await run("2026-01-10");
+  await run("2026-01-08");
+  const [state] = await db!.select().from(userDayState).where(eq(userDayState.userId, userId));
+  assert.equal(state!.lastActivityDate, "2026-01-10");
+});

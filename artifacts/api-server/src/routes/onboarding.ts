@@ -12,7 +12,6 @@ import {
 import { OnboardingRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
 import { buildGameState } from "../services/state";
-import { withUserLock } from "../services/user-lock";
 
 export function onboardingRoutes(db: Db): IRouter {
   const router = Router();
@@ -21,11 +20,13 @@ export function onboardingRoutes(db: Db): IRouter {
     const body = OnboardingRequestSchema.parse(req.body);
     const userId = req.user!.id;
 
-    await withIdempotency(db, req, res, "POST /onboarding", async () => {
+    await withIdempotency(db, req, res, "POST /onboarding", async (tx) => {
       const now = new Date();
-      const created = await withUserLock(db, userId, async (tx) => {
+      {
         const [existing] = await tx.select({ id: profiles.userId }).from(profiles).where(eq(profiles.userId, userId));
-        if (existing) return false;
+        if (existing) {
+          return { status: 409, body: { error: "Already onboarded", code: "already_onboarded" } };
+        }
 
         const today = localDate(now, body.timezone);
         const initial = Object.fromEntries(RANKED_DOMAINS.map((d) => [d, body.ratings[d] * 4])) as Record<
@@ -72,12 +73,8 @@ export function onboardingRoutes(db: Db): IRouter {
           hidden: hiddenScore(initial, 1.0),
           rank: "E",
         });
-        return true;
-      });
-      if (!created) {
-        return { status: 409, body: { error: "Already onboarded", code: "already_onboarded" } };
       }
-      return { status: 201, body: await buildGameState(db, userId, now) };
+      return { status: 201, body: await buildGameState(tx, userId, now) };
     });
   });
 

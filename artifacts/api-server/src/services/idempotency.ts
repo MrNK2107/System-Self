@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { and, eq } from "drizzle-orm";
 import { idempotencyKeys, type Db } from "@workspace/db";
+import { withUserLock, type Tx } from "./user-lock";
 
 export interface HandlerResult {
   status: number;
@@ -16,42 +17,45 @@ function readKey(req: Request): string | null {
 }
 
 /**
- * Runs `handler` and sends its result. With an `Idempotency-Key` header (or `clientId` body field) the
- * successful (2xx) result is stored per user and replayed with 200 on a repeat. Error results are
- * not stored, so a failed attempt can be retried. Requires req.user (mount behind requireAuth).
+ * Runs `handler` inside the per-user lock and sends its result. Key lookup, the handler's work and the
+ * key insert share one transaction, so concurrent same-key requests cannot both apply and a crash cannot
+ * lose the key. With an `Idempotency-Key` header (or `clientId` body field) a successful (2xx) result is
+ * stored and replayed with 200 on a repeat. Error results are not stored. Requires req.user.
+ * Handlers must do all their writes on the given tx.
  */
 export async function withIdempotency(
   db: Db,
   req: Request,
   res: Response,
   routeKey: string,
-  handler: () => Promise<HandlerResult>,
+  handler: (tx: Tx) => Promise<HandlerResult>,
 ): Promise<void> {
   const userId = req.user!.id;
   const key = readKey(req);
-  if (key) {
-    const [prior] = await db
-      .select()
-      .from(idempotencyKeys)
-      .where(and(eq(idempotencyKeys.userId, userId), eq(idempotencyKeys.key, key)))
-      .limit(1);
-    if (prior) {
-      if (prior.route !== routeKey) {
-        res
-          .status(409)
-          .json({ error: "Idempotency key already used for another request", code: "idempotency_key_reuse" });
-        return;
+  const out = await withUserLock(db, userId, async (tx): Promise<HandlerResult> => {
+    if (key) {
+      const [prior] = await tx
+        .select()
+        .from(idempotencyKeys)
+        .where(and(eq(idempotencyKeys.userId, userId), eq(idempotencyKeys.key, key)))
+        .limit(1);
+      if (prior) {
+        if (prior.route !== routeKey) {
+          return {
+            status: 409,
+            body: { error: "Idempotency key already used for another request", code: "idempotency_key_reuse" },
+          };
+        }
+        return { status: 200, body: prior.responseBody };
       }
-      res.status(200).json(prior.responseBody);
-      return;
     }
-  }
-  const result = await handler();
-  if (key && result.status >= 200 && result.status < 300) {
-    await db
-      .insert(idempotencyKeys)
-      .values({ userId, key, route: routeKey, responseStatus: result.status, responseBody: result.body ?? null })
-      .onConflictDoNothing();
-  }
-  res.status(result.status).json(result.body);
+    const result = await handler(tx);
+    if (key && result.status >= 200 && result.status < 300) {
+      await tx
+        .insert(idempotencyKeys)
+        .values({ userId, key, route: routeKey, responseStatus: result.status, responseBody: result.body ?? null });
+    }
+    return result;
+  });
+  res.status(out.status).json(out.body);
 }

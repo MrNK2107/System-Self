@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "@workspace/db/testing";
-import { dailySnapshots, scoreEvents, shadowSelves, userDayState, users } from "@workspace/db";
+import { dailySnapshots, profiles, scoreEvents, shadowSelves, userDayState, users } from "@workspace/db";
 import { GameStateSchema } from "@workspace/contracts";
 import { createApp } from "../app-factory";
 import type { Mailer } from "../lib/mailer";
@@ -138,4 +138,20 @@ test("GET /state after onboarding returns GameState and never a hidden key (deep
   assert.equal(findKey(created.body, "hidden"), false);
   assert.ok(["up", "stable", "down"].includes(res.body.trajectory));
   assert.equal(typeof res.body.tierProgress, "number");
+});
+
+test("concurrent same-key onboarding -> {201, 200}, identical bodies, one profile and one score set", { skip }, async () => {
+  const a = app();
+  const { token, id } = await register(a);
+  const send = () =>
+    request(a)
+      .post("/api/onboarding")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Idempotency-Key", "same")
+      .send(body());
+  const [r1, r2] = await Promise.all([send(), send()]);
+  assert.deepEqual([r1.status, r2.status].sort(), [200, 201]);
+  assert.deepEqual(r1.body, r2.body);
+  assert.equal((await db!.select().from(profiles).where(eq(profiles.userId, id))).length, 1);
+  assert.equal((await db!.select().from(scoreEvents).where(eq(scoreEvents.userId, id))).length, 5);
 });
