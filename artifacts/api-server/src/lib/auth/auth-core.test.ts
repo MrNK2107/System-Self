@@ -110,3 +110,28 @@ test("new email code invalidates earlier one; expired code -> expired", { skip }
   await db!.update(emailCodes).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(emailCodes.userId, uid));
   assert.equal(await consumeEmailCode(db!, uid, "verify", b), "expired");
 });
+
+test("concurrent wrong guesses cannot exceed the attempt limit", { skip }, async () => {
+  const uid = await makeUser();
+  const code = await createEmailCode(db!, uid, "verify");
+  const wrong = code === "000000" ? "111111" : "000000";
+  const results = await Promise.all(
+    Array.from({ length: 20 }, () => consumeEmailCode(db!, uid, "verify", wrong)),
+  );
+  assert.equal(results.filter((r) => r === "invalid").length, 5);
+  const [row] = await db!.select().from(emailCodes).where(eq(emailCodes.userId, uid));
+  assert.ok(row!.attempts <= 5);
+  assert.equal(await consumeEmailCode(db!, uid, "verify", code), "locked");
+});
+
+test("concurrent rotation of one token: exactly one wins, family revoked", { skip }, async () => {
+  const uid = await makeUser();
+  const t = await issueRefreshToken(db!, uid);
+  const results = await Promise.all([rotateRefreshToken(db!, t.token), rotateRefreshToken(db!, t.token)]);
+  assert.equal(results.filter((r) => r.ok).length, 1);
+  const loser = results.find((r) => !r.ok);
+  assert.deepEqual(loser, { ok: false, reason: "reused" });
+  const rows = await db!.select().from(refreshTokens).where(eq(refreshTokens.userId, uid));
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((x) => x.revokedAt));
+});

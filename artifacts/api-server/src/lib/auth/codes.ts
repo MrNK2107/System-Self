@@ -1,5 +1,5 @@
 import { randomInt, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { emailCodes, type Db } from "@workspace/db";
 import { hashToken } from "./tokens";
 
@@ -41,8 +41,15 @@ export async function consumeEmailCode(
     .orderBy(desc(emailCodes.createdAt))
     .limit(1);
   if (!row) return "invalid";
-  if (row.attempts >= MAX_ATTEMPTS) return "locked";
   if (row.expiresAt.getTime() <= Date.now()) return "expired";
+
+  // Atomically claim an attempt before comparing, so concurrent guesses cannot exceed the limit.
+  const claimedAttempt = await db
+    .update(emailCodes)
+    .set({ attempts: sql`${emailCodes.attempts} + 1` })
+    .where(and(eq(emailCodes.id, row.id), isNull(emailCodes.consumedAt), lt(emailCodes.attempts, MAX_ATTEMPTS)))
+    .returning({ id: emailCodes.id });
+  if (claimedAttempt.length === 0) return "locked";
 
   const a = Buffer.from(hashCode(userId, code));
   const b = Buffer.from(row.codeHash);
@@ -54,9 +61,5 @@ export async function consumeEmailCode(
       .returning({ id: emailCodes.id });
     return claimed.length ? "ok" : "invalid";
   }
-  await db
-    .update(emailCodes)
-    .set({ attempts: row.attempts + 1 })
-    .where(eq(emailCodes.id, row.id));
   return "invalid";
 }
