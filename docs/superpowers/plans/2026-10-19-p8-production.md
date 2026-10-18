@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - Image: multi-stage build, non-root user, `NODE_ENV=production`, `CMD` selected by `ROLE=api|worker|migrate`; no dev dependencies or source maps of secrets in the final layer; image < 250 MB.
+- The migrator currently runs through `tsx` (a devDependency): bundle `lib/db/src/migrate.ts` with esbuild into the image (`dist/migrate.mjs`, migrations folder copied alongside) so `ROLE=migrate` works without dev dependencies.
 - Production env validation: `JWT_SECRET` ≥ 32 chars, `DATABASE_URL` set, `CORS_ORIGIN` set (no `*`), otherwise the process exits with a clear message.
 - Body size limit 100 KB JSON (voice route keeps its own 5 MB raw limit). DB pool size `DB_POOL_MAX` (default 10).
 - `/metrics` requires `Authorization: Bearer ${METRICS_TOKEN}` (404 when `METRICS_TOKEN` unset).

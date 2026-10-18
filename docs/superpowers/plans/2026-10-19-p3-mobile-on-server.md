@@ -23,6 +23,7 @@
 
 ## Review Focus
 
+0. **Server refresh grace (P1 final fix):** replaying a refresh token within 30 s of its rotation returns a fresh token instead of revoking the family, so a lost refresh response does not log the user out. `POST /api/auth/password/change` returns a fresh `AuthResponse` (200): store it. Unknown `/api/*` paths return 404, so only real 401s trigger refresh.
 1. **Expired refresh token while offline** — the app opens with no network and an expired access token: cached screens render, no logout happens; on reconnect it refreshes once and replays the outbox. (Task 1)
 2. **Refresh race** — five requests 401 at once → exactly one `/auth/refresh` call; all five retry with the new token. (Task 1)
 3. **Outbox duplicates** — a log sent, response lost, then replayed → the server dedupes by `clientId`; the UI shows one log. (Task 1, Task 4)

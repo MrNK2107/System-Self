@@ -31,6 +31,7 @@
 - Dates: every "day" is the user's local date in `users.timezone` (IANA), as `YYYY-MM-DD`. Use `Intl.DateTimeFormat` with `timeZone`; no date library.
 - All score mutations happen inside `withUserLock` (transaction + `pg_advisory_xact_lock(hashtext(userId))`).
 - Every mutating endpoint accepts an `Idempotency-Key` header or a `clientId` body field; replays return the original result with 200.
+- Timezone changes (`PATCH /api/auth/me` with `timezone`) must recompute `user_day_state.nextRolloverAt` under `withUserLock` (add this hook in Task 7). Every new table that has `updatedAt` gets it set explicitly by the service on every update.
 - The hidden score is never returned to clients. Clients get `rank`, `tier progress %` (0–100 within the current tier band), and `trajectory`.
 - Trajectory: hidden score now vs the snapshot 7 days earlier (or the earliest one): > +1.0 up, < −1.0 down, else stable.
 - DB-dependent tests follow the P1 guard (skip without `TEST_DATABASE_URL`).
