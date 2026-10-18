@@ -23,7 +23,7 @@ import {
   type RankedDomain,
   type ShadowState,
 } from "@workspace/engine";
-import type { Notice, NoticeKind } from "@workspace/contracts";
+import type { Notice, NoticeKind, NoticePayload } from "@workspace/contracts";
 import type { Tx } from "./user-lock";
 
 export type ScoreReason =
@@ -56,16 +56,17 @@ export function toShadowState(row: typeof shadowSelves.$inferSelect | undefined)
   };
 }
 
+/** A stored notice as sent to clients. Rows are only written via the typed helpers below, so kind and payload agree. */
 export function toNotice(row: typeof noticesTable.$inferSelect): Notice {
-  return { id: row.id, kind: row.kind as NoticeKind, payload: row.payload, createdAt: row.createdAt.toISOString() };
+  return { id: row.id, kind: row.kind, payload: row.payload, createdAt: row.createdAt.toISOString() } as Notice;
 }
 
 /** Inserts one notice row and returns it as a client notice. */
-export async function insertNotice(
+export async function insertNotice<K extends NoticeKind>(
   tx: Pick<Tx, "insert">,
   userId: string,
-  kind: NoticeKind,
-  payload: unknown,
+  kind: K,
+  payload: NoticePayload<K>,
   now: Date,
 ): Promise<Notice> {
   const [n] = await tx.insert(noticesTable).values({ userId, kind, payload, createdAt: now }).returning();
@@ -136,10 +137,9 @@ export async function applyChanges(
       .where(eq(userDayState.userId, userId));
   }
 
-  const created: (typeof noticesTable.$inferSelect)[] = [];
-  const addNotice = async (kind: NoticeKind, payload: unknown) => {
-    const [n] = await tx.insert(noticesTable).values({ userId, kind, payload, createdAt: ctx.now }).returning();
-    created.push(n!);
+  const created: Notice[] = [];
+  const addNotice = async <K extends NoticeKind>(kind: K, payload: NoticePayload<K>) => {
+    created.push(await insertNotice(tx, userId, kind, payload, ctx.now));
   };
 
   // Milestones: every not-yet-unlocked tier between the old and new score, per touched domain.
@@ -203,5 +203,5 @@ export async function applyChanges(
     await addNotice("achievement", { id, title: def.title, description: def.description, icon: def.icon });
   }
 
-  return { results, notices: created.map(toNotice) };
+  return { results, notices: created };
 }

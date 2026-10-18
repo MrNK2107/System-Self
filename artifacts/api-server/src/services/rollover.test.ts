@@ -1,4 +1,4 @@
-import test, { after, beforeEach } from "node:test";
+import test, { after, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import { and, asc, eq } from "drizzle-orm";
@@ -18,7 +18,7 @@ import {
   userDayState,
 } from "@workspace/db";
 import { RANKED_DOMAINS, addDays, endOfLocalDay, hiddenScore, localDate } from "@workspace/engine";
-import { app, auth, db, score, setup, skip, TZ } from "../routes/game-test-helpers";
+import { app, auth, db, score, setup, skip, TZ, assertStoredNoticesMatchContract } from "../routes/game-test-helpers";
 import { createQuests } from "./quests";
 import { claimDueUsers, ensureRolledOver, rolloverDate } from "./rollover";
 import { withUserLock } from "./user-lock";
@@ -27,6 +27,9 @@ import { signAccessToken } from "../lib/auth/tokens";
 
 after(async () => {
   await closeTestDb();
+});
+afterEach(async () => {
+  await assertStoredNoticesMatchContract();
 });
 beforeEach(async () => {
   if (db) await resetDb(db);
@@ -149,7 +152,13 @@ test("streak break penalty includes DISCIPLINE when it broke", { skip }, async (
   assert.equal(ev[0]!.domain, "DISCIPLINE");
   assert.equal(ev[0]!.delta, -4);
   const n = await noticesOf(id, "streak_break");
-  assert.deepEqual(n[0]!.payload, { domains: ["BODY", "DISCIPLINE"], penalty: 4 });
+  assert.deepEqual(n[0]!.payload, {
+    domains: [
+      { domain: "BODY", lostStreak: 3 },
+      { domain: "DISCIPLINE", lostStreak: 2 },
+    ],
+    penalty: 4,
+  });
 });
 
 test("decay: 1 inactive day → none, 2nd → −0.3 per domain, 5th → −0.6", { skip }, async () => {
@@ -204,7 +213,7 @@ test("14 snapshots in tier D → promotion E→D with rank_change notice and ran
   assert.match(p!.codename, /^VECTOR \/\/ /);
   const rc = await noticesOf(id, "rank_change");
   assert.equal(rc.length, 1);
-  assert.deepEqual(rc[0]!.payload, { from: "E", to: "D", kind: "promotion" });
+  assert.deepEqual(rc[0]!.payload, { from: "E", to: "D", kind: "promotion", newCodename: p!.codename });
   const ach = await db!.select().from(achievements).where(eq(achievements.userId, id));
   assert.ok(ach.some((a) => a.achievementId === "rank_d"));
   const an = await noticesOf(id, "achievement");
@@ -237,7 +246,7 @@ test("rank freeze blocks demotion (and decay); without it the rank drops", { ski
   assert.match(p!.codename, /^VECTOR \/\/ /);
   assert.equal((await eventsOf(id, "decay")).length, 5);
   const rc = await noticesOf(id, "rank_change");
-  assert.deepEqual(rc[0]!.payload, { from: "C", to: "D", kind: "demotion" });
+  assert.deepEqual(rc[0]!.payload, { from: "C", to: "D", kind: "demotion", newCodename: p!.codename });
 });
 
 test("shadow activates after 5 inactive days, at the end of that date during a catch-up", { skip }, async () => {
@@ -253,6 +262,7 @@ test("shadow activates after 5 inactive days, at the end of that date during a c
   const n = await noticesOf(id, "shadow_activated");
   assert.equal(n.length, 1);
   assert.equal(typeof (n[0]!.payload as { gap: number }).gap, "number");
+  assert.equal((n[0]!.payload as { codename: string }).codename, "SHADOW // ALICE_1");
 });
 
 test("active shadow resolves once every domain is at or above it", { skip }, async () => {
@@ -329,7 +339,11 @@ test("rank windows restart after a promotion: hidden 60 from E -> D on day 14, C
   assert.equal(await rankOf(), "D");
   await ensureRolledOver(db!, id, at(addDays(D0, 28))); // D0+27: 14th
   assert.equal(await rankOf(), "C");
-  const rc = (await noticesOf(id, "rank_change")).map((n) => n.payload);
+  const rc = (await noticesOf(id, "rank_change")).map((n) => {
+    const { newCodename, ...rest } = n.payload as { newCodename: string };
+    assert.ok(newCodename.includes(" // "), newCodename);
+    return rest;
+  });
   assert.deepEqual(rc, [
     { from: "E", to: "D", kind: "promotion" },
     { from: "D", to: "C", kind: "promotion" },

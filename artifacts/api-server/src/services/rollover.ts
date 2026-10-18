@@ -34,7 +34,7 @@ import {
   type Rank,
   type RankedDomain,
 } from "@workspace/engine";
-import type { Notice } from "@workspace/contracts";
+import type { Notice, NoticePayload } from "@workspace/contracts";
 import { logger } from "../lib/logger";
 import { abandonChain } from "./quests";
 import { applyChanges, insertNotice, toShadowState, type ScoreChange } from "./scoring";
@@ -112,7 +112,7 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
     .where(and(eq(quests.userId, userId), eq(quests.status, "active"), lte(quests.expiresAt, dayEnd)))
     .orderBy(asc(quests.expiresAt), asc(quests.createdAt));
   const failChanges: ScoreChange[] = [];
-  const failNotices: { questId: string; title: string; type: string; penalty: number }[] = [];
+  const failNotices: NoticePayload<"quest_failed">[] = [];
   for (const q of expired) {
     const [failed] = await tx
       .update(quests)
@@ -123,7 +123,7 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
     if (q.chainId) await abandonChain(tx, q.chainId);
     const penalty = QUEST_FAIL_PENALTY[q.type as QuestType];
     failChanges.push({ domain: "DISCIPLINE", delta: -penalty, bonus: false, activity: false, reason: "quest_failed", refId: q.id });
-    failNotices.push({ questId: q.id, title: q.title, type: q.type, penalty });
+    failNotices.push({ questId: q.id, title: q.title, type: q.type as QuestType, penalty });
   }
   if (failChanges.length > 0) out.push(...(await applyChanges(tx, userId, failChanges, opts)).notices);
   for (const payload of failNotices) out.push(await insertNotice(tx, userId, "quest_failed", payload, now));
@@ -136,6 +136,8 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   );
   if (broken.length > 0) {
     const ordered = RANKED_DOMAINS.filter((d) => broken.includes(d));
+    // Captured before the streaks are zeroed, for the notice.
+    const lost = ordered.map((domain) => ({ domain, lostStreak: rows.find((r) => r.domain === domain)!.streak }));
     await tx
       .update(domainScores)
       .set({ streak: 0, updatedAt: now })
@@ -147,7 +149,7 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
       opts,
     );
     out.push(...applied.notices);
-    out.push(await insertNotice(tx, userId, "streak_break", { domains: ordered, penalty }, now));
+    out.push(await insertNotice(tx, userId, "streak_break", { domains: lost, penalty }, now));
   }
 
   // 3. Decay.
@@ -197,12 +199,19 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   if (transition) {
     // The last instant of D (or now), so rankSince's local date is D and the next window starts on D+1.
     const rankSince = new Date(Math.min(now.getTime(), dayEnd.getTime() - 1));
+    const newCodename = generateCodename(transition.to);
     await tx
       .update(profiles)
-      .set({ rank: transition.to, rankSince, codename: generateCodename(transition.to) })
+      .set({ rank: transition.to, rankSince, codename: newCodename })
       .where(eq(profiles.userId, userId));
     out.push(
-      await insertNotice(tx, userId, "rank_change", { from: rank, to: transition.to, kind: transition.kind }, now),
+      await insertNotice(
+        tx,
+        userId,
+        "rank_change",
+        { from: rank, to: transition.to, kind: transition.kind, newCodename },
+        now,
+      ),
     );
     const achievementId = transition.kind === "promotion" ? rankAchievement(transition.to) : null;
     if (achievementId) {
@@ -246,7 +255,7 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
         .insert(shadowSelves)
         .values({ userId, ...values })
         .onConflictDoUpdate({ target: shadowSelves.userId, set: values });
-      out.push(await insertNotice(tx, userId, "shadow_activated", { gap }, now));
+      out.push(await insertNotice(tx, userId, "shadow_activated", { gap, codename: next.codename }, now));
     }
   } else if (isShadowResolved(shadow, scores, at)) {
     await tx.update(shadowSelves).set({ active: false, resolvedAt: at }).where(eq(shadowSelves.userId, userId));

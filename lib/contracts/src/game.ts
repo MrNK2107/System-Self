@@ -58,13 +58,43 @@ export const NOTICE_KINDS = [
 export const NoticeKindSchema = z.enum(NOTICE_KINDS);
 export type NoticeKind = z.infer<typeof NoticeKindSchema>;
 
-export const NoticeSchema = z.object({
-  id: z.string(),
-  kind: NoticeKindSchema,
-  payload: z.unknown(),
-  createdAt: z.string(),
-});
+export const QuestTypeSchema = z.enum(["daily", "weekly", "arc"]);
+
+/** The payload the server writes for each notice kind. */
+export const NOTICE_PAYLOAD_SCHEMAS = {
+  achievement: z.object({ id: z.string(), title: z.string(), description: z.string(), icon: z.string() }),
+  milestone: z.object({ domain: RankedDomainSchema, tier: z.number().int(), title: z.string() }),
+  rank_change: z.object({
+    from: RankSchema,
+    to: RankSchema,
+    kind: z.enum(["promotion", "demotion"]),
+    newCodename: z.string(),
+  }),
+  chain_complete: z.object({ name: z.string(), templateKey: z.string() }),
+  quest_failed: z.object({ questId: z.string(), title: z.string(), type: QuestTypeSchema, penalty: z.number() }),
+  streak_break: z.object({
+    domains: z.array(z.object({ domain: RankedDomainSchema, lostStreak: z.number().int() })),
+    penalty: z.number(),
+  }),
+  shadow_activated: z.object({ gap: z.number(), codename: z.string() }),
+  shadow_resolved: z.object({ codename: z.string() }),
+} as const satisfies Record<NoticeKind, z.ZodTypeAny>;
+
+const noticeOf = <K extends NoticeKind>(kind: K) =>
+  z.object({ id: z.string(), kind: z.literal(kind), payload: NOTICE_PAYLOAD_SCHEMAS[kind], createdAt: z.string() });
+
+export const NoticeSchema = z.discriminatedUnion("kind", [
+  noticeOf("achievement"),
+  noticeOf("milestone"),
+  noticeOf("rank_change"),
+  noticeOf("chain_complete"),
+  noticeOf("quest_failed"),
+  noticeOf("streak_break"),
+  noticeOf("shadow_activated"),
+  noticeOf("shadow_resolved"),
+]);
 export type Notice = z.infer<typeof NoticeSchema>;
+export type NoticePayload<K extends NoticeKind> = z.infer<(typeof NOTICE_PAYLOAD_SCHEMAS)[K]>;
 
 export const TrajectorySchema = z.enum(["up", "stable", "down"]);
 
@@ -173,7 +203,7 @@ export const LogListResponseSchema = z.object({
 
 export const QuestSchema = z.object({
   id: z.string(),
-  type: z.enum(["daily", "weekly", "arc"]),
+  type: QuestTypeSchema,
   title: z.string(),
   description: z.string(),
   domain: z.string(),

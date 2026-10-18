@@ -44,11 +44,23 @@ test("generatedQuestsPayloadSchema rejects unknown domains and empty boards", ()
   );
 });
 
-test("NoticeSchema.kind is restricted to NOTICE_KINDS", () => {
-  const base = { id: "n1", payload: {}, createdAt: "2026-01-01T00:00:00.000Z" };
-  for (const kind of ["quest_failed", "streak_break", "shadow_activated", "shadow_resolved", "rank_change"]) {
-    assert.ok((NOTICE_KINDS as readonly string[]).includes(kind), kind);
-    assert.equal(NoticeSchema.parse({ ...base, kind }).kind, kind);
+test("NoticeSchema is a union by kind with the exact payload the server writes for every kind", () => {
+  const base = { id: "n1", createdAt: "2026-01-01T00:00:00.000Z" };
+  const payloads: Record<(typeof NOTICE_KINDS)[number], unknown> = {
+    achievement: { id: "first_log", title: "T", description: "D", icon: "zap" },
+    milestone: { domain: "BODY", tier: 60, title: "T" },
+    rank_change: { from: "E", to: "D", kind: "promotion", newCodename: "VECTOR // AB1-2" },
+    chain_complete: { name: "PHYSICAL PROTOCOL", templateKey: "physical_protocol" },
+    quest_failed: { questId: "q1", title: "Q", type: "daily", penalty: 0.8 },
+    streak_break: { domains: [{ domain: "BODY", lostStreak: 3 }], penalty: 2 },
+    shadow_activated: { gap: 12, codename: "SHADOW // ALICE_1" },
+    shadow_resolved: { codename: "SHADOW // ALICE_1" },
+  };
+  for (const kind of NOTICE_KINDS) {
+    assert.equal(NoticeSchema.parse({ ...base, kind, payload: payloads[kind] }).kind, kind);
+    assert.throws(() => NoticeSchema.parse({ ...base, kind, payload: {} }), kind);
   }
-  assert.throws(() => NoticeSchema.parse({ ...base, kind: "bogus" }));
+  // A payload of another kind does not pass.
+  assert.throws(() => NoticeSchema.parse({ ...base, kind: "rank_change", payload: payloads.milestone }));
+  assert.throws(() => NoticeSchema.parse({ ...base, kind: "bogus", payload: {} }));
 });

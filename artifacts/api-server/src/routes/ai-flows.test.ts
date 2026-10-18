@@ -1,4 +1,4 @@
-import test, { after, beforeEach } from "node:test";
+import test, { after, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import { and, eq } from "drizzle-orm";
@@ -7,10 +7,13 @@ import { dailySnapshots, debriefs, generatedQuestBatches, logs, profiles, quests
 import { RANKED_DOMAINS, addDays, debriefVerdict, endOfLocalDay, localDate, type RankedDomain } from "@workspace/engine";
 import { env } from "../lib/env";
 import { createQuests } from "../services/quests";
-import { app, auth, db, score, setup, skip, TZ } from "./game-test-helpers";
+import { app, auth, db, score, setup, skip, TZ, assertStoredNoticesMatchContract } from "./game-test-helpers";
 
 after(async () => {
   await closeTestDb();
+});
+afterEach(async () => {
+  await assertStoredNoticesMatchContract();
 });
 beforeEach(async () => {
   if (db) await resetDb(db);

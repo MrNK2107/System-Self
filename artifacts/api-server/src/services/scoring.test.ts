@@ -1,4 +1,4 @@
-import test, { after, beforeEach } from "node:test";
+import test, { after, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "@workspace/db/testing";
@@ -6,12 +6,16 @@ import { domainScores, logs, notices, scoreEvents, userDayState, users } from "@
 import { RANKED_DOMAINS } from "@workspace/engine";
 import { applyChanges } from "./scoring";
 import { withUserLock } from "./user-lock";
+import { assertStoredNoticesMatchContract } from "../routes/game-test-helpers";
 
 const db = getTestDb();
 const skip = db ? false : "TEST_DATABASE_URL not set";
 
 after(async () => {
   await closeTestDb();
+});
+afterEach(async () => {
+  await assertStoredNoticesMatchContract();
 });
 beforeEach(async () => {
   if (db) await resetDb(db);
