@@ -1,18 +1,17 @@
 import { and, desc, eq, lte } from "drizzle-orm";
-import { dailySnapshots, domainScores, quests, type Db } from "@workspace/db";
-import { RANKED_DOMAINS, addDays, debriefVerdict, endOfLocalDay, type RankedDomain } from "@workspace/engine";
-import type { DebriefFacts, PromptContext } from "./ai-context";
+import { dailySnapshots, debriefs, domainScores, profiles, quests, users, type Db } from "@workspace/db";
+import { RANKED_DOMAINS, debriefVerdict, localDate, localTimeToInstant, type RankedDomain } from "@workspace/engine";
+import type { AiDeps } from "../lib/ai";
+import { buildUserContext, generateMessage, type DebriefFacts, type PromptContext } from "./ai-context";
+import { rollOverDue } from "./rollover";
+import { withUserLock } from "./user-lock";
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-/**
- * The instant today's debrief opens: `nightlyTime` (HH:MM) after the local midnight that starts `today`.
- * Computed as an offset from that midnight, so on a DST-change day it can be an hour off the wall clock.
- */
+/** The instant today's debrief opens: local wall-clock `nightlyTime` (HH:MM) on `today`, DST-safe. */
 export function debriefAvailableAt(nightlyTime: string, today: string, tz: string): Date {
   const [h, m] = nightlyTime.split(":").map(Number);
-  const startOfToday = endOfLocalDay(addDays(today, -1), tz);
-  return new Date(startOfToday.getTime() + ((h ?? 0) * 60 + (m ?? 0)) * 60_000);
+  return localTimeToInstant(today, h ?? 0, m ?? 0, tz);
 }
 
 /**
@@ -51,4 +50,68 @@ export function templateDebriefText(ctx: PromptContext, facts: DebriefFacts): st
   const deltas = RANKED_DOMAINS.map((d) => `${d} ${facts.deltas[d] >= 0 ? "+" : ""}${facts.deltas[d]}`).join(", ");
   const verdict = facts.verdict.charAt(0) + facts.verdict.slice(1).toLowerCase();
   return `Day ${ctx.dayNumber} closed at rank ${ctx.rank}. ${deltas}. Quests resolved: ${facts.questCompleted} of ${facts.questTotal} completed. ${verdict}.`;
+}
+
+export type DebriefOutcome =
+  | { kind: "not_onboarded" }
+  | { kind: "unavailable"; availableAt: Date }
+  | { kind: "ready"; row: typeof debriefs.$inferSelect };
+
+type Step1 = DebriefOutcome | { kind: "build"; today: string; ctx: PromptContext; facts: DebriefFacts };
+
+/**
+ * Today's debrief, built once per local day and stored. Three steps so the model call never holds the user lock:
+ * (1) under the lock: roll over, check availability, return the stored debrief or gather the facts;
+ * (2) lock released: call the model; (3) under the lock again: insert (a concurrent request may have won,
+ * so conflicts are ignored) and return whatever is stored.
+ */
+export async function getOrBuildDebrief(db: Db, userId: string, now: Date, ai: AiDeps): Promise<DebriefOutcome> {
+  const step1 = await withUserLock(db, userId, async (tx): Promise<Step1> => {
+    await rollOverDue(tx, userId, now);
+    const [row] = await tx
+      .select({ tz: users.timezone, nightly: profiles.nightlyTime })
+      .from(users)
+      .innerJoin(profiles, eq(profiles.userId, users.id))
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!row) return { kind: "not_onboarded" };
+    const today = localDate(now, row.tz);
+    const availableAt = debriefAvailableAt(row.nightly, today, row.tz);
+    if (now.getTime() < availableAt.getTime()) return { kind: "unavailable", availableAt };
+    const [existing] = await tx
+      .select()
+      .from(debriefs)
+      .where(and(eq(debriefs.userId, userId), eq(debriefs.localDate, today)))
+      .limit(1);
+    if (existing) return { kind: "ready", row: existing };
+    const ctx = await buildUserContext(tx, userId, now);
+    if (!ctx) return { kind: "not_onboarded" };
+    return { kind: "build", today, ctx, facts: await computeDebriefFacts(tx, userId, today) };
+  });
+  if (step1.kind !== "build") return step1;
+
+  const { today, ctx, facts } = step1;
+  const generated = await generateMessage("nightly_debrief", ctx, ai, { debrief: facts }, templateDebriefText(ctx, facts));
+  const row = await withUserLock(db, userId, async (tx) => {
+    await tx
+      .insert(debriefs)
+      .values({
+        userId,
+        localDate: today,
+        deltas: facts.deltas,
+        questCompleted: facts.questCompleted,
+        questTotal: facts.questTotal,
+        verdict: facts.verdict,
+        text: generated.message,
+        model: generated.model,
+      })
+      .onConflictDoNothing();
+    const [stored] = await tx
+      .select()
+      .from(debriefs)
+      .where(and(eq(debriefs.userId, userId), eq(debriefs.localDate, today)))
+      .limit(1);
+    return stored!;
+  });
+  return { kind: "ready", row };
 }

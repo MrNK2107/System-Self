@@ -92,3 +92,11 @@ export function endOfLocalDay(date: string, timeZone: string): Date {
   }
   return result;
 }
+
+/** The instant of local wall-clock `hour:minute` on `date` in an IANA timezone (DST-safe; settles in 2 steps). */
+export function localTimeToInstant(date: string, hour: number, minute: number, timeZone: string): Date {
+  const wall = parseDate(date) + (hour * 60 + minute) * 60_000;
+  let guess = wall - offsetAt(new Date(wall), timeZone);
+  guess = wall - offsetAt(new Date(guess), timeZone);
+  return new Date(guess);
+}

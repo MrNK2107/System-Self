@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray } from "drizzle-orm";
 import { logs, quests, users, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, addDays, type RankedDomain } from "@workspace/engine";
 import { generateOrTemplate, type AiDeps } from "../lib/ai";
@@ -42,8 +42,8 @@ export interface PromptContext {
   /** mean(shadow) - mean(user): positive means the shadow is ahead. 0 when no shadow is active. */
   shadowGap: number;
   primaryGoal: string;
-  /** Last 7 local days, newest first: `DOMAIN: logType` plus free text truncated to 120 chars. */
-  recentLogs: string[];
+  /** Last 7 local days, newest first; free text is truncated to 120 chars (rendered single-line and quoted). */
+  recentLogs: { domain: string; logType: string; text: string | null }[];
   /** Fraction of quests resolved in the last 30 local days that were completed, or null with none resolved. */
   completionRate30: number | null;
   weakestDomain: RankedDomain;
@@ -74,7 +74,7 @@ export async function buildUserContext(
   const active = await tx
     .select({ id: quests.id })
     .from(quests)
-    .where(and(eq(quests.userId, userId), eq(quests.status, "active"), gte(quests.expiresAt, now)));
+    .where(and(eq(quests.userId, userId), eq(quests.status, "active"), gt(quests.expiresAt, now)));
   const resolved30 = await tx
     .select({ status: quests.status, date: quests.resolvedLocalDate })
     .from(quests)
@@ -112,20 +112,29 @@ export async function buildUserContext(
     shadowActive: state.shadow?.active ?? false,
     shadowGap: state.shadow?.gap ?? 0,
     primaryGoal: state.profile.primaryGoal,
-    recentLogs: logRows.map((l) => {
-      const text = l.freeText?.trim();
-      return text ? `${l.domain}: ${l.logType} — ${text.slice(0, 120)}` : `${l.domain}: ${l.logType}`;
-    }),
+    recentLogs: logRows.map((l) => ({
+      domain: l.domain,
+      logType: l.logType,
+      text: l.freeText?.trim() ? l.freeText.trim().slice(0, 120) : null,
+    })),
     completionRate30: resolved30.length > 0 ? completed.length / resolved30.length : null,
     weakestDomain: weakestDomainOf(scores),
     recentRefusals: refusals.map((r) => r.reason?.trim()).filter((r): r is string => Boolean(r)),
   };
 }
 
-function contextBlock(ctx: PromptContext): string {
+/**
+ * User-written text goes into prompts as one quoted line: control characters and newlines collapse to single
+ * spaces and inner double quotes become single quotes, so it cannot open a new instruction line.
+ */
+export function quoted(text: string): string {
+  return `"${text.replace(/[\p{Cc}\p{Cf}\u2028\u2029\s]+/gu, " ").trim().replace(/"/g, "'")}"`;
+}
+
+function contextBlock(ctx: PromptContext, extraContext?: string): string {
   const scoreLine = RANKED_DOMAINS.map((d) => `${d} ${ctx.scores[d].toFixed(1)}`).join(", ");
   return `USER CONTEXT:
-- Username: ${ctx.username}
+- Username: ${quoted(ctx.username)}
 - Current rank: ${ctx.rank}
 - Day number: ${ctx.dayNumber}
 - Score trajectory: ${ctx.trajectory}
@@ -134,9 +143,10 @@ function contextBlock(ctx: PromptContext): string {
 - Active quests: ${ctx.activeQuests} | Completed today: ${ctx.completedToday}
 - 30-day quest completion rate: ${ctx.completionRate30 === null ? "no data" : `${Math.round(ctx.completionRate30 * 100)}%`}
 - Shadow Self status: ${ctx.shadowActive ? `ACTIVE — gap is ${ctx.shadowGap.toFixed(1)} points` : "inactive"}
-- Primary goal: ${ctx.primaryGoal}
-- Recent logs (7 days): ${ctx.recentLogs.length > 0 ? ctx.recentLogs.join(" | ") : "none"}
-- Recent refusal reasons: ${ctx.recentRefusals.length > 0 ? ctx.recentRefusals.join(" | ") : "none"}`;
+- Primary goal: ${quoted(ctx.primaryGoal)}
+- Recent logs (7 days): ${ctx.recentLogs.length > 0 ? ctx.recentLogs.map((l) => `${l.domain}: ${l.logType}${l.text ? ` ${quoted(l.text)}` : ""}`).join(" | ") : "none"}
+- Recent refusal reasons: ${ctx.recentRefusals.length > 0 ? ctx.recentRefusals.map(quoted).join(" | ") : "none"}${extraContext ? `
+- Extra context (user supplied): ${quoted(extraContext)}` : ""}`;
 }
 
 export interface DebriefFacts {
@@ -220,14 +230,13 @@ export function buildMessagePrompt(
     },
   };
   const config = configs[type];
-  const blocks = [contextBlock(ctx)];
+  const blocks = [contextBlock(ctx, extras.extraContext)];
   if (ctx.weeklyRecap) blocks.push(weeklyRecapBlock(ctx.weeklyRecap));
   if (extras.debrief) {
     const d = extras.debrief;
     const deltas = RANKED_DOMAINS.map((k) => `${k} ${d.deltas[k] >= 0 ? "+" : ""}${d.deltas[k]}`).join(", ");
     blocks.push(`DEBRIEF FACTS:\n- Deltas today: ${deltas}\n- Quests resolved today: ${d.questCompleted} of ${d.questTotal} completed\n- Verdict: ${d.verdict}`);
   }
-  if (extras.extraContext) blocks.push(`- Extra context (user supplied): ${extras.extraContext}`);
   return {
     prompt: `${blocks.join("\n\n")}\n\nGenerate a ${type.replace(/_/g, " ")} for this user.\n${config.instruction}\nOutput only the message. No preamble. No explanation. Maximum ${config.maxWords} words.`,
     maxWords: config.maxWords,
@@ -241,6 +250,14 @@ export interface GeneratedMessage {
   attempts: number;
 }
 
+/** Cuts text to at most `max` characters at a word boundary. */
+export function capAtWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return (space > 0 ? cut.slice(0, space) : cut).trimEnd();
+}
+
 /** Calls the model (never throws); empty output or any failure resolves to the template message. */
 export async function generateMessage(
   type: MessageType,
@@ -249,7 +266,7 @@ export async function generateMessage(
   extras: MessageExtras = {},
   templateText?: string,
 ): Promise<GeneratedMessage> {
-  const { prompt } = buildMessagePrompt(type, ctx, extras);
+  const { prompt, maxWords } = buildMessagePrompt(type, ctx, extras);
   const promptVersion = type === "weekly_debrief" ? WEEKLY_DEBRIEF_PROMPT_VERSION : MESSAGE_PROMPT_VERSION;
   const result = await generateOrTemplate(
     {
@@ -260,8 +277,8 @@ export async function generateMessage(
     },
     ai.call,
   );
-  const text = result.model === "template" ? "" : result.text.trim();
-  if (!text) {
+  const text = result.model === "template" ? "" : capAtWord(result.text.trim(), maxWords * 8);
+  if (!text || text.includes("!") || /\p{Extended_Pictographic}/u.test(text)) {
     return {
       message:
         templateText ??

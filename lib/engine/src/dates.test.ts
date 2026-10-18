@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addDays, daysBetween, endOfLocalDay, isoWeekKey, localDate } from "./dates";
+import { addDays, daysBetween, endOfLocalDay, isoWeekKey, localDate, localTimeToInstant } from "./dates";
 
 test("localDate in Asia/Kolkata", () => {
   assert.equal(localDate(new Date("2026-10-19T18:25:00Z"), "Asia/Kolkata"), "2026-10-19");
@@ -40,4 +40,12 @@ test("endOfLocalDay when midnight does not exist (Sao Paulo-style gap) lands on 
   const end = endOfLocalDay("2026-03-28", "Asia/Beirut");
   assert.equal(localDate(end, "Asia/Beirut"), "2026-03-29");
   assert.equal(localDate(new Date(end.getTime() - 1), "Asia/Beirut"), "2026-03-28");
+});
+
+test("localTimeToInstant follows the wall clock across DST", () => {
+  assert.equal(localTimeToInstant("2026-10-19", 21, 30, "Asia/Kolkata").toISOString(), "2026-10-19T16:00:00.000Z");
+  // New York: EST (UTC-5) the day before spring-forward, EDT (UTC-4) the day of.
+  assert.equal(localTimeToInstant("2026-03-07", 21, 0, "America/New_York").toISOString(), "2026-03-08T02:00:00.000Z");
+  assert.equal(localTimeToInstant("2026-03-08", 21, 0, "America/New_York").toISOString(), "2026-03-09T01:00:00.000Z");
+  assert.equal(localTimeToInstant("2026-03-08", 0, 0, "America/New_York").toISOString(), "2026-03-08T05:00:00.000Z");
 });

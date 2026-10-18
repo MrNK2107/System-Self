@@ -89,8 +89,8 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
    * (1) under the lock: replay check, roll over, return the board if today already generated or nothing
    *     is missing, otherwise build the prompt context and work out what is needed;
    * (2) lock released: call the model;
-   * (3) under the lock again (withIdempotency): roll over, re-check — a concurrent request may have
-   *     generated meanwhile — recompute what is missing, then insert the batch record and the quests.
+   * (3) under the lock again (withIdempotency): roll over, re-check - a concurrent request may have
+   *     generated meanwhile - recompute what is missing, then insert the batch record and the quests.
    */
   router.post("/quests/generate", async (req, res) => {
     generateQuestsRequestSchema.parse(req.body ?? {});

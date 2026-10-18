@@ -59,7 +59,7 @@ export const generateQuestsResponseSchema = generatedQuestsPayloadSchema.extend(
 export const questCompletionEventBodySchema = z.object({
   questId: z.string().min(1),
   status: z.enum(["complete", "failed", "refused"]),
-  domain: z.enum(["BODY", "MIND", "WEALTH", "DISCIPLINE"]),
+  domain: z.enum(RANKED_DOMAINS),
   questType: z.enum(["daily", "weekly", "arc"]),
   idempotencyKey: z.string().min(8).max(200).optional(),
   completedAt: z.string().datetime().optional(),

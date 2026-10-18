@@ -3,11 +3,13 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { z, ZodError } from "zod";
 import { generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages, users, type Db } from "@workspace/db";
-import { localDate } from "@workspace/engine";
+import { addDays, localDate } from "@workspace/engine";
 import type { AiDeps } from "../lib/ai";
 import { buildUserContext, generateMessage } from "../services/ai-context";
+import { cachedMessage, storeMessage } from "../services/messages";
 import { buildWeeklyRecap } from "../services/recap";
 import { ensureRolledOver } from "../services/rollover";
+import { withUserLock } from "../services/user-lock";
 
 const messageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -129,13 +131,24 @@ router.get("/recap/weekly/debrief", async (req, res) => {
   await ensureRolledOver(db, userId, now);
   const ctx = await buildUserContext(db, userId, now);
   if (!ctx) return res.status(409).json({ error: "Onboarding required", code: "not_onboarded" });
+  // Cached per user per local day in system_messages (the same row POST /messages weekly_debrief uses).
+  const respond = (row: { message: string; model: string; attempts: number; promptVersion: string }) => ({
+    weekStart: addDays(ctx.today, -6),
+    debrief: row.message,
+    meta: { model: row.model, attempts: row.attempts, promptVersion: row.promptVersion },
+  });
+  const cached = await cachedMessage(db, userId, "weekly_debrief", ctx.today);
+  if (cached) return res.json(respond(cached));
   ctx.weeklyRecap = await buildWeeklyRecap(db, userId, ctx.today, ctx.timezone);
   const generated = await generateMessage("weekly_debrief", ctx, ai);
-  return res.json({
-    weekStart: ctx.weeklyRecap.weekStart,
-    debrief: generated.message,
-    meta: { model: generated.model, attempts: generated.attempts, promptVersion: generated.promptVersion },
+  // Re-check under the lock: a concurrent request may have stored one while the model ran.
+  const out = await withUserLock(db, userId, async (tx) => {
+    const again = await cachedMessage(tx, userId, "weekly_debrief", ctx.today);
+    if (again) return again;
+    await storeMessage(tx, userId, "weekly_debrief", ctx, generated);
+    return generated;
   });
+  return res.json(respond(out));
 });
 
 router.get("/system/completions/summary", async (req, res) => {
