@@ -3,10 +3,10 @@ export {};
 declare global {
   namespace Express {
     interface Request {
-      auth?: {
+      user?: {
+        id: string;
+        role: "user" | "admin";
         username: string;
-        token: string;
-        isAdmin?: boolean;
       };
     }
   }

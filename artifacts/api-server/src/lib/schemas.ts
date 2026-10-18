@@ -24,7 +24,6 @@ export const generateSystemMessageBodySchema = z.object({
     "forbidden_log",
     "rank_up_prep",
   ]),
-  username: z.string().min(1),
   rank: z.string().min(1),
   domainScores: domainScoresSchema,
   trajectory: z.enum(["up", "stable", "down"]),
@@ -39,7 +38,6 @@ export const generateSystemMessageBodySchema = z.object({
 });
 
 export const generateQuestsBodySchema = z.object({
-  username: z.string().min(1),
   rank: z.string().min(1),
   domainScores: domainScoresSchema,
   primaryGoal: z.string().min(1),
@@ -76,7 +74,6 @@ export const generateQuestsResponseSchema = z.object({
 });
 
 export const questCompletionEventBodySchema = z.object({
-  username: z.string().min(1),
   questId: z.string().min(1),
   status: z.enum(["complete", "failed", "refused"]),
   domain: z.enum(["BODY", "MIND", "WEALTH", "DISCIPLINE"]),

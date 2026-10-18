@@ -1,14 +1,28 @@
 import { Router, type IRouter } from "express";
-import adminRouter from "./admin";
+import type { Db } from "@workspace/db";
+import type { Mailer } from "../lib/mailer";
+import { createRequireAuth } from "../middlewares/auth";
+import { adminRoutes } from "./admin";
+import { authRoutes } from "./auth";
 import healthRouter from "./health";
-import historyRouter from "./history";
-import systemRouter from "./system";
+import { historyRoutes } from "./history";
+import { systemRoutes } from "./system";
 
-const router: IRouter = Router();
+export function createRouter(deps: { db: Db | null; mailer: Mailer }): IRouter {
+  const { db, mailer } = deps;
+  const router: IRouter = Router();
+  const requireAuth = createRequireAuth(db);
 
-router.use(healthRouter);
-router.use(systemRouter);
-router.use(historyRouter);
-router.use(adminRouter);
+  // Public: healthz, readyz, and the public /auth endpoints (the auth router guards its own private ones).
+  router.use(healthRouter);
+  router.use(authRoutes({ db, mailer, requireAuth }));
 
-export default router;
+  // Everything below requires a valid user.
+  router.use(requireAuth);
+  router.use(systemRoutes(db));
+  router.use(historyRoutes(db));
+  if (db) router.use(adminRoutes(db));
+  return router;
+}
+
+export default createRouter;

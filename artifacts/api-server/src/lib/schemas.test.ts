@@ -10,7 +10,6 @@ import {
 test("generateSystemMessageBodySchema accepts extended message types", () => {
   const parsed = generateSystemMessageBodySchema.parse({
     messageType: "rank_up_prep",
-    username: "nanda",
     rank: "B",
     domainScores: { BODY: 1, MIND: 2, WEALTH: 3, DISCIPLINE: 4 },
     trajectory: "up",
@@ -27,7 +26,6 @@ test("generateSystemMessageBodySchema accepts extended message types", () => {
 
 test("generateQuestsBodySchema fills optional fields", () => {
   const parsed = generateQuestsBodySchema.parse({
-    username: "nanda",
     rank: "E",
     domainScores: { BODY: 1, MIND: 1, WEALTH: 1, DISCIPLINE: 1 },
     primaryGoal: "Consistency",

@@ -1,6 +1,6 @@
-import { Router } from "express";
-import { db, generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages } from "@workspace/db";
-import { and, desc, eq } from "drizzle-orm";
+import { Router, type IRouter } from "express";
+import { generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages, type Db } from "@workspace/db";
+import { desc, eq } from "drizzle-orm";
 import { validateBody } from "../middlewares/validate";
 import {
   generateQuestsBodySchema,
@@ -10,9 +10,7 @@ import {
   questCompletionEventBodySchema,
 } from "../lib/schemas";
 import { generateWithFallback } from "../lib/ai";
-import { requireOwnership } from "../middlewares/auth";
 
-const router = Router();
 const MESSAGE_PROMPT_VERSION = "system-message-v2";
 const QUESTS_PROMPT_VERSION = "system-quests-v3";
 
@@ -180,10 +178,12 @@ const RANK_QUEST_PROFILES: Record<string, {
   },
 };
 
+export function systemRoutes(db: Db | null): IRouter {
+const router = Router();
+
 router.post("/system/message", validateBody(generateSystemMessageBodySchema), async (req, res) => {
   try {
-    if (!requireOwnership(req, res, req.body.username)) return;
-    const { prompt } = buildUserPrompt(req.body);
+    const { prompt } = buildUserPrompt({ ...req.body, username: req.user!.username });
     const ai = await generateWithFallback({
       systemInstruction: SYSTEM_PROMPT,
       prompt: `Prompt-Version: ${MESSAGE_PROMPT_VERSION}\n${prompt}`,
@@ -202,7 +202,7 @@ router.post("/system/message", validateBody(generateSystemMessageBodySchema), as
     req.log.info({ ai: payload.meta, messageType: req.body.messageType }, "Generated system message");
     if (db) {
       void db.insert(systemMessages).values({
-      username: req.body.username,
+      userId: req.user!.id,
       messageType: req.body.messageType,
       rank: req.body.rank,
       trajectory: req.body.trajectory,
@@ -234,8 +234,8 @@ router.post("/system/message", validateBody(generateSystemMessageBodySchema), as
 
 router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req, res) => {
   try {
+    const { id: userId, username } = req.user!;
     const {
-      username,
       rank,
       domainScores,
       primaryGoal,
@@ -244,7 +244,6 @@ router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req
       shadowGap,
       dayNumber,
     } = req.body;
-    if (!requireOwnership(req, res, username)) return;
 
     const profile = RANK_QUEST_PROFILES[rank as string] ?? RANK_QUEST_PROFILES["E"];
     const includeArc = profile.arcCount > 0;
@@ -256,7 +255,7 @@ router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req
       const recentBatches = await db
         .select()
         .from(generatedQuestBatches)
-        .where(eq(generatedQuestBatches.username, username))
+        .where(eq(generatedQuestBatches.userId, userId))
         .orderBy(desc(generatedQuestBatches.createdAt))
         .limit(5);
 
@@ -264,7 +263,7 @@ router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req
         const recentQuests = await db
           .select()
           .from(generatedQuests)
-          .where(eq(generatedQuests.username, username))
+          .where(eq(generatedQuests.userId, userId))
           .orderBy(desc(generatedQuests.createdAt))
           .limit(30);
 
@@ -279,7 +278,7 @@ router.post("/system/quests", validateBody(generateQuestsBodySchema), async (req
         const recentCompletions = await db
           .select()
           .from(questCompletionEvents)
-          .where(eq(questCompletionEvents.username, username))
+          .where(eq(questCompletionEvents.userId, userId))
           .orderBy(desc(questCompletionEvents.completedAt))
           .limit(40);
         const completed = recentCompletions.filter((e) => e.status === "complete").length;
@@ -365,7 +364,7 @@ Return ONLY valid JSON in this exact format:
       const [batch] = await tx
         .insert(generatedQuestBatches)
         .values({
-          username,
+          userId,
           rank,
           weakestDomain,
           primaryGoal,
@@ -382,7 +381,7 @@ Return ONLY valid JSON in this exact format:
       await tx.insert(generatedQuests).values(
         payload.quests.map((quest) => ({
           batchId: batch.id,
-          username,
+          userId,
           title: quest.title,
           description: quest.description,
           domain: quest.domain,
@@ -416,7 +415,6 @@ Return ONLY valid JSON in this exact format:
 router.post("/system/quest-completion", validateBody(questCompletionEventBodySchema), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
-    if (!requireOwnership(req, res, req.body.username)) return;
     const headerKey = typeof req.headers["idempotency-key"] === "string"
       ? req.headers["idempotency-key"].trim()
       : undefined;
@@ -425,29 +423,23 @@ router.post("/system/quest-completion", validateBody(questCompletionEventBodySch
       headerKey ||
       `${req.body.questId}:${req.body.status}:${req.body.domain}:${req.body.questType}`;
 
-    const already = await db
-      .select({ id: questCompletionEvents.id })
-      .from(questCompletionEvents)
-      .where(
-        and(
-          eq(questCompletionEvents.username, req.body.username),
-          eq(questCompletionEvents.idempotencyKey, idempotencyKey),
-        ),
-      )
-      .limit(1);
-    if (already.length > 0) {
+    const inserted = await db
+      .insert(questCompletionEvents)
+      .values({
+        userId: req.user!.id,
+        questId: req.body.questId,
+        status: req.body.status,
+        domain: req.body.domain,
+        questType: req.body.questType,
+        idempotencyKey,
+        completedAt: req.body.completedAt ? new Date(req.body.completedAt) : new Date(),
+        source: req.body.source,
+      })
+      .onConflictDoNothing({ target: [questCompletionEvents.userId, questCompletionEvents.idempotencyKey] })
+      .returning({ id: questCompletionEvents.id });
+    if (inserted.length === 0) {
       return res.status(200).json({ status: "ok", deduplicated: true });
     }
-    await db.insert(questCompletionEvents).values({
-      username: req.body.username,
-      questId: req.body.questId,
-      status: req.body.status,
-      domain: req.body.domain,
-      questType: req.body.questType,
-      idempotencyKey,
-      completedAt: req.body.completedAt ? new Date(req.body.completedAt) : new Date(),
-      source: req.body.source,
-    });
     return res.status(201).json({ status: "ok" });
   } catch (error) {
     req.log.error({ error }, "Failed to persist quest completion event");
@@ -455,4 +447,5 @@ router.post("/system/quest-completion", validateBody(questCompletionEventBodySch
   }
 });
 
-export default router;
+return router;
+}

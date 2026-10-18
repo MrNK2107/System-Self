@@ -1,14 +1,10 @@
-import { Router } from "express";
+import { Router, type IRouter } from "express";
 import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages } from "@workspace/db";
+import { generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages, type Db } from "@workspace/db";
 import { generateWithFallback } from "../lib/ai";
-import { requireOwnership } from "../middlewares/auth";
-
-const router = Router();
 
 const messageQuerySchema = z.object({
-  username: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.coerce.number().int().positive().optional(),
   messageType: z.string().optional(),
@@ -18,7 +14,6 @@ const messageQuerySchema = z.object({
 });
 
 const questHistoryQuerySchema = z.object({
-  username: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(50).default(10),
   cursor: z.coerce.number().int().positive().optional(),
   rank: z.string().optional(),
@@ -27,17 +22,18 @@ const questHistoryQuerySchema = z.object({
 });
 
 const completionSummaryQuerySchema = z.object({
-  username: z.string().min(1),
   days: z.coerce.number().int().min(1).max(90).default(14),
 });
+
+export function historyRoutes(db: Db | null): IRouter {
+const router = Router();
 
 router.get("/system/messages", async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
     const query = messageQuerySchema.parse(req.query);
-    if (!requireOwnership(req, res, query.username)) return;
 
-    const whereClauses = [eq(systemMessages.username, query.username)];
+    const whereClauses = [eq(systemMessages.userId, req.user!.id)];
     if (query.cursor) whereClauses.push(lt(systemMessages.id, query.cursor));
     if (query.messageType) whereClauses.push(eq(systemMessages.messageType, query.messageType));
     if (query.rank) whereClauses.push(eq(systemMessages.rank, query.rank));
@@ -66,9 +62,8 @@ router.get("/system/quests/history", async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
     const query = questHistoryQuerySchema.parse(req.query);
-    if (!requireOwnership(req, res, query.username)) return;
 
-    const whereClauses = [eq(generatedQuestBatches.username, query.username)];
+    const whereClauses = [eq(generatedQuestBatches.userId, req.user!.id)];
     if (query.cursor) whereClauses.push(lt(generatedQuestBatches.id, query.cursor));
     if (query.rank) whereClauses.push(eq(generatedQuestBatches.rank, query.rank));
     if (query.from) whereClauses.push(gte(generatedQuestBatches.createdAt, new Date(query.from)));
@@ -113,11 +108,7 @@ router.get("/system/quests/history", async (req, res) => {
 router.get("/system/recap/weekly", async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
-    const username = String(req.query.username || "").trim();
-    if (!username) {
-      return res.status(400).json({ error: "username query param is required" });
-    }
-    if (!requireOwnership(req, res, username)) return;
+    const { id: userId, username } = req.user!;
 
     const from = new Date();
     from.setDate(from.getDate() - 7);
@@ -125,7 +116,7 @@ router.get("/system/recap/weekly", async (req, res) => {
     const [messageStats] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(systemMessages)
-      .where(and(eq(systemMessages.username, username), gte(systemMessages.createdAt, from)));
+      .where(and(eq(systemMessages.userId, userId), gte(systemMessages.createdAt, from)));
 
     const [questStats] = await db
       .select({
@@ -134,7 +125,7 @@ router.get("/system/recap/weekly", async (req, res) => {
       })
       .from(generatedQuestBatches)
       .leftJoin(generatedQuests, eq(generatedQuestBatches.id, generatedQuests.batchId))
-      .where(and(eq(generatedQuestBatches.username, username), gte(generatedQuestBatches.createdAt, from)));
+      .where(and(eq(generatedQuestBatches.userId, userId), gte(generatedQuestBatches.createdAt, from)));
 
     const domainBreakdown = await db
       .select({
@@ -142,7 +133,7 @@ router.get("/system/recap/weekly", async (req, res) => {
         count: sql<number>`count(*)::int`,
       })
       .from(generatedQuests)
-      .where(and(eq(generatedQuests.username, username), gte(generatedQuests.createdAt, from)))
+      .where(and(eq(generatedQuests.userId, userId), gte(generatedQuests.createdAt, from)))
       .groupBy(generatedQuests.domain);
 
     const [completionStats] = await db
@@ -151,7 +142,7 @@ router.get("/system/recap/weekly", async (req, res) => {
         completed: sql<number>`sum(case when ${questCompletionEvents.status} = 'complete' then 1 else 0 end)::int`,
       })
       .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.username, username), gte(questCompletionEvents.completedAt, from)));
+      .where(and(eq(questCompletionEvents.userId, userId), gte(questCompletionEvents.completedAt, from)));
 
     return res.json({
       username,
@@ -178,11 +169,7 @@ router.get("/system/recap/weekly", async (req, res) => {
 router.get("/system/recap/weekly/debrief", async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
-    const username = String(req.query.username || "").trim();
-    if (!username) {
-      return res.status(400).json({ error: "username query param is required" });
-    }
-    if (!requireOwnership(req, res, username)) return;
+    const { id: userId, username } = req.user!;
 
     const from = new Date();
     from.setDate(from.getDate() - 7);
@@ -190,7 +177,7 @@ router.get("/system/recap/weekly/debrief", async (req, res) => {
     const [messageStats] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(systemMessages)
-      .where(and(eq(systemMessages.username, username), gte(systemMessages.createdAt, from)));
+      .where(and(eq(systemMessages.userId, userId), gte(systemMessages.createdAt, from)));
 
     const [questStats] = await db
       .select({
@@ -199,7 +186,7 @@ router.get("/system/recap/weekly/debrief", async (req, res) => {
       })
       .from(generatedQuestBatches)
       .leftJoin(generatedQuests, eq(generatedQuestBatches.id, generatedQuests.batchId))
-      .where(and(eq(generatedQuestBatches.username, username), gte(generatedQuestBatches.createdAt, from)));
+      .where(and(eq(generatedQuestBatches.userId, userId), gte(generatedQuestBatches.createdAt, from)));
 
     const domainBreakdown = await db
       .select({
@@ -207,7 +194,7 @@ router.get("/system/recap/weekly/debrief", async (req, res) => {
         count: sql<number>`count(*)::int`,
       })
       .from(generatedQuests)
-      .where(and(eq(generatedQuests.username, username), gte(generatedQuests.createdAt, from)))
+      .where(and(eq(generatedQuests.userId, userId), gte(generatedQuests.createdAt, from)))
       .groupBy(generatedQuests.domain);
     const [completionStats] = await db
       .select({
@@ -215,7 +202,7 @@ router.get("/system/recap/weekly/debrief", async (req, res) => {
         completed: sql<number>`sum(case when ${questCompletionEvents.status} = 'complete' then 1 else 0 end)::int`,
       })
       .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.username, username), gte(questCompletionEvents.completedAt, from)));
+      .where(and(eq(questCompletionEvents.userId, userId), gte(questCompletionEvents.completedAt, from)));
     const completionRate =
       (completionStats?.attempts ?? 0) > 0
         ? Math.round(((completionStats?.completed ?? 0) / (completionStats?.attempts ?? 1)) * 100)
@@ -262,7 +249,6 @@ router.get("/system/completions/summary", async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: "Database is not configured" });
     const query = completionSummaryQuerySchema.parse(req.query);
-    if (!requireOwnership(req, res, query.username)) return;
     const from = new Date();
     from.setDate(from.getDate() - query.days);
 
@@ -272,7 +258,7 @@ router.get("/system/completions/summary", async (req, res) => {
         count: sql<number>`count(*)::int`,
       })
       .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.username, query.username), gte(questCompletionEvents.completedAt, from)))
+      .where(and(eq(questCompletionEvents.userId, req.user!.id), gte(questCompletionEvents.completedAt, from)))
       .groupBy(questCompletionEvents.status);
 
     const byDomain = await db
@@ -282,7 +268,7 @@ router.get("/system/completions/summary", async (req, res) => {
         count: sql<number>`count(*)::int`,
       })
       .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.username, query.username), gte(questCompletionEvents.completedAt, from)))
+      .where(and(eq(questCompletionEvents.userId, req.user!.id), gte(questCompletionEvents.completedAt, from)))
       .groupBy(questCompletionEvents.domain, questCompletionEvents.status);
 
     const daily = await db
@@ -292,7 +278,7 @@ router.get("/system/completions/summary", async (req, res) => {
         count: sql<number>`count(*)::int`,
       })
       .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.username, query.username), gte(questCompletionEvents.completedAt, from)))
+      .where(and(eq(questCompletionEvents.userId, req.user!.id), gte(questCompletionEvents.completedAt, from)))
       .groupBy(sql`to_char(${questCompletionEvents.completedAt}, 'YYYY-MM-DD')`, questCompletionEvents.status)
       .orderBy(sql`to_char(${questCompletionEvents.completedAt}, 'YYYY-MM-DD') asc`);
 
@@ -300,7 +286,7 @@ router.get("/system/completions/summary", async (req, res) => {
     const completed = totals.find((r) => r.status === "complete")?.count ?? 0;
 
     return res.json({
-      username: query.username,
+      username: req.user!.username,
       windowDays: query.days,
       from: from.toISOString(),
       to: new Date().toISOString(),
@@ -317,4 +303,5 @@ router.get("/system/completions/summary", async (req, res) => {
   }
 });
 
-export default router;
+return router;
+}

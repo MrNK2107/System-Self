@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "../testing";
 import { emailCodes, refreshTokens, users } from "./users";
+import { questCompletionEvents, systemMessages } from "./system_ai";
 
 after(() => closeTestDb());
 
@@ -34,4 +35,36 @@ test("deleting a user cascades refresh_tokens and email_codes", async (t) => {
   await db.delete(users).where(eq(users.id, u!.id));
   assert.equal((await db.select().from(refreshTokens)).length, 0);
   assert.equal((await db.select().from(emailCodes)).length, 0);
+});
+
+test("deleting a user cascades system_messages and quest_completion_events", async (t) => {
+  const db = getTestDb();
+  if (!db) return t.skip("TEST_DATABASE_URL not set");
+  await resetDb(db);
+  const [u] = await db.insert(users).values({ ...base, email: "d@x.com", username: "dd" }).returning();
+  await db.insert(systemMessages).values({
+    userId: u!.id,
+    messageType: "morning_briefing",
+    rank: "E",
+    trajectory: "up",
+    shadowActive: false,
+    shadowGap: 0,
+    dayNumber: 1,
+    message: "m",
+    model: "x",
+    promptVersion: "v",
+    attempts: 1,
+  });
+  await db.insert(questCompletionEvents).values({
+    userId: u!.id,
+    questId: "q1",
+    status: "complete",
+    domain: "BODY",
+    questType: "daily",
+    idempotencyKey: "key-12345",
+  });
+  assert.equal((await db.select().from(systemMessages)).length, 1);
+  await db.delete(users).where(eq(users.id, u!.id));
+  assert.equal((await db.select().from(systemMessages)).length, 0);
+  assert.equal((await db.select().from(questCompletionEvents)).length, 0);
 });

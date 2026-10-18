@@ -1,10 +1,16 @@
-import { boolean, integer, jsonb, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, serial, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { users } from "./users";
+
+const userIdCol = () =>
+  uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" });
 
 export const systemMessages = pgTable("system_messages", {
   id: serial("id").primaryKey(),
-  username: text("username").notNull(),
+  userId: userIdCol(),
   messageType: text("message_type").notNull(),
   rank: text("rank").notNull(),
   trajectory: text("trajectory").notNull(),
@@ -17,11 +23,11 @@ export const systemMessages = pgTable("system_messages", {
   attempts: integer("attempts").notNull(),
   context: jsonb("context"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => [index("system_messages_user_created_idx").on(t.userId, t.createdAt)]);
 
 export const generatedQuestBatches = pgTable("generated_quest_batches", {
   id: serial("id").primaryKey(),
-  username: text("username").notNull(),
+  userId: userIdCol(),
   rank: text("rank").notNull(),
   weakestDomain: text("weakest_domain").notNull(),
   primaryGoal: text("primary_goal").notNull(),
@@ -31,26 +37,26 @@ export const generatedQuestBatches = pgTable("generated_quest_batches", {
   promptVersion: text("prompt_version").notNull(),
   attempts: integer("attempts").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => [index("generated_quest_batches_user_created_idx").on(t.userId, t.createdAt)]);
 
 export const generatedQuests = pgTable("generated_quests", {
   id: serial("id").primaryKey(),
   batchId: integer("batch_id")
     .notNull()
     .references(() => generatedQuestBatches.id, { onDelete: "cascade" }),
-  username: text("username").notNull(),
+  userId: userIdCol(),
   title: text("title").notNull(),
   description: text("description").notNull(),
   domain: text("domain").notNull(),
   type: text("type").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => [index("generated_quests_user_created_domain_idx").on(t.userId, t.createdAt, t.domain)]);
 
 export const questCompletionEvents = pgTable(
   "quest_completion_events",
   {
     id: serial("id").primaryKey(),
-    username: text("username").notNull(),
+    userId: userIdCol(),
     questId: text("quest_id").notNull(),
     status: text("status").notNull(),
     domain: text("domain").notNull(),
@@ -59,12 +65,15 @@ export const questCompletionEvents = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }).defaultNow().notNull(),
     source: text("source").notNull().default("app"),
   },
-  (table) => ({
-    usernameIdempotencyUnique: uniqueIndex("quest_completion_events_username_idempotency_key_unique").on(
-      table.username,
-      table.idempotencyKey,
+  (t) => [
+    uniqueIndex("quest_completion_events_user_idempotency_key_unique").on(t.userId, t.idempotencyKey),
+    index("quest_completion_events_user_completed_status_domain_idx").on(
+      t.userId,
+      t.completedAt,
+      t.status,
+      t.domain,
     ),
-  }),
+  ],
 );
 
 export const insertSystemMessageSchema = createInsertSchema(systemMessages).omit({
