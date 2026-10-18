@@ -5,18 +5,38 @@ import { QueryClient, focusManager, onlineManager, useIsRestoring } from "@tanst
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import React, { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { AppState, type AppStateStatus } from "react-native";
+import { shouldRetryQuery } from "./client";
 import { getOutbox } from "./outbox";
+import { createLocalDataManager } from "./user-scope";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const QUERY_CACHE_KEY = "system_self.rq.v1";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { gcTime: DAY_MS, staleTime: 15_000, retry: 1 },
+    queries: { gcTime: DAY_MS, staleTime: 15_000, retry: shouldRetryQuery },
   },
 });
 
 const persister = createAsyncStoragePersister({ storage: AsyncStorage, key: QUERY_CACHE_KEY });
+
+const localData = createLocalDataManager({
+  storage: AsyncStorage,
+  get outbox() {
+    return getOutbox();
+  },
+  queryClient,
+  persister,
+});
+
+/**
+ * Wipe the cached game state and the outbox. Call on explicit sign-out (Task 2 wires the button) BEFORE
+ * clearing the session. Do not call on mere session expiry: the same user keeps their queued logs.
+ */
+export const clearLocalData = localData.clearLocalData;
+
+/** Call after every successful sign-in/register with the user id: wipes local data if the account changed. */
+export const handleSignIn = localData.handleSignIn;
 
 // Reachability: unknown (null) counts as online so a slow probe never blocks the app.
 onlineManager.setEventListener((setOnline) =>

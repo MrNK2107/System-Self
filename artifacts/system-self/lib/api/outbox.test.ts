@@ -32,7 +32,7 @@ const httpErr = (status: number, code?: string) => new ApiError({ kind: "http", 
 test("outbox flushes in order and stops at a network error", async () => {
   const sent: string[] = [];
   let failOn: string | null = "b";
-  const outbox = createOutbox({
+  const outbox = createOutbox({ getUserId: async () => "u1",
     storage: memoryStorage(),
     send: async (i) => {
       if (i.clientId === failOn) throw networkErr();
@@ -52,7 +52,7 @@ test("outbox flushes in order and stops at a network error", async () => {
 
 test("outbox drops a 422 item and records it as failed", async () => {
   const sent: string[] = [];
-  const outbox = createOutbox({
+  const outbox = createOutbox({ getUserId: async () => "u1",
     storage: memoryStorage(),
     send: async (i) => {
       if (i.clientId === "bad") throw httpErr(422);
@@ -72,7 +72,7 @@ test("outbox drops a 422 item and records it as failed", async () => {
 
 test("outbox keeps items on 408, 429, 5xx and 401 and stops", async () => {
   for (const status of [408, 429, 500, 503, 401]) {
-    const outbox = createOutbox({
+    const outbox = createOutbox({ getUserId: async () => "u1",
       storage: memoryStorage(),
       send: async () => {
         throw httpErr(status);
@@ -86,7 +86,7 @@ test("outbox keeps items on 408, 429, 5xx and 401 and stops", async () => {
 });
 
 test("outbox treats legacy 409 duplicate_client_id as success", async () => {
-  const outbox = createOutbox({
+  const outbox = createOutbox({ getUserId: async () => "u1",
     storage: memoryStorage(),
     send: async () => {
       throw httpErr(409, "duplicate_client_id");
@@ -99,26 +99,26 @@ test("outbox treats legacy 409 duplicate_client_id as success", async () => {
 
 test("outbox survives re-creation from storage", async () => {
   const storage = memoryStorage();
-  const first = createOutbox({ storage, send: async () => {} });
+  const first = createOutbox({ getUserId: async () => "u1", storage, send: async () => {} });
   await first.enqueue(item("a"));
   await first.enqueue(item("b"));
   assert.ok(storage.data.has("system_self.outbox.v1"));
 
   const sent: OutboxItem[] = [];
-  const second = createOutbox({ storage, send: async (i) => void sent.push(i) });
+  const second = createOutbox({ getUserId: async () => "u1", storage, send: async (i) => void sent.push(i) });
   await second.ready();
   assert.deepEqual(second.pending().map((i) => i.clientId), ["a", "b"]);
   assert.deepEqual(await second.flush(), { sent: 2, remaining: 0 });
   assert.deepEqual(sent.map((i) => i.clientId), ["a", "b"]);
 
-  const third = createOutbox({ storage, send: async () => {} });
+  const third = createOutbox({ getUserId: async () => "u1", storage, send: async () => {} });
   await third.ready();
   assert.deepEqual(third.pending(), []);
 });
 
 test("concurrent flushes share one pass (no double send)", async () => {
   const sent: string[] = [];
-  const outbox = createOutbox({
+  const outbox = createOutbox({ getUserId: async () => "u1",
     storage: memoryStorage(),
     send: async (i) => {
       await new Promise((r) => setTimeout(r, 5));
@@ -133,7 +133,7 @@ test("concurrent flushes share one pass (no double send)", async () => {
 
 test("enqueue during a flush is sent after older items, in order", async () => {
   const sent: string[] = [];
-  const outbox = createOutbox({
+  const outbox = createOutbox({ getUserId: async () => "u1",
     storage: memoryStorage(),
     send: async (i) => {
       await new Promise((r) => setTimeout(r, 5));
@@ -150,7 +150,7 @@ test("enqueue during a flush is sent after older items, in order", async () => {
 
 test("flushBeforeMutation is true when empty after flush, false when blocked", async () => {
   let offline = true;
-  const outbox = createOutbox({
+  const outbox = createOutbox({ getUserId: async () => "u1",
     storage: memoryStorage(),
     send: async () => {
       if (offline) throw networkErr();
@@ -164,7 +164,7 @@ test("flushBeforeMutation is true when empty after flush, false when blocked", a
 });
 
 test("enqueue with an existing clientId does not duplicate", async () => {
-  const outbox = createOutbox({ storage: memoryStorage(), send: async () => {} });
+  const outbox = createOutbox({ getUserId: async () => "u1", storage: memoryStorage(), send: async () => {} });
   await outbox.enqueue(item("a"));
   await outbox.enqueue(item("a"));
   assert.equal(outbox.pending().length, 1);

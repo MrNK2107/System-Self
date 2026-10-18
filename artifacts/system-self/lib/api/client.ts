@@ -2,7 +2,7 @@ import type { ZodType } from "zod";
 import { apiBaseUrl } from "./config";
 import { AuthResponseSchema, secureTokenStore, type Session, type TokenStore } from "./session";
 
-export type ApiErrorKind = "network" | "http" | "parse";
+export type ApiErrorKind = "network" | "http" | "parse" | "storage";
 
 export class ApiError extends Error {
   readonly kind: ApiErrorKind;
@@ -16,6 +16,13 @@ export class ApiError extends Error {
     this.status = init.status;
     this.code = init.code;
   }
+}
+
+/** React Query retry policy: only transient failures (network, 5xx), at most 2 retries. */
+export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
+  if (failureCount >= 2) return false;
+  if (!(error instanceof ApiError)) return false;
+  return error.kind === "network" || (error.kind === "http" && (error.status ?? 0) >= 500);
 }
 
 export interface RequestOptions<T> {
@@ -39,10 +46,33 @@ export interface ApiClientDeps {
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
+interface Reply {
+  status: number;
+  ok: boolean;
+  body: unknown;
+}
+
 export function createApiClient(deps: ApiClientDeps): ApiClient {
   let refreshing: Promise<void> | null = null;
 
-  async function send(method: string, path: string, opts: RequestOptions<unknown>, token: string | null): Promise<Response> {
+  // Token storage failures surface as ApiError storage, never as raw native errors.
+  async function getSession(): Promise<Session | null> {
+    try {
+      return await deps.tokens.get();
+    } catch {
+      throw new ApiError({ kind: "storage", message: "Could not read the stored session" });
+    }
+  }
+  async function setSession(s: Session | null): Promise<void> {
+    try {
+      await deps.tokens.set(s);
+    } catch {
+      throw new ApiError({ kind: "storage", message: "Could not write the stored session" });
+    }
+  }
+
+  // The timeout covers the whole exchange, including reading the body.
+  async function send(method: string, path: string, opts: RequestOptions<unknown>, token: string | null): Promise<Reply> {
     const headers: Record<string, string> = { Accept: "application/json" };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -51,31 +81,26 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      return await deps.fetch(`${deps.baseUrl}${path}`, {
+      const res = await deps.fetch(`${deps.baseUrl}${path}`, {
         method,
         headers,
         body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
         signal: controller.signal,
       });
+      const text = await res.text();
+      let body: unknown = null;
+      if (text) {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = null;
+        }
+      }
+      return { status: res.status, ok: res.ok, body };
     } catch {
       throw new ApiError({ kind: "network", message: "Network request failed" });
     } finally {
       clearTimeout(timer);
-    }
-  }
-
-  async function readBody(res: Response): Promise<unknown> {
-    let text: string;
-    try {
-      text = await res.text();
-    } catch {
-      throw new ApiError({ kind: "network", message: "Network request failed" });
-    }
-    if (!text) return null;
-    try {
-      return JSON.parse(text);
-    } catch {
-      return null;
     }
   }
 
@@ -91,19 +116,19 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
 
   // One refresh at a time; every waiting request shares its outcome.
   async function doRefresh(): Promise<void> {
-    const current = await deps.tokens.get();
+    const current = await getSession();
     if (!current) throw new ApiError({ kind: "http", status: 401, message: "Unauthorized" });
     const res = await send("POST", "/api/auth/refresh", { body: { refreshToken: current.refreshToken } }, null);
-    const body = await readBody(res);
+    // Only a 401 means the refresh token is dead. 5xx / 429 / others keep the session for a later retry.
     if (res.status === 401) {
-      await deps.tokens.set(null);
+      await setSession(null);
       deps.onSessionExpired();
-      throw httpError(401, body);
+      throw httpError(401, res.body);
     }
-    if (!res.ok) throw httpError(res.status, body);
-    const parsed = AuthResponseSchema.safeParse(body);
+    if (!res.ok) throw httpError(res.status, res.body);
+    const parsed = AuthResponseSchema.safeParse(res.body);
     if (!parsed.success) throw new ApiError({ kind: "parse", message: "Unexpected refresh response" });
-    await deps.tokens.set(parsed.data);
+    await setSession(parsed.data);
   }
 
   function refreshOnce(): Promise<void> {
@@ -120,30 +145,26 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
 
   async function request<T = unknown>(method: string, path: string, opts: RequestOptions<T> = {}): Promise<T> {
     const useAuth = opts.auth !== false;
-    const session: Session | null = useAuth ? await deps.tokens.get() : null;
+    const session: Session | null = useAuth ? await getSession() : null;
     const usedToken = session?.accessToken ?? null;
 
     let res = await send(method, path, opts, usedToken);
-    let body = await readBody(res);
 
-    if (res.status === 401 && useAuth && isExpiredToken(body)) {
-      const latest = await deps.tokens.get();
-      // No session at all: nothing to refresh. Otherwise refresh unless another request already did.
+    if (res.status === 401 && useAuth && isExpiredToken(res.body)) {
+      const latest = await getSession();
+      // No session at all: nothing to refresh. Otherwise refresh unless another request already rotated the token.
       if (latest && latest.accessToken === usedToken) await refreshOnce();
-      const next = await deps.tokens.get();
-      if (next) {
-        res = await send(method, path, opts, next.accessToken);
-        body = await readBody(res);
-      }
+      const next = await getSession();
+      if (next) res = await send(method, path, opts, next.accessToken);
     }
 
-    if (!res.ok) throw httpError(res.status, body);
+    if (!res.ok) throw httpError(res.status, res.body);
     if (opts.schema) {
-      const parsed = opts.schema.safeParse(body);
+      const parsed = opts.schema.safeParse(res.body);
       if (!parsed.success) throw new ApiError({ kind: "parse", message: `Unexpected response from ${path}` });
       return parsed.data;
     }
-    return body as T;
+    return res.body as T;
   }
 
   return { request };
