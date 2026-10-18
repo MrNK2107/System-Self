@@ -45,10 +45,12 @@ The founder's requirement: *"make sure it doesn't affect the rankings part."*
 
 **Every feature in this doc is rank-neutral.** Concretely:
 
-1. No change to the hidden score formula, domain weights or DISCIPLINE multiplier (`computeHiddenScore` in `artifacts/system-self/context/AppContext.tsx`).
-2. No change to rank thresholds (`computeRankFromScore`), promotion/demotion rules, or Rank Freeze (PRD §10).
-3. No change to decay, quest failure penalties or refusal penalties (PRD §9, §11, §13; `refuseQuest` currently applies −1.5 DISCIPLINE).
-4. No change to the streak multiplier (`getStreakMultiplier`) or to how streaks break.
+The ranking rules these features must not touch are the PRD's, as implemented in `lib/engine` (see `docs/superpowers/specs/2026-10-19-production-architecture-design.md` §2 item 3):
+
+1. No change to the hidden score formula, domain weights or DISCIPLINE multiplier.
+2. No change to rank thresholds, promotion/demotion rules, or Rank Freeze (PRD §10).
+3. No change to decay, quest failure penalties or refusal penalties (PRD §9, §11, §13).
+4. No change to the streak multiplier or to how streaks break.
 5. No change to rival matching or rival scores.
 6. **No new feature grants, removes, multiplies or protects score points.** Score moves only through the paths that exist today: logs and quest outcomes, under the existing rules.
 7. New rewards are **non-score**: achievements, marks, SYSTEM lines, unlocks inside the new features. None of them feed the hidden score.
@@ -58,8 +60,6 @@ If a builder finds a feature below that can only be built by bending one of thes
 **No new quest slots (my call).** `completeQuest` always pays +3 DISCIPLINE with the streak multiplier, so any extra quest would be a new source of points. These features **never add quests**. They only shape the *content* of the existing quest slots (3 daily, 1–2 weekly, 1 arc), or they prompt the user to make an ordinary log. A quest that fills an existing slot is completed through `completeQuest` under existing rules. Anything that isn't a quest (floor session, comeback steps) is not completed through `completeQuest`.
 
 **What a "gym quest" is (my call).** Any quest with `domain: "BODY"`. There's no new structured quest type and no API schema change. Finishing a gym session does **not** auto-complete a quest; the two stay separate actions, as they are today.
-
-> **Builder note:** the code's hidden score (no SOCIAL, DISCIPLINE weighted 0.45) already differs from the PRD's formula. That's out of scope here. Leave whatever is in the code as it is.
 
 ## 4. Features
 
