@@ -222,6 +222,30 @@ test("email verify request + verify marks the user verified", { skip }, async ()
   assert.equal(ok.body.user.emailVerified, true);
 });
 
+test("email verify request: per-account cap -> 429 code_rate_limited", { skip }, async () => {
+  const a = app();
+  const reg = await request(a).post("/api/auth/register").send(validBody());
+  const auth = { Authorization: `Bearer ${reg.body.accessToken}` };
+  // Registration already created one verify code; 4 more fit in the hourly budget of 5.
+  for (let i = 0; i < 4; i++) assert.equal((await request(a).post("/api/auth/email/verify/request").set(auth)).status, 204);
+  const capped = await request(a).post("/api/auth/email/verify/request").set(auth);
+  assert.equal(capped.status, 429);
+  assert.equal(capped.body.code, "code_rate_limited");
+  assert.equal(sent.length, 5);
+});
+
+test("password forgot: per-account cap still returns 204 but sends nothing", { skip }, async () => {
+  const a = app();
+  await request(a).post("/api/auth/register").send(validBody());
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await request(a).post("/api/auth/password/forgot").send({ email: "alice@example.com" })).status, 204);
+  }
+  assert.equal(sent.length, 6);
+  const capped = await request(a).post("/api/auth/password/forgot").send({ email: "alice@example.com" });
+  assert.equal(capped.status, 204);
+  assert.equal(sent.length, 6);
+});
+
 test("password change revokes tokens", { skip }, async () => {
   const a = app();
   const reg = await request(a).post("/api/auth/register").send(validBody());

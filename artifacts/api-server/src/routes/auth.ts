@@ -144,7 +144,7 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
     const body = registerSchema.parse(req.body);
     const passwordHash = await hashPassword(body.password);
     let user: User;
-    let verifyCode: string;
+    let verifyCode: string | null;
     try {
       ({ user, verifyCode } = await database().transaction(async (tx) => {
         const [row] = await tx
@@ -170,7 +170,7 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
       });
       return;
     }
-    sendCode(req, user.email, "verify", verifyCode);
+    if (verifyCode) sendCode(req, user.email, "verify", verifyCode);
     res.status(201).json(await issueSession(req, user));
   });
 
@@ -245,6 +245,10 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
     const user = await loadUser(req.user!.id);
     if (user && !user.emailVerifiedAt) {
       const c = await createEmailCode(database(), user.id, "verify");
+      if (!c) {
+        res.status(429).json({ error: "Too many codes requested, try again later", code: "code_rate_limited" });
+        return;
+      }
       sendCode(req, user.email, "verify", c);
     }
     res.status(204).end();
@@ -269,8 +273,9 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
     const body = forgotSchema.parse(req.body);
     const [user] = await database().select().from(users).where(eq(users.email, body.email)).limit(1);
     if (user) {
+      // Over the per-account cap nothing is sent, but the response stays 204 (no account enumeration).
       const c = await createEmailCode(database(), user.id, "reset");
-      sendCode(req, user.email, "reset", c);
+      if (c) sendCode(req, user.email, "reset", c);
     }
     res.status(204).end();
   });

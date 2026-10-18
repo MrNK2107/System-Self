@@ -140,12 +140,12 @@ test("expired refresh token -> expired", { skip }, async () => {
 
 test("email code: correct ok, second use invalid, 6th wrong attempt locked", { skip }, async () => {
   const uid = await makeUser();
-  const code = await createEmailCode(db!, uid, "verify");
+  const code = (await createEmailCode(db!, uid, "verify"))!;
   assert.match(code, /^\d{6}$/);
   assert.equal(await consumeEmailCode(db!, uid, "verify", code), "ok");
   assert.equal(await consumeEmailCode(db!, uid, "verify", code), "invalid");
 
-  const c2 = await createEmailCode(db!, uid, "reset");
+  const c2 = (await createEmailCode(db!, uid, "reset"))!;
   const wrong = c2 === "000000" ? "111111" : "000000";
   for (let i = 0; i < 5; i++) assert.equal(await consumeEmailCode(db!, uid, "reset", wrong), "invalid");
   assert.equal(await consumeEmailCode(db!, uid, "reset", wrong), "locked");
@@ -154,8 +154,8 @@ test("email code: correct ok, second use invalid, 6th wrong attempt locked", { s
 
 test("new email code invalidates earlier one; expired code -> expired", { skip }, async () => {
   const uid = await makeUser();
-  const a = await createEmailCode(db!, uid, "verify");
-  const b = await createEmailCode(db!, uid, "verify");
+  const a = (await createEmailCode(db!, uid, "verify"))!;
+  const b = (await createEmailCode(db!, uid, "verify"))!;
   if (a !== b) assert.equal(await consumeEmailCode(db!, uid, "verify", a), "invalid");
   await db!.update(emailCodes).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(emailCodes.userId, uid));
   assert.equal(await consumeEmailCode(db!, uid, "verify", b), "expired");
@@ -163,7 +163,7 @@ test("new email code invalidates earlier one; expired code -> expired", { skip }
 
 test("concurrent wrong guesses cannot exceed the attempt limit", { skip }, async () => {
   const uid = await makeUser();
-  const code = await createEmailCode(db!, uid, "verify");
+  const code = (await createEmailCode(db!, uid, "verify"))!;
   const wrong = code === "000000" ? "111111" : "000000";
   const results = await Promise.all(
     Array.from({ length: 20 }, () => consumeEmailCode(db!, uid, "verify", wrong)),
@@ -186,4 +186,15 @@ test("concurrent rotation of one token: both resolve, exactly one live token, fa
   assert.ok(okTokens.includes(live[0]!.tokenHash));
   const rows = await db!.select().from(refreshTokens).where(eq(refreshTokens.userId, uid));
   assert.ok(rows.some((x) => !x.revokedAt), "family must not be fully revoked");
+});
+
+test("createEmailCode refuses after 5 codes of a purpose in the last hour", { skip }, async () => {
+  const uid = await makeUser();
+  for (let i = 0; i < 5; i++) assert.match((await createEmailCode(db!, uid, "reset"))!, /^\d{6}$/);
+  assert.equal(await createEmailCode(db!, uid, "reset"), null);
+  // Other purposes have their own budget.
+  assert.match((await createEmailCode(db!, uid, "verify"))!, /^\d{6}$/);
+  // Codes older than an hour no longer count.
+  await db!.update(emailCodes).set({ createdAt: new Date(Date.now() - 61 * 60_000) }).where(eq(emailCodes.userId, uid));
+  assert.match((await createEmailCode(db!, uid, "reset"))!, /^\d{6}$/);
 });
