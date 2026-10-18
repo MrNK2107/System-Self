@@ -1,7 +1,9 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { sql } from "drizzle-orm";
-import { getTestDb, resetDb } from "./testing";
+import { closeTestDb, getTestDb, resetDb } from "./testing";
+
+after(() => closeTestDb());
 
 test("resetDb truncates rows", async (t) => {
   const db = getTestDb();

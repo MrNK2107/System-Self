@@ -2,9 +2,11 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
+import type { Pool } from "pg";
 import { createDb, type Db } from "./index";
 
 let cached: Db | null = null;
+let cachedPool: Pool | null = null;
 
 function migrateOnce(url: string): void {
   // Synchronous on purpose so getTestDb() can stay sync: run the migrate script in a child process.
@@ -21,7 +23,9 @@ export function getTestDb(): Db | null {
   if (!url) return null;
   if (!cached) {
     migrateOnce(url);
-    cached = createDb(url).db;
+    const created = createDb(url);
+    cached = created.db;
+    cachedPool = created.pool;
   }
   return cached;
 }
@@ -33,4 +37,11 @@ export async function resetDb(db: Db): Promise<void> {
   const names = res.rows.map((r) => `"${String((r as { tablename: string }).tablename)}"`);
   if (names.length === 0) return;
   await db.execute(sql.raw(`TRUNCATE ${names.join(", ")} RESTART IDENTITY CASCADE`));
+}
+
+export async function closeTestDb(): Promise<void> {
+  const pool = cachedPool;
+  cached = null;
+  cachedPool = null;
+  if (pool) await pool.end();
 }
