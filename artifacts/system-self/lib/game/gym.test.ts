@@ -3,11 +3,16 @@ import { test } from "node:test";
 import { ApiError, type ApiClient } from "../api/client";
 import {
   activatePlan,
+  applyFlushResult,
   buildPlanRequest,
   completeGymSession,
   createPlan,
+  clearActive,
+  emptyActive,
   fetchGym,
   flushSetQueue,
+  loadActive,
+  saveActive,
   newSetKey,
   planBlocksFor,
   startGymSession,
@@ -280,4 +285,94 @@ test("newSetKey is unique per call and names its session", () => {
   const a = newSetKey(SESSION.id);
   assert.notEqual(a, newSetKey(SESSION.id));
   assert.ok(a.startsWith("gym-set-"));
+});
+
+test("flushSetQueue reports every processed key (sent and dropped)", async () => {
+  const { api } = fakeApi((c) => {
+    if (c.key === "k0") throw http(400);
+    return SET_REPLY;
+  });
+  const r = await flushSetQueue(api, [q(0), q(1), q(2)]);
+  assert.deepEqual([...r.processed].sort(), ["k0", "k1", "k2"]);
+  const stopped = await flushSetQueue(fakeApi(() => { throw http(503); }).api, [q(0)]);
+  assert.deepEqual([...stopped.processed], []);
+});
+
+test("a set appended while a flush is in flight survives and is sent on the next pass", async () => {
+  let queue: QueuedSet[] = [q(0)];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const sent: string[] = [];
+  const api: ApiClient = {
+    async request(_m, _p, opts) {
+      await gate;
+      sent.push(opts!.idempotencyKey!);
+      return SET_REPLY as never;
+    },
+  };
+  const inFlight = flushSetQueue(api, queue); // snapshots [k0]
+  queue = [...queue, q(1)]; // appended during the flush
+  release();
+  queue = applyFlushResult(queue, await inFlight);
+  assert.deepEqual(queue.map((s) => s.key), ["k1"]);
+  const second = await flushSetQueue(api, queue);
+  queue = applyFlushResult(queue, second);
+  assert.deepEqual(sent, ["k0", "k1"]);
+  assert.equal(queue.length, 0);
+});
+
+test("applyFlushResult keeps unprocessed sets in order", () => {
+  const out = applyFlushResult([q(0), q(1), q(2)], { processed: new Set(["k0"]) });
+  assert.deepEqual(out.map((s) => s.key), ["k1", "k2"]);
+});
+
+function memStorage() {
+  const m = new Map<string, string>();
+  return {
+    m,
+    getItem: async (k: string) => m.get(k) ?? null,
+    setItem: async (k: string, v: string) => void m.set(k, v),
+    removeItem: async (k: string) => void m.delete(k),
+  };
+}
+
+test("saveActive / loadActive round-trip per user; clearActive removes", async () => {
+  const st = memStorage();
+  const rec = {
+    ...emptyActive(),
+    session: { id: SESSION.id, planId: null, startedAt: SESSION.startedAt, performed: [{ exerciseId: "ex_squat", setIndex: 0, reps: 5, weight: 40, completed: true }] },
+    queue: [q(0)],
+  };
+  await saveActive(st, "u1", rec);
+  assert.ok(st.m.has("system_self.gym.active.v1.u1"));
+  assert.deepEqual(await loadActive(st, "u1"), rec);
+  assert.deepEqual(await loadActive(st, "u2"), emptyActive());
+  await clearActive(st, "u1");
+  assert.deepEqual(await loadActive(st, "u1"), emptyActive());
+});
+
+test("loadActive ignores corrupt or wrong-shape data", async () => {
+  const st = memStorage();
+  st.m.set("system_self.gym.active.v1.u1", "{not json");
+  assert.deepEqual(await loadActive(st, "u1"), emptyActive());
+  st.m.set("system_self.gym.active.v1.u1", JSON.stringify({ session: 5 }));
+  assert.deepEqual(await loadActive(st, "u1"), emptyActive());
+});
+
+test("saveActive of an empty record removes the key; a pending start survives the round-trip", async () => {
+  const st = memStorage();
+  await saveActive(st, "u1", { ...emptyActive(), pendingStart: { clientId: "gs-1", planId: "p" } });
+  assert.deepEqual((await loadActive(st, "u1")).pendingStart, { clientId: "gs-1", planId: "p" });
+  await saveActive(st, "u1", emptyActive());
+  assert.equal(st.m.size, 0);
+});
+
+test("weekdayOf and planBlocksFor use the given timezone for the weekday", () => {
+  const instant = new Date("2026-10-18T22:00:00Z"); // Sunday 22:00 UTC = Monday 03:30 in Kolkata
+  assert.equal(weekdayOf(instant, "UTC"), "SUN");
+  assert.equal(weekdayOf(instant, "Asia/Kolkata"), "MON");
+  assert.equal(weekdayOf(instant, "Not/AZone"), weekdayOf(instant));
+  const plan = { days: [{ weekday: "MON" as const, blocks: [{ exerciseId: "ex_squat", sets: 3, repRange: "5", restSec: 90 }] }] };
+  assert.equal(planBlocksFor(plan, instant, "Asia/Kolkata").length, 1);
+  assert.equal(planBlocksFor(plan, instant, "UTC").length, 0);
 });

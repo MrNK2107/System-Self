@@ -38,8 +38,20 @@ const DEFAULT_REST_SEC = 90;
 
 // --- calendar ---------------------------------------------------------------------
 
-/** The weekday of the device's local calendar day. */
-export function weekdayOf(date: Date): Weekday {
+/**
+ * The weekday of `date` in the given IANA timezone (the account's profile timezone, which is what the server
+ * uses for a session's localDate). Without a usable timezone: the device's local day.
+ */
+export function weekdayOf(date: Date, timeZone?: string): Weekday {
+  if (timeZone) {
+    try {
+      const name = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone }).format(date).toUpperCase();
+      const found = WEEKDAYS.find((d) => d === name.slice(0, 3));
+      if (found) return found;
+    } catch {
+      // unknown timezone: fall through to the device day
+    }
+  }
   return WEEKDAYS[date.getDay()] ?? "MON";
 }
 
@@ -47,9 +59,10 @@ export function weekdayOf(date: Date): Weekday {
 export function planBlocksFor(
   plan: { days: { weekday: Weekday; blocks: PlanBlock[] }[] } | undefined,
   date: Date,
+  timeZone?: string,
 ): PlanBlock[] {
   if (!plan) return [];
-  const weekday = weekdayOf(date);
+  const weekday = weekdayOf(date, timeZone);
   return plan.days.find((d) => d.weekday === weekday)?.blocks ?? [];
 }
 
@@ -212,8 +225,9 @@ export function newSetKey(sessionId: string): string {
 export async function flushSetQueue(
   api: ApiClient,
   queue: readonly QueuedSet[],
-): Promise<{ remaining: QueuedSet[]; dropped: QueuedSet[] }> {
+): Promise<FlushResult> {
   const dropped: QueuedSet[] = [];
+  const processed = new Set<string>();
   for (let i = 0; i < queue.length; i++) {
     const item = queue[i]!;
     try {
@@ -224,12 +238,92 @@ export async function flushSetQueue(
       });
     } catch (e) {
       const retryable = !(e instanceof ApiError) || e.kind === "network" || (e.kind === "http" && (e.status ?? 0) >= 500);
-      if (retryable) return { remaining: queue.slice(i), dropped };
+      if (retryable) return { remaining: queue.slice(i), dropped, processed };
       dropped.push(item);
     }
+    processed.add(item.key);
   }
-  return { remaining: [], dropped };
+  return { remaining: [], dropped, processed };
 }
+
+export interface FlushResult {
+  /** The snapshot's sets that were not sent (stopped by a network error or 5xx). */
+  remaining: QueuedSet[];
+  /** Sets the server refused for good (4xx). */
+  dropped: QueuedSet[];
+  /** Keys of the sets that are done with: sent or dropped. */
+  processed: ReadonlySet<string>;
+}
+
+/** The live queue after a flush: only processed sets leave it, so sets appended mid-flush are kept. */
+export function applyFlushResult(live: readonly QueuedSet[], result: Pick<FlushResult, "processed">): QueuedSet[] {
+  return live.filter((s) => !result.processed.has(s.key));
+}
+
+// --- the in-progress session, kept across app restarts -----------------------------------------------------
+
+const PerformedSetSchema = z.object({
+  exerciseId: z.string(),
+  setIndex: z.number(),
+  reps: z.number(),
+  weight: z.number(),
+  completed: z.boolean(),
+});
+const ActiveRecordSchema = z.object({
+  session: z
+    .object({
+      id: z.string(),
+      planId: z.string().nullable(),
+      startedAt: z.string(),
+      performed: z.array(PerformedSetSchema),
+    })
+    .nullable(),
+  queue: z.array(
+    z.object({
+      key: z.string(),
+      sessionId: z.string(),
+      set: z.object({
+        exerciseId: z.string(),
+        reps: z.number(),
+        weight: z.number(),
+        completed: z.boolean(),
+        setIndex: z.number(),
+      }),
+    }),
+  ),
+  /** The clientId of a session start that has not succeeded yet: a retry reuses it so the server dedupes. */
+  pendingStart: z.object({ clientId: z.string(), planId: z.string().optional() }).nullable(),
+});
+export type ActiveRecord = z.infer<typeof ActiveRecordSchema>;
+
+export const emptyActive = (): ActiveRecord => ({ session: null, queue: [], pendingStart: null });
+export const activeKey = (userId: string) => `system_self.gym.active.v1.${userId}`;
+
+interface Storage {
+  getItem(key: string): Promise<string | null>;
+  setItem(key: string, value: string): Promise<void>;
+  removeItem(key: string): Promise<void>;
+}
+
+/** Persists the record; an empty one removes the key. */
+export async function saveActive(storage: Storage, userId: string, rec: ActiveRecord): Promise<void> {
+  if (!rec.session && rec.queue.length === 0 && !rec.pendingStart) return storage.removeItem(activeKey(userId));
+  await storage.setItem(activeKey(userId), JSON.stringify(rec));
+}
+
+/** The saved record, or an empty one when nothing is saved or the data is unreadable. */
+export async function loadActive(storage: Storage, userId: string): Promise<ActiveRecord> {
+  try {
+    const raw = await storage.getItem(activeKey(userId));
+    if (!raw) return emptyActive();
+    const parsed = ActiveRecordSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : emptyActive();
+  } catch {
+    return emptyActive();
+  }
+}
+
+export const clearActive = (storage: Storage, userId: string) => storage.removeItem(activeKey(userId));
 
 // --- server data -> screen model --------------------------------------------------------------
 

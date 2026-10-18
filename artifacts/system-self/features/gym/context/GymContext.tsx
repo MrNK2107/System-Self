@@ -1,6 +1,7 @@
 // Gym state for the screens, backed by /api/gym. The server computes points and PRs (POST .../complete);
 // this provider reads the data through React Query (cached for offline), creates sessions online, sends sets
 // with a stable idempotency key and retries them, and completes sessions once every set has landed.
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
@@ -11,16 +12,21 @@ import { useOnline } from "@/lib/api/query";
 import { newClientId } from "@/lib/game/actions";
 import {
   activatePlan,
+  applyFlushResult,
   buildPlanRequest,
   completeGymSession,
   createPlan,
+  emptyActive,
   fetchGym,
   flushSetQueue,
+  loadActive,
+  saveActive,
   newSetKey,
   startGymSession,
   toGymView,
   toWorkoutSession,
   validatePlanDraft,
+  type ActiveRecord,
   type GymCompletion,
   type PlanDraft,
   type QueuedSet,
@@ -52,6 +58,15 @@ interface GymContextType {
   lastCompletion: GymCompletion | null;
   /** Sets logged on this device that the server has not confirmed yet. */
   unsyncedSets: number;
+  /** Sets the server refused for good since the last dismissal. */
+  rejectedSets: number;
+  dismissRejectedSets: () => void;
+  /** The in-progress session (started or restored from the last run), if any. */
+  activeSessionId: string | null;
+  /** True when the active session was restored from storage and not touched since. */
+  restoredSession: boolean;
+  /** Drops the local session and its unsent sets (the server session stays incomplete). */
+  discardActiveSession: () => Promise<void>;
   loading: boolean;
   /** True when the first load failed and there is no cached data. */
   loadFailed: boolean;
@@ -97,27 +112,85 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
   const [lastPrEvents, setLastPrEvents] = useState<NewPrEvent[]>([]);
   const [lastCompletion, setLastCompletion] = useState<GymCompletion | null>(null);
   const [unsyncedSets, setUnsyncedSets] = useState(0);
+  const [rejectedSets, setRejectedSets] = useState(0);
+  const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null);
+  const [restoredSession, setRestoredSession] = useState(false);
+  const activeIdRef = useRef<string | null>(null);
+  const pendingStart = useRef<ActiveRecord["pendingStart"]>(null);
+  const restoredFor = useRef<string | null>(null);
+  const writing = useRef<Promise<void>>(Promise.resolve());
   const queue = useRef<QueuedSet[]>([]);
   const sending = useRef<Promise<void> | null>(null);
   const busy = useRef(new Set<string>());
 
-  // A different account starts clean.
+  const setActiveId = useCallback((id: string | null) => {
+    activeIdRef.current = id;
+    setActiveSessionIdState(id);
+  }, []);
+
+  /** Writes the in-progress session, unsent sets and pending start id for this user (writes are serialized). */
+  const persist = useCallback(() => {
+    if (!userId || restoredFor.current !== userId) return;
+    const id = activeIdRef.current;
+    const s = id ? sessionsRef.current[id] : undefined;
+    const rec: ActiveRecord = {
+      session: s && !s.completedAt ? { id: s.id, planId: s.planId ?? null, startedAt: s.date, performed: s.performed } : null,
+      queue: queue.current,
+      pendingStart: pendingStart.current,
+    };
+    writing.current = writing.current.then(() => saveActive(AsyncStorage, userId, rec)).catch(() => undefined);
+  }, [userId]);
+
+  // A different account starts clean; the signed-in account gets its unfinished session back.
   useEffect(() => {
+    restoredFor.current = null;
     setLocalSessions(() => ({}));
     setLastPrEvents([]);
     setLastCompletion(null);
+    setRejectedSets(0);
+    setRestoredSession(false);
+    setActiveId(null);
+    pendingStart.current = null;
     queue.current = [];
     setUnsyncedSets(0);
-  }, [userId]);
+    if (!userId) return;
+    let cancelled = false;
+    void loadActive(AsyncStorage, userId).then((rec) => {
+      if (cancelled) return;
+      queue.current = [...rec.queue, ...queue.current];
+      setUnsyncedSets(queue.current.length);
+      pendingStart.current = rec.pendingStart;
+      if (rec.session) {
+        const r = rec.session;
+        setLocalSessions(() => ({
+          [r.id]: { id: r.id, date: r.startedAt, planId: r.planId ?? undefined, points: 0, performed: r.performed },
+        }));
+        setActiveId(r.id);
+        setRestoredSession(true);
+      }
+      restoredFor.current = userId;
+      if (rec.queue.length > 0) void flushSetsRef.current();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, setLocalSessions, setActiveId]);
 
+  const flushSetsRef = useRef<() => Promise<boolean>>(async () => true);
   const flushSets = useCallback(async (): Promise<boolean> => {
     // Serialize passes so one set is never in flight twice.
     while (sending.current) await sending.current;
     if (queue.current.length === 0) return true;
     const pass = (async () => {
       const r = await flushSetQueue(api, queue.current);
-      queue.current = r.remaining;
-      setUnsyncedSets(r.remaining.length);
+      // Only processed sets leave the queue: one logged while this pass was in flight stays for the next.
+      queue.current = applyFlushResult(queue.current, r);
+      setUnsyncedSets(queue.current.length);
+      if (r.dropped.length > 0) {
+        console.warn(`gym: ${r.dropped.length} set(s) rejected by the server`, r.dropped.map((d) => d.key));
+        setRejectedSets((n) => n + r.dropped.length);
+      }
+      persist();
     })();
     sending.current = pass;
     try {
@@ -126,7 +199,8 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       sending.current = null;
     }
     return queue.current.length === 0;
-  }, []);
+  }, [persist]);
+  flushSetsRef.current = flushSets;
 
   useEffect(() => {
     if (online && userId) void flushSets();
@@ -193,13 +267,22 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
   const startWorkoutSession = useCallback(
     (planId?: string) =>
       guarded("start", async () => {
-        const r = await startGymSession(api, getOutbox(), newClientId("gym-session"), planId);
+        // One clientId per pending start (kept in storage): a retry after a lost response is deduped by the server.
+        const pending = pendingStart.current;
+        const start = pending && pending.planId === planId ? pending : { clientId: newClientId("gym-session"), planId };
+        pendingStart.current = start;
+        persist();
+        const r = await startGymSession(api, getOutbox(), start.clientId, planId);
         if (!r.ok) return { ok: false, reason: "sync_pending" };
+        pendingStart.current = null;
         const session = toWorkoutSession(r.value);
         setLocalSessions((prev) => ({ ...prev, [session.id]: session }));
+        setActiveId(session.id);
+        setRestoredSession(false);
+        persist();
         return { ok: true, value: session };
       }),
-    [guarded, setLocalSessions],
+    [guarded, setLocalSessions, setActiveId, persist],
   );
 
   const logPerformedSet = useCallback(
@@ -216,9 +299,11 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       };
       queue.current = [...queue.current, queued];
       setUnsyncedSets(queue.current.length);
+      setRestoredSession(false);
+      persist();
       await flushSets();
     },
-    [flushSets, setLocalSessions],
+    [flushSets, setLocalSessions, persist],
   );
 
   const completeWorkoutSession = useCallback(
@@ -239,6 +324,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
             const s = prev[sessionId];
             return s ? { ...prev, [sessionId]: { ...s, completedAt: done.session.completedAt ?? new Date().toISOString(), points: done.points } } : prev;
           });
+          if (activeIdRef.current === sessionId) setActiveId(null);
           return { ok: true, value: done };
         } catch (error) {
           if (error instanceof ApiError && error.code === "already_completed") {
@@ -246,17 +332,36 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
               const s = prev[sessionId];
               return s ? { ...prev, [sessionId]: { ...s, completedAt: s.completedAt ?? new Date().toISOString() } } : prev;
             });
+            if (activeIdRef.current === sessionId) setActiveId(null);
             return { ok: false, reason: "already_completed" };
           }
           throw error;
         } finally {
+          persist();
           // Points, notices and scores changed on the server.
           void queryClient.invalidateQueries({ queryKey: gymKey(userId) });
           void invalidateGame(queryClient, userId);
         }
       }),
-    [guarded, flushSets, queryClient, userId, setLocalSessions],
+    [guarded, flushSets, queryClient, userId, setLocalSessions, setActiveId, persist],
   );
+
+  const discardActiveSession = useCallback(async () => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    queue.current = queue.current.filter((s) => s.sessionId !== id);
+    setUnsyncedSets(queue.current.length);
+    setLocalSessions((prev) => {
+      const { [id]: _gone, ...rest } = prev;
+      return rest;
+    });
+    setActiveId(null);
+    setRestoredSession(false);
+    persist();
+    await writing.current;
+  }, [setLocalSessions, setActiveId, persist]);
+
+  const dismissRejectedSets = useCallback(() => setRejectedSets(0), []);
 
   const getBodyPartScores = useCallback(() => view.bodyPartScores, [view.bodyPartScores]);
 
@@ -280,6 +385,11 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       lastPrEvents,
       lastCompletion,
       unsyncedSets,
+      rejectedSets,
+      dismissRejectedSets,
+      activeSessionId,
+      restoredSession,
+      discardActiveSession,
       loading: !!userId && q.isPending,
       loadFailed: q.isError && !q.data,
       refresh,
@@ -292,7 +402,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       getPersonalRecords,
     }),
     [
-      view, workoutSessions, lastPrEvents, lastCompletion, unsyncedSets, userId, q.isPending, q.isError, q.data, refresh,
+      view, workoutSessions, lastPrEvents, lastCompletion, unsyncedSets, rejectedSets, dismissRejectedSets, activeSessionId, restoredSession, discardActiveSession, userId, q.isPending, q.isError, q.data, refresh,
       createWorkoutPlan, updateWorkoutPlan, startWorkoutSession, logPerformedSet, completeWorkoutSession,
       getBodyPartScores, getPersonalRecords,
     ],

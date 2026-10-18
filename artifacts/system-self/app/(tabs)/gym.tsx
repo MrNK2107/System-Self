@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { useGym } from "@/features/gym/context/GymContext";
 import { PlanEditor } from "@/features/gym/components/PlanEditor";
@@ -31,6 +32,11 @@ export default function GymScreen() {
     lastPrEvents,
     lastCompletion,
     unsyncedSets,
+    rejectedSets,
+    dismissRejectedSets,
+    activeSessionId,
+    restoredSession,
+    discardActiveSession,
     createWorkoutPlan,
     updateWorkoutPlan,
     startWorkoutSession,
@@ -38,7 +44,6 @@ export default function GymScreen() {
     completeWorkoutSession,
   } = useGym();
   const [activeTab, setActiveTab] = useState<TabKey>("today");
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [reps, setReps] = useState("5");
   const [weight, setWeight] = useState("40");
   const [editing, setEditing] = useState(false);
@@ -47,9 +52,11 @@ export default function GymScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
 
+  const { user } = useAuth();
+  const timeZone = user?.timezone;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const plan = workoutPlans.find((p) => p.id === activePlanId) ?? workoutPlans[0];
-  const todayBlocks = useMemo(() => planBlocksFor(plan, new Date()), [plan]);
+  const todayBlocks = useMemo(() => planBlocksFor(plan, new Date(), timeZone), [plan, timeZone]);
 
   const exById = useMemo(() => Object.fromEntries(exercises.map((x) => [x.id, x])), [exercises]);
   const activeSession = workoutSessions.find((s) => s.id === activeSessionId);
@@ -60,8 +67,7 @@ export default function GymScreen() {
     setMessage(null);
     try {
       const r = await startWorkoutSession(plan?.id);
-      if (r.ok) setActiveSessionId(r.value.id);
-      else setMessage(r.reason === "sync_pending" ? SYNC_PENDING_START : "The session could not be started. Try again.");
+      if (!r.ok) setMessage(r.reason === "sync_pending" ? SYNC_PENDING_START : "The session could not be started. Try again.");
     } finally {
       setWorking(false);
     }
@@ -84,14 +90,12 @@ export default function GymScreen() {
     try {
       const r = await completeWorkoutSession(activeSessionId);
       if (r.ok) {
-        setActiveSessionId(null);
         setMessage(
           r.value.points > 0
             ? `Session recorded. BODY +${r.value.points.toFixed(1)}.`
             : "Session recorded. 0 points: no planned set was finished.",
         );
       } else if (r.reason === "already_completed") {
-        setActiveSessionId(null);
         setMessage("This session was already recorded.");
       } else {
         setMessage(r.reason === "sync_pending" ? SYNC_PENDING_COMPLETE : "The session could not be completed. Try again.");
@@ -225,6 +229,23 @@ export default function GymScreen() {
               )}
             </View>
 
+            {activeSession && restoredSession && (
+              <View style={[styles.block, { borderColor: colors.border }]}>
+                <Text style={{ color: colors.foreground, fontSize: 12 }}>
+                  Unfinished session restored: {activeSession.performed.length} sets logged. Resume it or discard it.
+                </Text>
+                <TouchableOpacity onPress={() => void discardActiveSession()}>
+                  <Text style={{ color: "#E05555", fontSize: 11, letterSpacing: 1 }}>DISCARD SESSION</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {rejectedSets > 0 && (
+              <TouchableOpacity onPress={dismissRejectedSets}>
+                <Text style={{ color: "#E05555", fontSize: 12 }}>
+                  {rejectedSets} {rejectedSets === 1 ? "set was" : "sets were"} rejected. Tap to dismiss.
+                </Text>
+              </TouchableOpacity>
+            )}
             {message && <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{message}</Text>}
             {unsyncedSets > 0 && (
               <Text style={{ color: "#C4873A", fontSize: 12 }}>
