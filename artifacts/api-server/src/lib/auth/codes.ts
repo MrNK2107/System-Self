@@ -1,7 +1,7 @@
-import { randomInt, timingSafeEqual } from "node:crypto";
+import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { and, count, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { emailCodes, type Db } from "@workspace/db";
-import { hashToken } from "./tokens";
+import { env } from "../env";
 
 export type CodePurpose = "verify" | "reset";
 
@@ -10,8 +10,10 @@ const MAX_ATTEMPTS = 5;
 /** Per-account, per-purpose cap on codes created in the trailing hour (stops mail bombing one inbox). */
 export const MAX_CODES_PER_HOUR = 5;
 
-// Salted with userId so identical codes for different users hash differently.
-const hashCode = (userId: string, code: string) => hashToken(`${userId}:${code}`);
+// HMAC keyed with JWT_SECRET (a pepper: a leaked email_codes table cannot be brute-forced over the
+// 10^6 code space without the secret) and salted with userId so equal codes hash differently.
+const hashCode = (userId: string, code: string) =>
+  createHmac("sha256", env.JWT_SECRET).update(`${userId}:${code}`).digest("hex");
 
 /**
  * Accepts a Db or an open transaction (nested transactions become savepoints).

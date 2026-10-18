@@ -42,6 +42,10 @@ pnpm --filter @workspace/db migrate      # applies lib/db/migrations/*.sql using
 pnpm --filter @workspace/api-server build
 pnpm --filter @workspace/api-server start
 ```
+Databases previously created with `pnpm --filter @workspace/db push` have no migration history: `migrate` would try to create tables that already exist and fail. Drop and recreate such a database (local data is disposable) before running `migrate`, e.g. `docker compose down -v && docker compose up -d postgres` for the compose database.
+
+The compose service runs `scripts/db/init-test-db.sql` (which creates `system_self_test`) only when the `pgdata` volume is first initialised. On an existing volume it does nothing; create the test database by hand (`docker compose exec postgres createdb -U system_self system_self_test`) or recreate the volume with `docker compose down -v`.
+
 Authoring a schema change: edit `lib/db/src/schema`, run `pnpm --filter @workspace/db generate`, review and commit the SQL. `pnpm --filter @workspace/db push` is for throwaway local databases only.
 
 Warning: `lib/db/migrations/0002_*.sql` was hand-edited to begin with `DELETE FROM` statements for the AI tables (`generated_quests`, `generated_quest_batches`, `quest_completion_events`, `system_messages`), because legacy rows were keyed by username and could not be attributed to a user. This was safe only because no production data existed. Never replay this migration against a populated database that still has the pre-0002 schema; it would delete that data. Databases already past 0002 are unaffected (migrations run once).
@@ -58,8 +62,10 @@ Warning: `lib/db/migrations/0002_*.sql` was hand-edited to begin with `DELETE FR
 - Accounts use email + password (argon2). Sessions are short-lived JWT access tokens plus rotating refresh tokens (`/api/auth/refresh`); reuse of a rotated token revokes its family. Grace window: a client whose refresh response was lost may retry with the same token within 30 seconds of the original rotation; if the unseen successor is still live it is revoked (`revoked_reason = 'superseded'`) and a new token is issued in the same family. Replays after 30 seconds, or of tokens revoked by logout/password change, revoke the family.
 - Rotate `JWT_SECRET`: deploying a new value invalidates all access tokens; clients recover via refresh only if the refresh token store is intact (refresh tokens are opaque and not signed with `JWT_SECRET`).
 - Email codes (verification, password reset) are capped at 5 per account and purpose per hour: `/api/auth/email/verify/request` then answers 429 `code_rate_limited`; `/api/auth/password/forgot` still answers 204 but sends nothing.
-- Password change/reset bumps the user's `tokenVersion` and revokes all refresh tokens.
-- Operator access: users with `role = "admin"` can use `/api/admin/users`.
+- Password change/reset bumps the user's `tokenVersion` and revokes all refresh tokens. `/api/auth/password/change` then returns a fresh session (200, same body as login) so the caller stays signed in; reset returns 204 and the user signs in again.
+- Operator access: users with `role = "admin"` can use `/api/admin/users` and `PATCH /api/admin/users/:id/role`. Demoting the last remaining admin is refused with 409 `last_admin`.
+- Bootstrap the first admin (the user must already be registered): `DATABASE_URL=... pnpm --filter @workspace/api-server admin:grant <email>`. It exits non-zero when no user has that email.
+- Email codes are stored as HMAC-SHA256 keyed with `JWT_SECRET`, so rotating `JWT_SECRET` also invalidates outstanding codes (they expire within 15 minutes anyway).
 - Raw tokens and codes are never logged; the `authorization` and `cookie` headers are redacted.
 
 ## 6. Query Options

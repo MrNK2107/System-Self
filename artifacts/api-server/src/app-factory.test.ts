@@ -27,3 +27,8 @@ test("health probes are exempt from the global rate limiter", async () => {
     assert.equal((await request(a).get("/api/readyz")).status, 503, `readyz ${i + 1}`);
   }
 });
+
+test("unknown /api path -> 404 even without a database", async () => {
+  const res = await request(createApp({ db: null, mailer })).get("/api/nope");
+  assert.equal(res.status, 404);
+});

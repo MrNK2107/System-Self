@@ -17,8 +17,8 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer }): IRouter {
   router.use(healthRoutes(db));
   router.use(authRoutes({ db, mailer, requireAuth }));
 
-  // Everything below requires a valid user.
-  router.use(requireAuth);
+  // Private surfaces. requireAuth is mounted per prefix so unknown /api paths fall through to 404.
+  router.use(["/system", "/admin"], requireAuth);
   router.use(systemRoutes(db));
   router.use(historyRoutes(db));
   if (db) router.use(adminRoutes(db));

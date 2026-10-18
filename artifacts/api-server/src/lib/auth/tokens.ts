@@ -28,6 +28,11 @@ export async function signAccessToken(
   return { token, expiresAt: new Date(exp * 1000) };
 }
 
+/**
+ * Verifies signature, issuer and expiry. The returned `role` is only what was true when the token
+ * was signed: never use it for authorization. requireAuth reloads the role (and tokenVersion) from
+ * the database on every request.
+ */
 export async function verifyAccessToken(
   token: string,
 ): Promise<{ userId: string; role: Role; ver: number } | null> {

@@ -1,5 +1,6 @@
 import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "@workspace/db/testing";
 import { emailCodes, refreshTokens, users } from "@workspace/db";
@@ -7,6 +8,7 @@ import { hashPassword, verifyPassword } from "./passwords";
 import { hashToken, signAccessToken, verifyAccessToken } from "./tokens";
 import { issueRefreshToken, revokeRefreshFamilyByToken, rotateRefreshToken } from "./refresh";
 import { consumeEmailCode, createEmailCode } from "./codes";
+import { env } from "../env";
 
 const db = getTestDb();
 const skip = db ? false : "TEST_DATABASE_URL not set";
@@ -197,4 +199,13 @@ test("createEmailCode refuses after 5 codes of a purpose in the last hour", { sk
   // Codes older than an hour no longer count.
   await db!.update(emailCodes).set({ createdAt: new Date(Date.now() - 61 * 60_000) }).where(eq(emailCodes.userId, uid));
   assert.match((await createEmailCode(db!, uid, "reset"))!, /^\d{6}$/);
+});
+
+test("email codes are stored as HMAC-SHA256 keyed with JWT_SECRET", { skip }, async () => {
+  const uid = await makeUser();
+  const code = (await createEmailCode(db!, uid, "verify"))!;
+  const [row] = await db!.select().from(emailCodes).where(eq(emailCodes.userId, uid));
+  const expected = createHmac("sha256", env.JWT_SECRET).update(`${uid}:${code}`).digest("hex");
+  assert.equal(row!.codeHash, expected);
+  assert.notEqual(row!.codeHash, hashToken(`${uid}:${code}`));
 });

@@ -24,6 +24,17 @@ test("email is unique", async (t) => {
   );
 });
 
+test("email uniqueness is case-insensitive", async (t) => {
+  const db = getTestDb();
+  if (!db) return t.skip("TEST_DATABASE_URL not set");
+  await resetDb(db);
+  await db.insert(users).values({ ...base, email: "a@x.com", username: "a" });
+  await assert.rejects(
+    db.insert(users).values({ ...base, email: "A@X.com", username: "b" }),
+    (e: any) => (e.cause?.code ?? e.code) === "23505" && (e.cause?.constraint ?? e.constraint) === "users_email_lower_idx",
+  );
+});
+
 test("deleting a user cascades refresh_tokens and email_codes", async (t) => {
   const db = getTestDb();
   if (!db) return t.skip("TEST_DATABASE_URL not set");

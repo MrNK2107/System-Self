@@ -33,11 +33,18 @@ export function adminRoutes(db: Db): IRouter {
   router.patch("/admin/users/:id/role", async (req, res) => {
     const id = idParamSchema.parse(req.params.id);
     const { role } = roleBodySchema.parse(req.body);
-    const [updated] = await db
-      .update(users)
-      .set({ role, updatedAt: new Date() })
-      .where(eq(users.id, id))
-      .returning();
+    const result = await db.transaction(async (tx) => {
+      // Lock every admin row so two concurrent demotions cannot both pass the "another admin exists" check.
+      const admins = await tx.select({ id: users.id }).from(users).where(eq(users.role, "admin")).for("update");
+      if (role === "user" && admins.length <= 1 && admins.some((a) => a.id === id)) return "last_admin" as const;
+      const [row] = await tx.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, id)).returning();
+      return row;
+    });
+    if (result === "last_admin") {
+      res.status(409).json({ error: "Cannot demote the last admin", code: "last_admin" });
+      return;
+    }
+    const updated = result;
     if (!updated) {
       res.status(404).json({ error: "User not found" });
       return;

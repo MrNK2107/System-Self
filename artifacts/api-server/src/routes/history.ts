@@ -1,7 +1,7 @@
 import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import { Router, type IRouter } from "express";
 import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages, type Db } from "@workspace/db";
 import { generateOrTemplate } from "../lib/ai";
 
@@ -54,6 +54,7 @@ router.get("/system/messages", async (req, res) => {
 
     return res.json({ items, page: { hasMore, nextCursor } });
   } catch (error) {
+    if (error instanceof ZodError) throw error; // validation -> 400 via errorHandler
     req.log.error({ error }, "Failed to fetch system messages");
     return res.status(500).json({ error: "Failed to fetch system messages" });
   }
@@ -101,6 +102,7 @@ router.get("/system/quests/history", async (req, res) => {
       page: { hasMore, nextCursor },
     });
   } catch (error) {
+    if (error instanceof ZodError) throw error; // validation -> 400 via errorHandler
     req.log.error({ error }, "Failed to fetch quest history");
     return res.status(500).json({ error: "Failed to fetch quest history" });
   }
@@ -302,6 +304,7 @@ router.get("/system/completions/summary", async (req, res) => {
       daily,
     });
   } catch (error) {
+    if (error instanceof ZodError) throw error; // validation -> 400 via errorHandler
     req.log.error({ error }, "Failed to fetch completion summary");
     return res.status(500).json({ error: "Failed to fetch completion summary" });
   }

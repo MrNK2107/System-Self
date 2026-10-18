@@ -246,7 +246,7 @@ test("password forgot: per-account cap still returns 204 but sends nothing", { s
   assert.equal(sent.length, 6);
 });
 
-test("password change revokes tokens", { skip }, async () => {
+test("password change revokes other sessions and returns a fresh session", { skip }, async () => {
   const a = app();
   const reg = await request(a).post("/api/auth/register").send(validBody());
   const auth = { Authorization: `Bearer ${reg.body.accessToken}` };
@@ -259,9 +259,17 @@ test("password change revokes tokens", { skip }, async () => {
     .post("/api/auth/password/change")
     .set(auth)
     .send({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
-  assert.equal(ok.status, 204);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.user.id, reg.body.user.id);
+  assert.equal(typeof ok.body.accessToken, "string");
+  assert.equal(typeof ok.body.refreshToken, "string");
+  // Other sessions are revoked...
   assert.equal((await request(a).get("/api/auth/me").set(auth)).status, 401);
   assert.equal((await request(a).post("/api/auth/refresh").send({ refreshToken: reg.body.refreshToken })).status, 401);
+  // ...but the caller stays signed in with the fresh session.
+  const fresh = { Authorization: `Bearer ${ok.body.accessToken}` };
+  assert.equal((await request(a).get("/api/auth/me").set(fresh)).status, 200);
+  assert.equal((await request(a).post("/api/auth/refresh").send({ refreshToken: ok.body.refreshToken })).status, 200);
 });
 
 test("PATCH /auth/me updates timezone and username; taken username -> 409", { skip }, async () => {
@@ -271,11 +279,26 @@ test("PATCH /auth/me updates timezone and username; taken username -> 409", { sk
   const auth = { Authorization: `Bearer ${reg.body.accessToken}` };
   const res = await request(a).patch("/api/auth/me").set(auth).send({ timezone: "Asia/Kolkata", username: "Alice_2" });
   assert.equal(res.status, 200);
-  assert.equal(res.body.user.timezone, "Asia/Kolkata");
+  assert.equal(res.body.user.timezone, new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata" }).resolvedOptions().timeZone);
   assert.equal(res.body.user.username, "alice_2");
   const taken = await request(a).patch("/api/auth/me").set(auth).send({ username: "bob" });
   assert.equal(taken.status, 409);
   assert.equal(taken.body.code, "username_taken");
+});
+
+test("timezones are canonicalized on register and PATCH /auth/me; invalid -> 400", { skip }, async () => {
+  const canonical = (tz: string) => new Intl.DateTimeFormat("en-US", { timeZone: tz }).resolvedOptions().timeZone;
+  const a = app();
+  const reg = await request(a).post("/api/auth/register").send(validBody({ timezone: "america/new_york" }));
+  assert.equal(reg.status, 201);
+  assert.equal(reg.body.user.timezone, "America/New_York");
+  const auth = { Authorization: `Bearer ${reg.body.accessToken}` };
+  const res = await request(a).patch("/api/auth/me").set(auth).send({ timezone: "asia/kolkata" });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.user.timezone, canonical("Asia/Kolkata"));
+  assert.match(res.body.user.timezone, /^Asia\/(Kolkata|Calcutta)$/);
+  const bad = await request(a).patch("/api/auth/me").set(auth).send({ timezone: "Mars/Olympus" });
+  assert.equal(bad.status, 400);
 });
 
 test("delete account -> old access token 401, refresh 401, user row gone", { skip }, async () => {
@@ -320,6 +343,47 @@ test("admin: users list and role change are admin-only", { skip }, async () => {
   const patched = await request(a).patch(`/api/admin/users/${other.body.user.id}/role`).set(auth).send({ role: "admin" });
   assert.equal(patched.status, 200);
   assert.equal(patched.body.user.role, "admin");
+});
+
+test("admin: demoting the last admin -> 409 last_admin; demoting one of two works", { skip }, async () => {
+  const a = app();
+  const reg = await request(a).post("/api/auth/register").send(validBody());
+  const auth = { Authorization: `Bearer ${reg.body.accessToken}` };
+  const me = reg.body.user.id as string;
+  await db!.update(users).set({ role: "admin" }).where(eq(users.id, me));
+  const self = await request(a).patch(`/api/admin/users/${me}/role`).set(auth).send({ role: "user" });
+  assert.equal(self.status, 409);
+  assert.equal(self.body.code, "last_admin");
+  const other = await request(a).post("/api/auth/register").send(validBody({ email: "b@example.com", username: "bob" }));
+  assert.equal((await request(a).patch(`/api/admin/users/${other.body.user.id}/role`).set(auth).send({ role: "admin" })).status, 200);
+  const demote = await request(a).patch(`/api/admin/users/${other.body.user.id}/role`).set(auth).send({ role: "user" });
+  assert.equal(demote.status, 200);
+  assert.equal(demote.body.user.role, "user");
+  // Demoting a non-admin when only one admin exists is not a "last admin" case.
+  const noop = await request(a).patch(`/api/admin/users/${other.body.user.id}/role`).set(auth).send({ role: "user" });
+  assert.equal(noop.status, 200);
+});
+
+test("unknown /api path without a token -> 404, not 401", { skip }, async () => {
+  const res = await request(app()).get("/api/nope");
+  assert.equal(res.status, 404);
+  assert.deepEqual(res.body, { error: "Not found" });
+});
+
+test("history query validation errors -> 400 Validation failed", { skip }, async () => {
+  const a = app();
+  const reg = await request(a).post("/api/auth/register").send(validBody());
+  const auth = { Authorization: `Bearer ${reg.body.accessToken}` };
+  for (const url of [
+    "/api/system/messages?limit=0",
+    "/api/system/quests/history?from=not-a-date",
+    "/api/system/completions/summary?days=999",
+  ]) {
+    const res = await request(a).get(url).set(auth);
+    assert.equal(res.status, 400, url);
+    assert.equal(res.body.error, "Validation failed", url);
+    assert.ok(Array.isArray(res.body.issues), url);
+  }
 });
 
 test("system routes require auth", { skip }, async () => {
