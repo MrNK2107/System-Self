@@ -165,6 +165,7 @@ export function toQuestChains(res: z.infer<typeof ChainTemplatesResponseSchema>)
       domain: t.domain,
       steps: t.steps,
       currentStep: a.currentStep,
+      totalSteps: t.steps.length,
       status: "active",
     });
   }

@@ -16,7 +16,8 @@ export function QuestChainCard({ chain, onStart }: Props) {
   const domIcon = DOMAIN_ICONS[chain.domain];
   const isComplete = chain.status === "complete";
   const isAbandoned = chain.status === "abandoned";
-  const progress = Math.min(chain.steps.length, chain.currentStep);
+  const total = chain.totalSteps;
+  const progress = Math.min(total, chain.currentStep);
 
   return (
     <View style={[
@@ -61,7 +62,7 @@ export function QuestChainCard({ chain, onStart }: Props) {
       {/* Progress bar */}
       <View style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
         <View style={[styles.progressFill, {
-          width: `${(progress / chain.steps.length) * 100}%` as `${number}%`,
+          width: `${total > 0 ? (progress / total) * 100 : 0}%` as `${number}%`,
           backgroundColor: isComplete ? domColor : domColor + "80",
         }]} />
       </View>
@@ -103,7 +104,7 @@ export function QuestChainCard({ chain, onStart }: Props) {
 
       {/* Step counter */}
       <Text style={[styles.counter, { color: colors.mutedForeground }]}>
-        {progress}/{chain.steps.length} STEPS COMPLETE
+        {progress}/{total} STEPS COMPLETE
       </Text>
     </View>
   );

@@ -6,12 +6,14 @@ import { Platform, StyleSheet, View } from "react-native";
 import { NoticeHost } from "@/components/NoticeHost";
 import { OfflineBar } from "@/components/OfflineBar";
 import { useColors } from "@/hooks/useColors";
+import { QuestSchedulerProvider } from "@/hooks/useQuestScheduler";
 
 export default function TabLayout() {
   const colors = useColors();
   const isIOS = Platform.OS === "ios";
 
   return (
+    <QuestSchedulerProvider>
     <View style={{ flex: 1 }}>
       <Tabs
         screenOptions={{
@@ -96,5 +98,6 @@ export default function TabLayout() {
       {/* Server notices (rank changes, achievements, milestones, ...) as modals, one at a time. */}
       <NoticeHost />
     </View>
+    </QuestSchedulerProvider>
   );
 }

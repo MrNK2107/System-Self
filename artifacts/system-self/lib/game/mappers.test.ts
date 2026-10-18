@@ -205,6 +205,7 @@ test("toQuestChains joins the active chains with their templates", () => {
     domain: "MIND",
     steps: [{ title: "a", description: "b", reward: "c" }],
     currentStep: 1,
+    totalSteps: 1,
     status: "active",
   });
 });

@@ -12,6 +12,8 @@ interface QuestCardProps {
   onRefuse?: (quest: Quest) => void;
   /** The weekly refusal allowance is used up (server 409 refusal_limit). */
   refuseDisabled?: boolean;
+  /** A request for this quest is in flight. */
+  busy?: boolean;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -20,7 +22,7 @@ const TYPE_LABELS: Record<string, string> = {
   arc: "ARC",
 };
 
-export function QuestCard({ quest, onComplete, onRefuse, refuseDisabled = false }: QuestCardProps) {
+export function QuestCard({ quest, onComplete, onRefuse, refuseDisabled = false, busy = false }: QuestCardProps) {
   const colors = useColors();
   const domainColor = DOMAIN_COLORS[quest.domain] ?? colors.primary;
   const isActive = quest.status === "active";
@@ -29,6 +31,7 @@ export function QuestCard({ quest, onComplete, onRefuse, refuseDisabled = false 
   const isRefused = quest.status === "refused";
 
   const handleComplete = () => {
+    if (busy) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     onComplete(quest.id);
   };
@@ -76,17 +79,18 @@ export function QuestCard({ quest, onComplete, onRefuse, refuseDisabled = false 
       {isActive && (
         <View style={styles.actions}>
           <TouchableOpacity
-            style={[styles.completeBtn, { borderColor: domainColor + "80", backgroundColor: domainColor + "15" }]}
+            style={[styles.completeBtn, { borderColor: domainColor + "80", backgroundColor: domainColor + "15", opacity: busy ? 0.5 : 1 }]}
             onPress={handleComplete}
+            disabled={busy}
             activeOpacity={0.7}
           >
             <Text style={[styles.completeBtnText, { color: domainColor }]}>MARK COMPLETE</Text>
           </TouchableOpacity>
           {onRefuse && quest.type === "daily" && (
             <TouchableOpacity
-              style={[styles.refuseBtn, { borderColor: colors.border, opacity: refuseDisabled ? 0.35 : 1 }]}
+              style={[styles.refuseBtn, { borderColor: colors.border, opacity: refuseDisabled || busy ? 0.35 : 1 }]}
               onPress={handleRefuse}
-              disabled={refuseDisabled}
+              disabled={refuseDisabled || busy}
               accessibilityLabel="Refuse"
               activeOpacity={0.7}
             >

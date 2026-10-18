@@ -73,11 +73,13 @@ export interface QuestChain {
   domain: Domain;
   steps: { title: string; description: string; reward: string }[];
   currentStep: number;
+  /** Server step count of the template. */
+  totalSteps: number;
   status: "active" | "complete" | "abandoned";
 }
 
 /** A chain the server offers, started or not. */
-export type ChainTemplate = Omit<QuestChain, "id" | "currentStep" | "status">;
+export type ChainTemplate = Omit<QuestChain, "id" | "currentStep" | "totalSteps" | "status">;
 
 export interface Achievement {
   id: AchievementId;

@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type ChainTemplate, type Domain, type Quest } from "@/context/AppContext";
 import { ApiError } from "@/lib/api/client";
+import { hasApiCode, isoWeekKey } from "@/lib/game/guards";
 import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
 import { QuestCard } from "@/components/QuestCard";
 import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
@@ -122,7 +123,18 @@ export default function QuestsScreen() {
   const [showChainCatalog, setShowChainCatalog] = useState(false);
   const [refusing, setRefusing] = useState<Quest | null>(null);
   const [refuseBusy, setRefuseBusy] = useState(false);
-  const [refusalLimit, setRefusalLimit] = useState(false);
+  // The 409 refusal_limit marker belongs to one account and one ISO week.
+  const userId = user?.id ?? null;
+  const [limitMark, setLimitMark] = useState<{ userId: string | null; week: string } | null>(null);
+  const refusalLimit = limitMark !== null && limitMark.userId === userId && limitMark.week === isoWeekKey(new Date());
+  // Quests with a request in flight: repeats are ignored and the card's buttons are disabled.
+  const inFlight = useRef(new Set<string>());
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
+  const setBusy = (id: string, on: boolean) => {
+    if (on) inFlight.current.add(id);
+    else inFlight.current.delete(id);
+    setBusyIds(new Set(inFlight.current));
+  };
   const [startingKey, setStartingKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
@@ -143,24 +155,37 @@ export default function QuestsScreen() {
     return "Request failed. Try again.";
   };
 
+  /** not_active: it was already resolved (another tap, another device). The refetch that follows shows it. */
+  const isStale = (r: { ok: false; reason: "sync_pending" } | { ok: false; reason: "error"; error: unknown }) =>
+    r.reason === "error" && hasApiCode(r.error, "not_active");
+
   const onComplete = async (id: string) => {
+    if (inFlight.current.has(id)) return;
+    setBusy(id, true);
     setNotice(null);
-    const r = await completeQuest(id);
-    if (!r.ok) setNotice(describeFailure(r));
+    try {
+      const r = await completeQuest(id);
+      if (!r.ok && !isStale(r)) setNotice(describeFailure(r));
+    } finally {
+      setBusy(id, false);
+    }
   };
 
   const confirmRefuse = async (reason: string) => {
-    if (!refusing) return;
+    if (!refusing || inFlight.current.has(refusing.id)) return;
+    const id = refusing.id;
+    setBusy(id, true);
     setRefuseBusy(true);
     setNotice(null);
     try {
-      const r = await refuseQuest(refusing.id, reason);
+      const r = await refuseQuest(id, reason);
       if (!r.ok) {
-        if (r.reason === "error" && r.error instanceof ApiError && r.error.code === "refusal_limit") setRefusalLimit(true);
-        else setNotice(describeFailure(r));
+        if (r.reason === "error" && hasApiCode(r.error, "refusal_limit")) setLimitMark({ userId, week: isoWeekKey(new Date()) });
+        else if (!isStale(r)) setNotice(describeFailure(r));
       }
       setRefusing(null);
     } finally {
+      setBusy(id, false);
       setRefuseBusy(false);
     }
   };
@@ -225,7 +250,7 @@ export default function QuestsScreen() {
       const r = await startQuestChain(template.templateKey);
       if (r.ok) return;
       // chain_active: another device started it; the refetch that follows shows it as active.
-      if (r.reason === "error" && r.error instanceof ApiError && r.error.code === "chain_active") setNotice("Chain already active.");
+      if (r.reason === "error" && hasApiCode(r.error, "chain_active")) setNotice("Chain already active.");
       else setNotice(describeFailure(r));
     } finally {
       setStartingKey(null);
@@ -398,7 +423,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeDailies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} refuseDisabled={refusalLimit} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
                 ))}
                 {refusalLimit && (
                   <Text style={[styles.refusalNote, { color: colors.destructive }]}>{REFUSAL_RULE}</Text>
@@ -416,7 +441,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeWeeklies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} refuseDisabled={refusalLimit} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
                 ))}
               </View>
             )}
@@ -431,7 +456,7 @@ export default function QuestsScreen() {
                   </View>
                 </View>
                 {activeArcs.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} busy={busyIds.has(q.id)} />
                 ))}
               </View>
             )}
@@ -459,7 +484,7 @@ export default function QuestsScreen() {
                   <Text style={[styles.sectionMeta, { color: "#4B8B6F" }]}>+{completedQuests.length}</Text>
                 </View>
                 {completedQuests.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} busy={busyIds.has(q.id)} />
                 ))}
               </View>
             )}
@@ -489,7 +514,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {failedQuests.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} busy={busyIds.has(q.id)} />
                 ))}
               </View>
             )}
