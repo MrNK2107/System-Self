@@ -1,246 +1,302 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { BODY_PARTS, DEFAULT_EXERCISES, WEEKDAYS } from "@/features/gym/model/constants";
+// Gym state for the screens, backed by /api/gym. The server computes points and PRs (POST .../complete);
+// this provider reads the data through React Query (cached for offline), creates sessions online, sends sets
+// with a stable idempotency key and retries them, and completes sessions once every set has landed.
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
+import { useGameUserId } from "@/hooks/useGameState";
+import { api, ApiError } from "@/lib/api/client";
+import { getOutbox } from "@/lib/api/outbox";
+import { useOnline } from "@/lib/api/query";
+import { newClientId } from "@/lib/game/actions";
+import {
+  activatePlan,
+  buildPlanRequest,
+  completeGymSession,
+  createPlan,
+  fetchGym,
+  flushSetQueue,
+  newSetKey,
+  startGymSession,
+  toGymView,
+  toWorkoutSession,
+  validatePlanDraft,
+  type GymCompletion,
+  type PlanDraft,
+  type QueuedSet,
+} from "@/lib/game/gym";
+import { gymKey, invalidateGame } from "@/lib/game/keys";
 import type {
   BodyPartScore,
   Exercise,
   NewPrEvent,
   PerformedSet,
   PersonalRecord,
-  WorkoutBlock,
   WorkoutPlan,
   WorkoutSession,
 } from "@/features/gym/model/types";
-import { computeGymPoints, mergeBodyPartScores } from "@/features/gym/services/gymScoringService";
-import { getPlanDayForDate } from "@/features/gym/services/planService";
-import { computePrUpdates } from "@/features/gym/services/prService";
 
-interface GymState {
+export type GymActionResult<T = void> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "sync_pending" | "invalid" | "already_completed" | "error"; message?: string; error?: unknown };
+
+interface GymContextType {
   exercises: Exercise[];
   workoutPlans: WorkoutPlan[];
+  activePlanId: string | null;
   workoutSessions: WorkoutSession[];
   personalRecords: PersonalRecord[];
   bodyPartScores: BodyPartScore[];
   lastPrEvents: NewPrEvent[];
+  /** The most recent completion (points, per body part), for the result line. */
+  lastCompletion: GymCompletion | null;
+  /** Sets logged on this device that the server has not confirmed yet. */
+  unsyncedSets: number;
   loading: boolean;
-}
-
-interface GymContextType extends GymState {
-  createWorkoutPlan: (planInput: Omit<WorkoutPlan, "id">) => Promise<WorkoutPlan>;
-  updateWorkoutPlan: (planId: string, patch: Partial<WorkoutPlan>) => Promise<void>;
-  startWorkoutSession: (planId?: string) => Promise<WorkoutSession>;
-  logPerformedSet: (sessionId: string, setPayload: Omit<PerformedSet, "setIndex"> & { setIndex?: number }) => Promise<void>;
-  completeWorkoutSession: (sessionId: string) => Promise<void>;
+  /** True when the first load failed and there is no cached data. */
+  loadFailed: boolean;
+  refresh: () => Promise<void>;
+  createWorkoutPlan: (draft: PlanDraft) => Promise<GymActionResult<WorkoutPlan | null>>;
+  updateWorkoutPlan: (planId: string, patch: { isActive: true }) => Promise<GymActionResult>;
+  startWorkoutSession: (planId?: string) => Promise<GymActionResult<WorkoutSession>>;
+  logPerformedSet: (
+    sessionId: string,
+    setPayload: Omit<PerformedSet, "setIndex"> & { setIndex?: number },
+  ) => Promise<void>;
+  completeWorkoutSession: (sessionId: string) => Promise<GymActionResult<GymCompletion>>;
   getBodyPartScores: () => BodyPartScore[];
   getPersonalRecords: (exerciseIds?: string[]) => PersonalRecord[];
 }
 
-const STORAGE_KEYS = {
-  EXERCISES: "@system_self:gym:exercises",
-  PLANS: "@system_self:gym:plans",
-  SESSIONS: "@system_self:gym:sessions",
-  PRS: "@system_self:gym:prs",
-  BODY_PART_SCORES: "@system_self:gym:body_part_scores",
-} as const;
-
 const GymContext = createContext<GymContextType | null>(null);
 
-function id(): string {
-  return Date.now().toString() + Math.random().toString(36).slice(2, 8);
-}
-
-function defaultBodyPartScores(): BodyPartScore[] {
-  const now = new Date().toISOString();
-  return BODY_PARTS.map((bodyPart) => ({ bodyPart, pointsTotal: 0, lastUpdatedAt: now }));
-}
-
-function defaultPlan(): WorkoutPlan {
-  const makeDay = (weekday: (typeof WEEKDAYS)[number], blocks: WorkoutBlock[]) => ({
-    id: id(),
-    planId: "",
-    weekday,
-    blocks,
-  });
-  const planId = id();
-  const plan: WorkoutPlan = {
-    id: planId,
-    name: "Starter Strength",
-    goal: "Consistency and progressive overload",
-    days: [
-      makeDay("MON", [
-        { exerciseId: "ex_squat", sets: 3, repRange: "5-8", restSec: 120 },
-        { exerciseId: "ex_bench", sets: 3, repRange: "5-8", restSec: 120 },
-        { exerciseId: "ex_row", sets: 3, repRange: "6-10", restSec: 90 },
-      ]),
-      makeDay("WED", [
-        { exerciseId: "ex_deadlift", sets: 3, repRange: "3-6", restSec: 150 },
-        { exerciseId: "ex_ohp", sets: 3, repRange: "5-8", restSec: 120 },
-        { exerciseId: "ex_pullup", sets: 3, repRange: "6-10", restSec: 90 },
-      ]),
-      makeDay("FRI", [
-        { exerciseId: "ex_squat", sets: 3, repRange: "5-8", restSec: 120 },
-        { exerciseId: "ex_bench", sets: 3, repRange: "5-8", restSec: 120 },
-        { exerciseId: "ex_plank", sets: 3, repRange: "30-60s", restSec: 60 },
-      ]),
-    ],
-  };
-  plan.days = plan.days.map((d) => ({ ...d, planId }));
-  return plan;
-}
+const EMPTY_VIEW = toGymView({
+  exercises: [],
+  plans: [],
+  activePlanId: null,
+  recentSessions: [],
+  personalRecords: [],
+  bodyPartScores: [],
+});
 
 export function GymProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<GymState>({
-    exercises: DEFAULT_EXERCISES,
-    workoutPlans: [],
-    workoutSessions: [],
-    personalRecords: [],
-    bodyPartScores: defaultBodyPartScores(),
-    lastPrEvents: [],
-    loading: true,
-  });
+  const queryClient = useQueryClient();
+  const userId = useGameUserId();
+  const online = useOnline();
+  const q = useQuery({ queryKey: gymKey(userId), queryFn: () => fetchGym(api), enabled: !!userId });
+  const refetch = q.refetch;
+
+  // Sessions started on this device, with the sets logged so far (the server list has no sets).
+  const [localSessions, setLocalSessionsState] = useState<Record<string, WorkoutSession>>({});
+  // A synchronous mirror: logging a set reads the session it extends, so it cannot wait for a render.
+  const sessionsRef = useRef<Record<string, WorkoutSession>>({});
+  const setLocalSessions = useCallback((update: (prev: Record<string, WorkoutSession>) => Record<string, WorkoutSession>) => {
+    sessionsRef.current = update(sessionsRef.current);
+    setLocalSessionsState(sessionsRef.current);
+  }, []);
+  const [lastPrEvents, setLastPrEvents] = useState<NewPrEvent[]>([]);
+  const [lastCompletion, setLastCompletion] = useState<GymCompletion | null>(null);
+  const [unsyncedSets, setUnsyncedSets] = useState(0);
+  const queue = useRef<QueuedSet[]>([]);
+  const sending = useRef<Promise<void> | null>(null);
+  const busy = useRef(new Set<string>());
+
+  // A different account starts clean.
+  useEffect(() => {
+    setLocalSessions(() => ({}));
+    setLastPrEvents([]);
+    setLastCompletion(null);
+    queue.current = [];
+    setUnsyncedSets(0);
+  }, [userId]);
+
+  const flushSets = useCallback(async (): Promise<boolean> => {
+    // Serialize passes so one set is never in flight twice.
+    while (sending.current) await sending.current;
+    if (queue.current.length === 0) return true;
+    const pass = (async () => {
+      const r = await flushSetQueue(api, queue.current);
+      queue.current = r.remaining;
+      setUnsyncedSets(r.remaining.length);
+    })();
+    sending.current = pass;
+    try {
+      await pass;
+    } finally {
+      sending.current = null;
+    }
+    return queue.current.length === 0;
+  }, []);
 
   useEffect(() => {
-    void load();
-  }, []);
+    if (online && userId) void flushSets();
+  }, [online, userId, flushSets]);
 
-  const load = async () => {
-    const [ex, plans, sessions, prs, bodyPartScores] = await Promise.all([
-      AsyncStorage.getItem(STORAGE_KEYS.EXERCISES),
-      AsyncStorage.getItem(STORAGE_KEYS.PLANS),
-      AsyncStorage.getItem(STORAGE_KEYS.SESSIONS),
-      AsyncStorage.getItem(STORAGE_KEYS.PRS),
-      AsyncStorage.getItem(STORAGE_KEYS.BODY_PART_SCORES),
-    ]);
-
-    const parsedPlans = plans ? (JSON.parse(plans) as WorkoutPlan[]) : [defaultPlan()];
-    if (!plans) {
-      await AsyncStorage.setItem(STORAGE_KEYS.PLANS, JSON.stringify(parsedPlans));
-    }
-
-    setState({
-      exercises: ex ? (JSON.parse(ex) as Exercise[]) : DEFAULT_EXERCISES,
-      workoutPlans: parsedPlans,
-      workoutSessions: sessions ? (JSON.parse(sessions) as WorkoutSession[]) : [],
-      personalRecords: prs ? (JSON.parse(prs) as PersonalRecord[]) : [],
-      bodyPartScores: bodyPartScores ? (JSON.parse(bodyPartScores) as BodyPartScore[]) : defaultBodyPartScores(),
-      lastPrEvents: [],
-      loading: false,
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void flushSets();
     });
-  };
+    return () => sub.remove();
+  }, [flushSets]);
 
-  const persist = useCallback(async (next: Partial<GymState>) => {
-    await Promise.all([
-      next.exercises ? AsyncStorage.setItem(STORAGE_KEYS.EXERCISES, JSON.stringify(next.exercises)) : Promise.resolve(),
-      next.workoutPlans ? AsyncStorage.setItem(STORAGE_KEYS.PLANS, JSON.stringify(next.workoutPlans)) : Promise.resolve(),
-      next.workoutSessions ? AsyncStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(next.workoutSessions)) : Promise.resolve(),
-      next.personalRecords ? AsyncStorage.setItem(STORAGE_KEYS.PRS, JSON.stringify(next.personalRecords)) : Promise.resolve(),
-      next.bodyPartScores ? AsyncStorage.setItem(STORAGE_KEYS.BODY_PART_SCORES, JSON.stringify(next.bodyPartScores)) : Promise.resolve(),
-    ]);
-  }, []);
+  const view = useMemo(() => (q.data ? toGymView(q.data) : EMPTY_VIEW), [q.data]);
 
-  const createWorkoutPlan = useCallback(async (planInput: Omit<WorkoutPlan, "id">) => {
-    const next: WorkoutPlan = { ...planInput, id: id() };
-    next.days = next.days.map((d) => ({ ...d, id: d.id || id(), planId: next.id }));
-    setState((prev) => {
-      const workoutPlans = [...prev.workoutPlans, next];
-      void persist({ workoutPlans });
-      return { ...prev, workoutPlans };
-    });
-    return next;
-  }, [persist]);
+  const workoutSessions = useMemo(() => {
+    const server = view.workoutSessions.map((s) => localSessions[s.id] ?? s);
+    const known = new Set(server.map((s) => s.id));
+    const fresh = Object.values(localSessions).filter((s) => !known.has(s.id));
+    return [...server, ...fresh].sort((a, b) => a.date.localeCompare(b.date));
+  }, [view.workoutSessions, localSessions]);
 
-  const updateWorkoutPlan = useCallback(async (planId: string, patch: Partial<WorkoutPlan>) => {
-    setState((prev) => {
-      const workoutPlans = prev.workoutPlans.map((p) => (p.id === planId ? { ...p, ...patch, id: p.id } : p));
-      void persist({ workoutPlans });
-      return { ...prev, workoutPlans };
-    });
-  }, [persist]);
+  const refresh = useCallback(async () => {
+    await refetch();
+  }, [refetch]);
 
-  const startWorkoutSession = useCallback(async (planId?: string) => {
-    const session: WorkoutSession = {
-      id: id(),
-      date: new Date().toISOString(),
-      planId,
-      performed: [],
-    };
-    setState((prev) => {
-      const workoutSessions = [...prev.workoutSessions, session];
-      void persist({ workoutSessions });
-      return { ...prev, workoutSessions };
-    });
-    return session;
-  }, [persist]);
+  const guarded = useCallback(
+    async <T,>(key: string, run: () => Promise<GymActionResult<T>>): Promise<GymActionResult<T>> => {
+      if (busy.current.has(key)) return { ok: false, reason: "error", message: "Already in progress." };
+      busy.current.add(key);
+      try {
+        return await run();
+      } catch (error) {
+        return { ok: false, reason: "error", error };
+      } finally {
+        busy.current.delete(key);
+      }
+    },
+    [],
+  );
 
-  const logPerformedSet = useCallback(async (sessionId: string, setPayload: Omit<PerformedSet, "setIndex"> & { setIndex?: number }) => {
-    setState((prev) => {
-      const workoutSessions = prev.workoutSessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        const countForExercise = s.performed.filter((x) => x.exerciseId === setPayload.exerciseId).length;
-        const nextSet: PerformedSet = {
-          ...setPayload,
-          setIndex: setPayload.setIndex ?? countForExercise + 1,
-        };
-        return { ...s, performed: [...s.performed, nextSet] };
-      });
-      void persist({ workoutSessions });
-      return { ...prev, workoutSessions };
-    });
-  }, [persist]);
+  const createWorkoutPlan = useCallback(
+    (draft: PlanDraft) =>
+      guarded("plan", async () => {
+        const known = new Set(view.exercises.map((e) => e.id));
+        const problem = validatePlanDraft(draft, known);
+        if (problem) return { ok: false, reason: "invalid", message: problem };
+        const plan = await createPlan(api, buildPlanRequest(draft, newClientId("gym-plan")));
+        await queryClient.invalidateQueries({ queryKey: gymKey(userId) });
+        return { ok: true, value: view.workoutPlans.find((p) => p.id === plan.id) ?? null };
+      }),
+    [guarded, view.exercises, view.workoutPlans, queryClient, userId],
+  );
 
-  const completeWorkoutSession = useCallback(async (sessionId: string) => {
-    const now = new Date().toISOString();
-    const session = state.workoutSessions.find((s) => s.id === sessionId);
-    if (!session) return;
-    if (session.completedAt) return;
+  const updateWorkoutPlan = useCallback(
+    (planId: string, patch: { isActive: true }) =>
+      guarded("plan", async () => {
+        if (patch.isActive) await activatePlan(api, planId, newClientId("gym-activate"));
+        await queryClient.invalidateQueries({ queryKey: gymKey(userId) });
+        return { ok: true, value: undefined };
+      }),
+    [guarded, queryClient, userId],
+  );
 
-    const completedSession: WorkoutSession = { ...session, completedAt: now };
-    const workoutSessions = state.workoutSessions.map((s) => (s.id === sessionId ? completedSession : s));
+  const startWorkoutSession = useCallback(
+    (planId?: string) =>
+      guarded("start", async () => {
+        const r = await startGymSession(api, getOutbox(), newClientId("gym-session"), planId);
+        if (!r.ok) return { ok: false, reason: "sync_pending" };
+        const session = toWorkoutSession(r.value);
+        setLocalSessions((prev) => ({ ...prev, [session.id]: session }));
+        return { ok: true, value: session };
+      }),
+    [guarded, setLocalSessions],
+  );
 
-    const plan = state.workoutPlans.find((p) => p.id === session.planId) ?? state.workoutPlans[0];
-    const plannedBlocks = getPlanDayForDate(plan, completedSession.date)?.blocks ?? [];
-    const exercisesById = Object.fromEntries(state.exercises.map((x) => [x.id, x]));
+  const logPerformedSet = useCallback(
+    async (sessionId: string, setPayload: Omit<PerformedSet, "setIndex"> & { setIndex?: number }) => {
+      const s = sessionsRef.current[sessionId];
+      if (!s || s.completedAt) return;
+      const setIndex = setPayload.setIndex ?? s.performed.filter((x) => x.exerciseId === setPayload.exerciseId).length;
+      const set: PerformedSet = { ...setPayload, setIndex };
+      setLocalSessions((prev) => ({ ...prev, [sessionId]: { ...s, performed: [...s.performed, set] } }));
+      const queued: QueuedSet = {
+        key: newSetKey(sessionId),
+        sessionId,
+        set: { exerciseId: set.exerciseId, reps: set.reps, weight: set.weight, completed: set.completed, setIndex },
+      };
+      queue.current = [...queue.current, queued];
+      setUnsyncedSets(queue.current.length);
+      await flushSets();
+    },
+    [flushSets, setLocalSessions],
+  );
 
-    const points = computeGymPoints(completedSession, plannedBlocks, exercisesById);
-    const bodyPartScores = mergeBodyPartScores(state.bodyPartScores, points.bodyPartPoints, now);
+  const completeWorkoutSession = useCallback(
+    (sessionId: string) =>
+      guarded(`complete-${sessionId}`, async () => {
+        // Points count the sets the server has: all of this session's sets must land first.
+        await flushSets();
+        if (queue.current.some((s) => s.sessionId === sessionId)) return { ok: false, reason: "sync_pending" };
+        try {
+          const r = await completeGymSession(api, getOutbox(), sessionId, `gym-done-${sessionId}`);
+          if (!r.ok) return { ok: false, reason: "sync_pending" };
+          const done = r.value;
+          setLastCompletion(done);
+          setLastPrEvents(
+            done.newPrs.map((p) => ({ exerciseId: p.exerciseId, exerciseName: p.name, value: p.value, achievedAt: p.achievedAt })),
+          );
+          setLocalSessions((prev) => {
+            const s = prev[sessionId];
+            return s ? { ...prev, [sessionId]: { ...s, completedAt: done.session.completedAt ?? new Date().toISOString(), points: done.points } } : prev;
+          });
+          return { ok: true, value: done };
+        } catch (error) {
+          if (error instanceof ApiError && error.code === "already_completed") {
+            setLocalSessions((prev) => {
+              const s = prev[sessionId];
+              return s ? { ...prev, [sessionId]: { ...s, completedAt: s.completedAt ?? new Date().toISOString() } } : prev;
+            });
+            return { ok: false, reason: "already_completed" };
+          }
+          throw error;
+        } finally {
+          // Points, notices and scores changed on the server.
+          void queryClient.invalidateQueries({ queryKey: gymKey(userId) });
+          void invalidateGame(queryClient, userId);
+        }
+      }),
+    [guarded, flushSets, queryClient, userId, setLocalSessions],
+  );
 
-    // P3-T7: BODY points for a session come from the server (POST /api/gym/sessions/:id/complete). Until then
-    // a gym session is tracked here only and does not change the BODY score (no local scoring).
+  const getBodyPartScores = useCallback(() => view.bodyPartScores, [view.bodyPartScores]);
 
-    const prRes = computePrUpdates(completedSession, exercisesById, state.personalRecords);
+  const getPersonalRecords = useCallback(
+    (exerciseIds?: string[]) => {
+      if (!exerciseIds || exerciseIds.length === 0) return view.personalRecords;
+      const set = new Set(exerciseIds);
+      return view.personalRecords.filter((pr) => set.has(pr.exerciseId));
+    },
+    [view.personalRecords],
+  );
 
-    setState((prev) => ({
-      ...prev,
+  const value = useMemo<GymContextType>(
+    () => ({
+      exercises: view.exercises,
+      workoutPlans: view.workoutPlans,
+      activePlanId: view.activePlanId,
       workoutSessions,
-      bodyPartScores,
-      personalRecords: prRes.updatedRecords,
-      lastPrEvents: prRes.newPrEvents,
-    }));
-    await persist({
-      workoutSessions,
-      bodyPartScores,
-      personalRecords: prRes.updatedRecords,
-    });
-  }, [persist, state.bodyPartScores, state.exercises, state.personalRecords, state.workoutPlans, state.workoutSessions]);
-
-  const getBodyPartScores = useCallback(() => state.bodyPartScores, [state.bodyPartScores]);
-
-  const getPersonalRecords = useCallback((exerciseIds?: string[]) => {
-    if (!exerciseIds || exerciseIds.length === 0) return state.personalRecords;
-    const set = new Set(exerciseIds);
-    return state.personalRecords.filter((pr) => set.has(pr.exerciseId));
-  }, [state.personalRecords]);
-
-  const value = useMemo<GymContextType>(() => ({
-    ...state,
-    createWorkoutPlan,
-    updateWorkoutPlan,
-    startWorkoutSession,
-    logPerformedSet,
-    completeWorkoutSession,
-    getBodyPartScores,
-    getPersonalRecords,
-  }), [completeWorkoutSession, createWorkoutPlan, getBodyPartScores, getPersonalRecords, logPerformedSet, startWorkoutSession, state, updateWorkoutPlan]);
+      personalRecords: view.personalRecords,
+      bodyPartScores: view.bodyPartScores,
+      lastPrEvents,
+      lastCompletion,
+      unsyncedSets,
+      loading: !!userId && q.isPending,
+      loadFailed: q.isError && !q.data,
+      refresh,
+      createWorkoutPlan,
+      updateWorkoutPlan,
+      startWorkoutSession,
+      logPerformedSet,
+      completeWorkoutSession,
+      getBodyPartScores,
+      getPersonalRecords,
+    }),
+    [
+      view, workoutSessions, lastPrEvents, lastCompletion, unsyncedSets, userId, q.isPending, q.isError, q.data, refresh,
+      createWorkoutPlan, updateWorkoutPlan, startWorkoutSession, logPerformedSet, completeWorkoutSession,
+      getBodyPartScores, getPersonalRecords,
+    ],
+  );
 
   return <GymContext.Provider value={value}>{children}</GymContext.Provider>;
 }
@@ -250,4 +306,3 @@ export function useGym() {
   if (!ctx) throw new Error("useGym must be used within GymProvider");
   return ctx;
 }
-

@@ -25,6 +25,7 @@ interface Props {
 
 export function StreakBrokenModal({ visible, data, onAcknowledge }: Props) {
   const { user } = useApp();
+  const userId = user?.id;
   const { generateMessage } = useSystemAI();
 
   const [aiText, setAiText] = useState(data.aiText || "");
@@ -50,7 +51,7 @@ export function StreakBrokenModal({ visible, data, onAcknowledge }: Props) {
 
   // Fetch AI text if missing
   useEffect(() => {
-    if (!visible || aiLoaded || !user) return;
+    if (!visible || aiLoaded || !userId) return;
     let cancelled = false;
     generateMessage("streak_break").then(text => {
       if (cancelled) return;
@@ -58,7 +59,7 @@ export function StreakBrokenModal({ visible, data, onAcknowledge }: Props) {
       setAiLoaded(true);
     });
     return () => { cancelled = true; };
-  }, [visible, aiLoaded, user]);
+  }, [visible, aiLoaded, userId]);
 
   useEffect(() => {
     if (!visible) return;

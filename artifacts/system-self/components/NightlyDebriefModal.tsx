@@ -165,7 +165,7 @@ export function NightlyDebriefModal({ visible, debrief, username, dayNumber, onA
   }).toUpperCase();
 
   return (
-    <Modal transparent animationType="none" visible={visible} statusBarTranslucent>
+    <Modal transparent animationType="none" visible={visible} statusBarTranslucent onRequestClose={onAcknowledge}>
       <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
         <LinearGradient
           colors={["#040609", "#080B12", "#06080F"]}

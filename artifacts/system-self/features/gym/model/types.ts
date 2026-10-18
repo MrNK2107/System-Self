@@ -55,6 +55,8 @@ export interface WorkoutSession {
   date: string;
   planId?: string;
   completedAt?: string;
+  /** Server-awarded BODY points (0 until completed). */
+  points: number;
   performed: PerformedSet[];
 }
 

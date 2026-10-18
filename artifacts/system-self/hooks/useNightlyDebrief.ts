@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useApp, type DebriefData } from "@/context/AppContext";
 import { useGameUserId } from "@/hooks/useGameState";
-import { api } from "@/lib/api/client";
+import { api, ApiError } from "@/lib/api/client";
 import { getOutbox } from "@/lib/api/outbox";
 import { debriefKey } from "@/lib/game/keys";
 import { ackDebrief, fetchDebriefToday, toDebriefData, type DebriefToday } from "@/lib/game/messages";
@@ -49,8 +49,13 @@ export function useNightlyDebrief(): {
           const r = await ackDebrief(api, getOutbox(), date, `debrief-ack-${date}`);
           if (!r.ok) break; // older logs still queued: retry on the next foreground
           unsent.current.delete(date);
-        } catch {
-          break; // offline or server error: retry on the next foreground
+        } catch (e) {
+          // 404/409 never succeed on retry: drop the date. Network and 5xx errors retry on the next foreground.
+          if (e instanceof ApiError && e.kind === "http" && (e.status === 404 || e.status === 409)) {
+            unsent.current.delete(date);
+            continue;
+          }
+          break;
         }
       }
     } finally {

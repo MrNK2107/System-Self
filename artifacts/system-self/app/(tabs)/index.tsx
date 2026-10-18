@@ -446,20 +446,6 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     fontWeight: "600" as const,
   },
-  lockPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    borderWidth: 1,
-    borderRadius: 2,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-  },
-  lockText: {
-    fontSize: 8,
-    letterSpacing: 2,
-    fontWeight: "700" as const,
-  },
   card: {
     padding: 16,
     borderRadius: 4,

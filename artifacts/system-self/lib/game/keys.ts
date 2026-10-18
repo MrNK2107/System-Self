@@ -6,6 +6,8 @@ export const logsKey = (userId: string | null) => ["logs", userId] as const;
 export const questsKey = (userId: string | null) => ["quests", userId] as const;
 /** Chain templates + active chains (GET /api/chains/templates). */
 export const chainsKey = (userId: string | null) => ["chains", userId] as const;
+/** Exercises, plans, recent sessions, PRs and body-part scores (GET /api/gym). */
+export const gymKey = (userId: string | null) => ["gym", userId] as const;
 /** Further unseen notices (GET /api/notices), fetched only when the state says there are more. */
 export const noticesKey = (userId: string | null) => ["notices", userId] as const;
 

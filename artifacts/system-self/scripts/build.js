@@ -55,12 +55,12 @@ function stripProtocol(domain) {
 }
 
 function getDeploymentDomain() {
-  if (process.env.EXPO_PUBLIC_DOMAIN) {
-    return stripProtocol(process.env.EXPO_PUBLIC_DOMAIN);
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return stripProtocol(process.env.EXPO_PUBLIC_API_URL);
   }
 
   console.error(
-    "ERROR: No deployment domain found. Set EXPO_PUBLIC_DOMAIN",
+    "ERROR: No deployment domain found. Set EXPO_PUBLIC_API_URL",
   );
   process.exit(1);
 }
@@ -119,7 +119,7 @@ function getExpoPublicReplId() {
   return process.env.EXPO_PUBLIC_REPL_ID;
 }
 
-async function startMetro(expoPublicDomain, expoPublicReplId) {
+async function startMetro(expoPublicApiUrl, expoPublicReplId) {
   const isRunning = await checkMetroHealth();
   if (isRunning) {
     console.log("Metro already running");
@@ -127,10 +127,10 @@ async function startMetro(expoPublicDomain, expoPublicReplId) {
   }
 
   console.log("Starting Metro...");
-  console.log(`Setting EXPO_PUBLIC_DOMAIN=${expoPublicDomain}`);
+  console.log(`Setting EXPO_PUBLIC_API_URL=${expoPublicApiUrl}`);
   const env = {
     ...process.env,
-    EXPO_PUBLIC_DOMAIN: expoPublicDomain,
+    EXPO_PUBLIC_API_URL: expoPublicApiUrl,
     EXPO_PUBLIC_REPL_ID: expoPublicReplId,
   };
 
@@ -510,7 +510,7 @@ async function main() {
   prepareDirectories(timestamp);
   clearMetroCache();
 
-  await startMetro(domain, expoPublicReplId);
+  await startMetro(process.env.EXPO_PUBLIC_API_URL, expoPublicReplId);
 
   const downloadTimeout = 600000;
   const downloadPromise = downloadBundlesAndManifests(timestamp);
