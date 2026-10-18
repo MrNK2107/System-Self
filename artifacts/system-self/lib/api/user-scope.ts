@@ -27,7 +27,8 @@ export function createLocalDataManager(deps: {
   /** Call after every successful sign-in / register with the resulting user id. */
   async function handleSignIn(userId: string): Promise<void> {
     const last = await deps.storage.getItem(LAST_USER_KEY);
-    if (last !== null && last !== userId) await clearLocalData();
+    // A missing marker counts as a different user: unknown ownership of leftover data is never trusted.
+    if (last !== userId) await clearLocalData();
     await deps.storage.setItem(LAST_USER_KEY, userId);
   }
 

@@ -89,3 +89,13 @@ test("signing in as a different user clears local data; the same user keeps it",
   s.setUser("A");
   assert.deepEqual(await s.outbox.flush(), { sent: 0, remaining: 0 });
 });
+
+test("a missing last-user marker counts as a different user and clears leftovers", async () => {
+  const s = setup("A");
+  await s.outbox.enqueue(entry("a1"));
+  s.queryClient.setQueryData(["state"], { x: 1 });
+  await s.mgr.handleSignIn("A");
+  assert.deepEqual(s.outbox.pending(), []);
+  assert.equal(s.queryClient.getQueryData(["state"]), undefined);
+  assert.equal(await s.storage.getItem(LAST_USER_KEY), "A");
+});
