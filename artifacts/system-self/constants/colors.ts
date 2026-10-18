@@ -24,6 +24,9 @@ const colors = {
     destructive: "#8B1A1A",
     destructiveForeground: "#FFFFFF",
 
+    /** Text on a disabled control and other near-invisible chrome labels. */
+    subtle: "#3A3D48",
+
     border: "#2A2D38",
     input: "#2A2D38",
 
@@ -40,6 +43,7 @@ const colors = {
       BODY: "#E05555",
       MIND: "#3A7BD5",
       WEALTH: "#4B8B6F",
+      SOCIAL: "#B05CD6",
       DISCIPLINE: "#C4873A",
     },
   },

@@ -5,7 +5,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -67,17 +66,14 @@ export default function IdentityScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
 
-  const [username, setUsername] = useState("");
   const [identity, setIdentity] = useState<IdentitySetting>("semi-public");
-  const [focused, setFocused] = useState(false);
 
   const topPad = insets.top + (Platform.OS === "web" ? 0 : 0);
-  const canContinue = username.trim().length >= 3;
 
   const handleNext = () => {
     router.push({
       pathname: "/onboarding/calibrating",
-      params: { ...params, username: username.trim(), identity },
+      params: { ...params, identity },
     });
   };
 
@@ -92,7 +88,7 @@ export default function IdentityScreen() {
           <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
         </TouchableOpacity>
         <View style={s.headerMid}>
-          <Text style={s.headerTag}>IDENTITY SETUP</Text>
+          <Text style={[s.headerTag, { color: colors.subtle }]}>IDENTITY SETUP</Text>
           <StepBadge step={1} />
         </View>
         <View style={{ width: 36 }} />
@@ -110,33 +106,7 @@ export default function IdentityScreen() {
             <Text style={{ color: "#3A7BD5" }}>in here?</Text>
           </Text>
           <Text style={[s.subtitle, { color: colors.mutedForeground }]}>
-            Your callsign is how your clan knows you. Pick something you'll own.
-          </Text>
-        </View>
-
-        {/* Username input */}
-        <View style={[s.card, { backgroundColor: colors.card, borderColor: focused ? "#3A7BD550" : colors.border }]}>
-          <Text style={[s.cardLabel, { color: colors.mutedForeground }]}>CALLSIGN</Text>
-          <View style={[s.inputWrap, { borderColor: focused ? "#3A7BD580" : colors.border, backgroundColor: focused ? "#3A7BD508" : "transparent" }]}>
-            <Feather name="at-sign" size={16} color={focused ? "#3A7BD5" : colors.mutedForeground} />
-            <TextInput
-              style={[s.input, { color: colors.foreground }]}
-              placeholder="Choose your callsign"
-              placeholderTextColor={colors.mutedForeground}
-              value={username}
-              onChangeText={setUsername}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={20}
-            />
-            {username.length >= 3 && (
-              <Feather name="check-circle" size={16} color="#4B8B6F" />
-            )}
-          </View>
-          <Text style={[s.cardHint, { color: colors.mutedForeground }]}>
-            3–20 characters. Rivals see a generated codename, not this.
+            Your codename is already set. Decide who else gets to see it.
           </Text>
         </View>
 
@@ -195,20 +165,15 @@ export default function IdentityScreen() {
 
       {/* Footer */}
       <View style={[s.footer, { paddingBottom: insets.bottom + 16, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-        <TouchableOpacity
-          onPress={handleNext}
-          disabled={!canContinue}
-          activeOpacity={0.85}
-          style={{ borderRadius: 2, overflow: "hidden" }}
-        >
+        <TouchableOpacity onPress={handleNext} activeOpacity={0.85} style={{ borderRadius: 2, overflow: "hidden" }}>
           <LinearGradient
-            colors={canContinue ? ["#3A7BD5", "#2860B4"] : ["#252830", "#252830"]}
+            colors={["#3A7BD5", "#2860B4"]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={s.nextBtn}
           >
-            <Text style={[s.nextText, { color: canContinue ? "#fff" : "#3A3D48" }]}>CONTINUE</Text>
-            {canContinue && <Feather name="arrow-right" size={16} color="#fff" />}
+            <Text style={[s.nextText, { color: "#fff" }]}>CONTINUE</Text>
+            <Feather name="arrow-right" size={16} color="#fff" />
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -227,7 +192,7 @@ const s = StyleSheet.create({
   },
   back: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   headerMid: { flex: 1, alignItems: "center", gap: 8 },
-  headerTag: { fontSize: 9, letterSpacing: 3, color: "#3A3D48", fontWeight: "700" as const },
+  headerTag: { fontSize: 9, letterSpacing: 3, fontWeight: "700" as const },
   stepRow: { flexDirection: "row", gap: 4 },
   stepSeg: { width: 20, height: 2, borderRadius: 1 },
   scroll: { paddingHorizontal: 16, paddingTop: 24, gap: 14 },
@@ -236,19 +201,8 @@ const s = StyleSheet.create({
   subtitle: { fontSize: 13, lineHeight: 20 },
   card: { borderWidth: 1, borderRadius: 8, padding: 16, gap: 12 },
   cardTop: { flexDirection: "row", alignItems: "center", gap: 7 },
-  cardLabel: { fontSize: 9, letterSpacing: 2.5, fontWeight: "700" as const },
   cardLabelBlue: { fontSize: 9, letterSpacing: 2.5, color: "#3A7BD5", fontWeight: "700" as const },
   cardHint: { fontSize: 12, lineHeight: 17 },
-  inputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  input: { flex: 1, fontSize: 16, letterSpacing: 0.5 },
   optionRow: {
     flexDirection: "row",
     alignItems: "center",

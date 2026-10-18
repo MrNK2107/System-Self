@@ -99,8 +99,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus("signed_in");
       },
       async signOut() {
-        await actions.signOut();
-        signedOut();
+        try {
+          await actions.signOut();
+        } finally {
+          // The session is cleared even when the local wipe failed, so the UI must leave signed-in screens too.
+          signedOut();
+        }
       },
       requestPasswordReset: actions.requestPasswordReset,
       resetPassword: actions.resetPassword,

@@ -6,6 +6,7 @@ import { AuthResponseSchema, PublicUserSchema, type PublicUser, type Session, ty
 export const MIN_AGE = 16;
 export const USERNAME_PATTERN = /^[a-z0-9_]{3,20}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const MAX_EMAIL_LENGTH = 254;
 
 export interface SignUpInput {
   email: string;
@@ -31,6 +32,17 @@ export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
+/** True for a 400 whose every validation issue is on the `timezone` field. */
+export function rejectsOnlyTimezone(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.kind === "http" &&
+    err.status === 400 &&
+    err.issues.length > 0 &&
+    err.issues.every((i) => i.path === "timezone")
+  );
+}
+
 export function createAuthActions(deps: AuthActionDeps) {
   const { api, tokens } = deps;
 
@@ -51,18 +63,27 @@ export function createAuthActions(deps: AuthActionDeps) {
     },
 
     async signUp(input: SignUpInput): Promise<PublicUser> {
-      const session = await api.request("POST", "/api/auth/register", {
-        auth: false,
-        schema: AuthResponseSchema,
-        body: {
-          email: normalizeEmail(input.email),
-          password: input.password,
-          username: input.username.trim().toLowerCase(),
-          birthYear: input.birthYear,
-          acceptTerms: input.acceptTerms,
-          ...(input.timezone ? { timezone: input.timezone } : {}),
-        },
-      });
+      const register = (timezone: string) =>
+        api.request("POST", "/api/auth/register", {
+          auth: false,
+          schema: AuthResponseSchema,
+          body: {
+            email: normalizeEmail(input.email),
+            password: input.password,
+            username: input.username.trim().toLowerCase(),
+            birthYear: input.birthYear,
+            acceptTerms: input.acceptTerms,
+            ...(timezone ? { timezone } : {}),
+          },
+        });
+      let session: Session;
+      try {
+        session = await register(input.timezone);
+      } catch (e) {
+        // An odd device timezone must not block sign-up: when only the timezone is rejected, retry once without it.
+        if (input.timezone && rejectsOnlyTimezone(e)) session = await register("");
+        else throw e;
+      }
       return adopt(session);
     },
 
@@ -81,8 +102,12 @@ export function createAuthActions(deps: AuthActionDeps) {
           // Offline or server down: the refresh token stays valid server-side until it expires; the device forgets it anyway.
         }
       }
-      await deps.clearLocalData();
-      await tokens.set(null);
+      try {
+        await deps.clearLocalData();
+      } finally {
+        // Whatever happened to the local wipe, the session must go: signing out never leaves the user signed in.
+        await tokens.set(null);
+      }
     },
 
     async requestPasswordReset(email: string): Promise<void> {
@@ -141,7 +166,9 @@ export type SignUpField = keyof SignUpDraft;
 
 export function validateSignUp(d: SignUpDraft, now: Date = new Date()): Partial<Record<SignUpField, string>> {
   const errors: Partial<Record<SignUpField, string>> = {};
-  if (!EMAIL_PATTERN.test(d.email.trim())) errors.email = "Enter a valid email.";
+  const email = d.email.trim();
+  if (!EMAIL_PATTERN.test(email)) errors.email = "Enter a valid email.";
+  else if (email.length > MAX_EMAIL_LENGTH) errors.email = "Use at most 254 characters.";
   if (d.password.length < 10) errors.password = "Use at least 10 characters.";
   else if (d.password.length > 128) errors.password = "Use at most 128 characters.";
   if (!USERNAME_PATTERN.test(d.username.trim().toLowerCase())) {
@@ -192,7 +219,10 @@ export function describeAuthError(err: unknown, context: AuthErrorContext): Auth
     if (err.code === "username_taken") return { message: "That codename is taken.", field: "username" };
   }
   if (context === "reset" && err.code && CODE_MESSAGES[err.code]) return { message: CODE_MESSAGES[err.code]! };
-  if (status === 400) return { message: "Those details were rejected. Check them and retry." };
+  if (status === 400) {
+    const first = err.issues[0]?.message;
+    return { message: first ? `Rejected: ${first}` : "Those details were rejected. Check them and retry." };
+  }
   return { message: "Something broke. Retry." };
 }
 

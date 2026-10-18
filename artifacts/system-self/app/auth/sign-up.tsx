@@ -7,7 +7,7 @@ import { AuthField } from "@/components/AuthField";
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { deviceTimezone, useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { describeAuthError, isRetryable, validateSignUp, type SignUpField } from "@/lib/auth/actions";
+import { MAX_EMAIL_LENGTH, describeAuthError, isRetryable, validateSignUp, type SignUpField } from "@/lib/auth/actions";
 
 type FieldErrors = Partial<Record<SignUpField, string>>;
 
@@ -67,6 +67,7 @@ export default function SignUpScreen() {
         }}
         error={fieldErrors.email}
         keyboardType="email-address"
+        maxLength={MAX_EMAIL_LENGTH}
         autoComplete="email"
         textContentType="username"
         returnKeyType="next"
@@ -121,6 +122,7 @@ export default function SignUpScreen() {
         maxLength={4}
         placeholder="YYYY"
         returnKeyType="done"
+        onSubmitEditing={submit}
       />
 
       <View style={styles.termsWrap}>

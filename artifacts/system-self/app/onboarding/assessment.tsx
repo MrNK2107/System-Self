@@ -14,14 +14,22 @@ import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import type { Domain } from "@/context/AppContext";
+import {
+  DEFAULT_RATING,
+  MAX_GOAL_LENGTH,
+  MAX_STOPPED_BEFORE_LENGTH,
+  MIN_GOAL_LENGTH,
+  RANKED_DOMAINS,
+  type RankedDomain as Domain,
+} from "@/lib/onboarding/payload";
 
-const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
+const DOMAINS: readonly Domain[] = RANKED_DOMAINS;
 
 const DOMAIN_CONFIG: Record<Domain, { desc: string; color: string; icon: string }> = {
   BODY: { desc: "Physical fitness, sleep, nutrition, energy", color: "#E05555", icon: "activity" },
   MIND: { desc: "Focus, deep work, learning, mental clarity", color: "#3A7BD5", icon: "zap" },
   WEALTH: { desc: "Income, savings, investing, financial discipline", color: "#4B8B6F", icon: "trending-up" },
+  SOCIAL: { desc: "Relationships, presence, community, how you show up", color: "#B05CD6", icon: "users" },
   DISCIPLINE: { desc: "Consistency, habit execution, follow-through", color: "#C4873A", icon: "target" },
 };
 
@@ -42,6 +50,7 @@ const DOMAIN_LABELS: Record<Domain, string> = {
   BODY: "Physical",
   MIND: "Mental",
   WEALTH: "Financial",
+  SOCIAL: "Social",
   DISCIPLINE: "Discipline",
 };
 
@@ -127,17 +136,18 @@ export default function AssessmentScreen() {
   const insets = useSafeAreaInsets();
 
   const [ratings, setRatings] = useState<Record<Domain, number>>({
-    BODY: 5, MIND: 5, WEALTH: 5, DISCIPLINE: 5,
+    BODY: DEFAULT_RATING, MIND: DEFAULT_RATING, WEALTH: DEFAULT_RATING, SOCIAL: DEFAULT_RATING, DISCIPLINE: DEFAULT_RATING,
   });
   const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
   const [customGoal, setCustomGoal] = useState("");
   const [showCustom, setShowCustom] = useState(false);
   const [weakness, setWeakness] = useState<Domain | null>(null);
+  const [stoppedBefore, setStoppedBefore] = useState("");
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const primaryGoal = showCustom ? customGoal.trim() : (selectedGoal ?? "");
-  const canContinue = primaryGoal.length > 5 && weakness !== null;
+  const canContinue = primaryGoal.length >= MIN_GOAL_LENGTH && weakness !== null;
 
   const handleSelectGoal = (goal: string) => {
     setSelectedGoal(goal);
@@ -156,7 +166,7 @@ export default function AssessmentScreen() {
         ratings: JSON.stringify(ratings),
         primaryGoal,
         weakness: weakness ?? "DISCIPLINE",
-        stoppedYou: "",
+        stoppedBefore: stoppedBefore.trim(),
       },
     });
   };
@@ -280,6 +290,7 @@ export default function AssessmentScreen() {
               onChangeText={setCustomGoal}
               multiline
               numberOfLines={3}
+              maxLength={MAX_GOAL_LENGTH}
               autoFocus
             />
           )}
@@ -323,12 +334,37 @@ export default function AssessmentScreen() {
             })}
           </View>
         </View>
+
+        {/* What has stopped you before (optional) */}
+        <View style={[s.weaknessSection, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          <View style={s.goalHeader}>
+            <Feather name="slash" size={14} color={colors.mutedForeground} />
+            <Text style={[s.goalHeaderText, { color: colors.mutedForeground }]}>WHAT HAS STOPPED YOU BEFORE?</Text>
+          </View>
+          <Text style={[s.goalSub, { color: colors.mutedForeground }]}>
+            Optional. Say it plainly. THE SYSTEM reads it.
+          </Text>
+          <TextInput
+            style={[s.customInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+            placeholder="What broke the last time you tried..."
+            placeholderTextColor={colors.mutedForeground}
+            value={stoppedBefore}
+            onChangeText={setStoppedBefore}
+            multiline
+            numberOfLines={3}
+            maxLength={MAX_STOPPED_BEFORE_LENGTH}
+            accessibilityLabel="What has stopped you before"
+          />
+          <Text style={[s.charCount, { color: colors.subtle }]}>
+            {stoppedBefore.length}/{MAX_STOPPED_BEFORE_LENGTH}
+          </Text>
+        </View>
       </ScrollView>
 
       {/* Footer CTA */}
       <View style={[s.footer, { paddingBottom: insets.bottom + 16, borderTopColor: colors.border, backgroundColor: colors.background }]}>
         {!canContinue && (
-          <Text style={s.missingHint}>
+          <Text style={[s.missingHint, { color: colors.subtle }]}>
             {!primaryGoal ? "Select or write your objective above" : "Select your biggest weakness"}
           </Text>
         )}
@@ -344,7 +380,7 @@ export default function AssessmentScreen() {
             end={{ x: 1, y: 0 }}
             style={s.nextBtn}
           >
-            <Text style={[s.nextBtnText, { color: canContinue ? "#FFFFFF" : "#3A3D48" }]}>
+            <Text style={[s.nextBtnText, { color: canContinue ? "#FFFFFF" : colors.subtle }]}>
               CONTINUE
             </Text>
             {canContinue && <Feather name="arrow-right" size={16} color="#FFFFFF" />}
@@ -596,8 +632,13 @@ const s = StyleSheet.create({
   },
   missingHint: {
     textAlign: "center",
-    color: "#3A3D48",
     fontSize: 11,
+  },
+  charCount: {
+    alignSelf: "flex-end",
+    fontSize: 10,
+    marginTop: -6,
+    fontVariant: ["tabular-nums"],
   },
   nextBtn: {
     flexDirection: "row",

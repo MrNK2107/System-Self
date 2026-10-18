@@ -19,6 +19,7 @@ const DOMAIN_BARS = [
   { label: "BODY", color: "#E05555", pct: 23 },
   { label: "MIND", color: "#3A7BD5", pct: 31 },
   { label: "WEALTH", color: "#4B8B6F", pct: 18 },
+  { label: "SOCIAL", color: "#B05CD6", pct: 21 },
   { label: "DISCIPLINE", color: "#C4873A", pct: 27 },
 ];
 

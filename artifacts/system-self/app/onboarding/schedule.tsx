@@ -10,9 +10,13 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { useApp } from "@/context/AppContext";
+import { ApiError, api } from "@/lib/api/client";
+import { applyProfile, updateSchedule } from "@/lib/onboarding/actions";
+import { DEFAULT_MORNING_TIME, DEFAULT_NIGHTLY_TIME } from "@/lib/onboarding/payload";
 
 const MORNING_TIMES = ["05:00", "05:30", "06:00", "06:30", "07:00", "07:30", "08:00", "09:00"];
 const NIGHTLY_TIMES = ["19:30", "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00"];
@@ -65,18 +69,36 @@ function TimeSelector({
 export default function ScheduleScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, setUser } = useApp();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
 
-  const [morning, setMorning] = useState("07:00");
-  const [nightly, setNightly] = useState("21:00");
+  const [morning, setMorning] = useState(DEFAULT_MORNING_TIME);
+  const [nightly, setNightly] = useState(DEFAULT_NIGHTLY_TIME);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const topPad = insets.top + (Platform.OS === "web" ? 0 : 0);
 
   const handleFinish = async () => {
-    if (user) {
-      await setUser({ ...user, morningTime: morning, nightlyTime: nightly });
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const profile = await updateSchedule(api, { morningTime: morning, nightlyTime: nightly });
+      if (user) applyProfile(queryClient, user.id, profile);
+      router.replace("/(tabs)");
+    } catch (e) {
+      // The account already exists with the default times, so a failed save never traps the user here.
+      setError(
+        e instanceof ApiError && e.kind === "http" && e.status === 400 && e.issues[0]
+          ? `Rejected: ${e.issues[0].message}`
+          : e instanceof ApiError && e.kind === "network"
+            ? "No connection. Check your signal and retry."
+            : "The schedule did not save. Retry."
+      );
+    } finally {
+      setSaving(false);
     }
-    router.replace("/(tabs)");
   };
 
   return (
@@ -87,7 +109,7 @@ export default function ScheduleScreen() {
           <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
         </TouchableOpacity>
         <View style={s.headerMid}>
-          <Text style={s.headerTag}>SCHEDULE</Text>
+          <Text style={[s.headerTag, { color: colors.subtle }]}>SCHEDULE</Text>
           <StepBadge step={3} />
         </View>
         <View style={{ width: 36 }} />
@@ -166,10 +188,21 @@ export default function ScheduleScreen() {
 
       {/* Footer */}
       <View style={[s.footer, { paddingBottom: insets.bottom + 16, borderTopColor: colors.border, backgroundColor: colors.background }]}>
+        {error ? (
+          <View style={s.errorRow} accessibilityLiveRegion="polite">
+            <Text style={[s.errorText, { color: colors.foreground }]}>{error}</Text>
+            <TouchableOpacity onPress={() => router.replace("/(tabs)")} accessibilityRole="button">
+              <Text style={[s.skipText, { color: colors.mutedForeground }]}>KEEP DEFAULTS</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         <TouchableOpacity
           onPress={handleFinish}
+          disabled={saving}
           activeOpacity={0.85}
-          style={{ borderRadius: 2, overflow: "hidden" }}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: saving, busy: saving }}
+          style={{ borderRadius: 2, overflow: "hidden", opacity: saving ? 0.6 : 1 }}
         >
           <LinearGradient
             colors={["#3A7BD5", "#2860B4"]}
@@ -178,7 +211,7 @@ export default function ScheduleScreen() {
             style={s.finishBtn}
           >
             <Feather name="zap" size={16} color="#fff" />
-            <Text style={s.finishText}>INITIALIZE THE SYSTEM</Text>
+            <Text style={s.finishText}>{error ? "RETRY" : "INITIALIZE THE SYSTEM"}</Text>
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -197,7 +230,7 @@ const s = StyleSheet.create({
   },
   back: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   headerMid: { flex: 1, alignItems: "center", gap: 8 },
-  headerTag: { fontSize: 9, letterSpacing: 3, color: "#3A3D48", fontWeight: "700" as const },
+  headerTag: { fontSize: 9, letterSpacing: 3, fontWeight: "700" as const },
   stepRow: { flexDirection: "row", gap: 4 },
   stepSeg: { width: 20, height: 2, borderRadius: 1 },
   scroll: { paddingHorizontal: 16, paddingTop: 24, gap: 14 },
@@ -227,6 +260,9 @@ const s = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
+  errorRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingBottom: 12 },
+  errorText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  skipText: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 2 },
   finishBtn: {
     flexDirection: "row",
     alignItems: "center",

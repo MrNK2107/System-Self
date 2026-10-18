@@ -49,7 +49,7 @@ export function AuthShell({ tag, title, subtitle, back, children }: AuthShellPro
             </TouchableOpacity>
           ) : null}
         </View>
-        <Text style={s.tag}>{tag}</Text>
+        <Text style={[s.tag, { color: colors.subtle }]}>{tag}</Text>
         <View style={s.side} />
       </View>
       {!online ? (
@@ -94,7 +94,7 @@ export function AuthButton({ label, onPress, loading, disabled }: AuthButtonProp
       {loading ? (
         <ActivityIndicator color={colors.primaryForeground} />
       ) : (
-        <Text style={[s.buttonText, { color: inactive ? "#3A3D48" : colors.primaryForeground }]}>{label}</Text>
+        <Text style={[s.buttonText, { color: inactive ? colors.subtle : colors.primaryForeground }]}>{label}</Text>
       )}
     </TouchableOpacity>
   );
@@ -151,7 +151,7 @@ const s = StyleSheet.create({
   },
   side: { width: 36 },
   back: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  tag: { flex: 1, textAlign: "center", fontSize: 9, letterSpacing: 3, color: "#3A3D48", fontWeight: "700" as const },
+  tag: { flex: 1, textAlign: "center", fontSize: 9, letterSpacing: 3, fontWeight: "700" as const },
   offline: { paddingVertical: 4, alignItems: "center" },
   offlineText: { fontSize: 9, letterSpacing: 2, fontWeight: "700" as const },
   scroll: { paddingHorizontal: 16, paddingTop: 24, gap: 16 },

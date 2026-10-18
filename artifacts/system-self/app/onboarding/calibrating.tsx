@@ -1,25 +1,41 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
-  Dimensions,
-  Platform,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useApp, type Domain } from "@/context/AppContext";
+import { deviceTimezone, useAuth } from "@/context/AuthContext";
+import { useColors } from "@/hooks/useColors";
+import { api } from "@/lib/api/client";
+import {
+  applyOnboarded,
+  canRetry,
+  describeOnboardingError,
+  submitOnboarding,
+} from "@/lib/onboarding/actions";
+import {
+  RANKED_DOMAINS,
+  buildOnboardingPayload,
+  draftFromParams,
+  type RankedDomain as Domain,
+} from "@/lib/onboarding/payload";
 
-
-const { width: SW } = Dimensions.get("window");
+/** The calibration animation runs at least this long, however fast the server answers. */
+const MIN_CALIBRATION_MS = 4400;
+const STEP_INTERVAL_MS = 720;
 
 const DOMAIN_COLORS: Record<Domain, string> = {
   BODY: "#E05555",
   MIND: "#3A7BD5",
   WEALTH: "#4B8B6F",
+  SOCIAL: "#B05CD6",
   DISCIPLINE: "#C4873A",
 };
 
@@ -31,108 +47,123 @@ const STEPS = [
   { icon: "check-circle" as const, label: "Calibration complete.", domain: null },
 ];
 
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+type Phase = "running" | "failed";
+
 export default function CalibratingScreen() {
   const insets = useSafeAreaInsets();
+  const colors = useColors();
   const params = useLocalSearchParams();
-  const { setUser, updateDomainScore, initializeShadowSelf } = useApp();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const [stepIndex, setStepIndex] = useState(0);
+  const [phase, setPhase] = useState<Phase>("running");
+  const [failure, setFailure] = useState<{ message: string; retry: boolean } | null>(null);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const scanY = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0.2)).current;
 
-  useEffect(() => {
-    // Progress bar
-    Animated.timing(progressAnim, {
-      toValue: 1,
-      duration: 3600,
-      useNativeDriver: false,
-    }).start();
+  const draft = draftFromParams(params, deviceTimezone());
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  // One id per visit: a retry after a lost reply is recognised by the server instead of onboarding twice.
+  const clientId = useRef(`onboarding-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`).current;
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const alive = useRef(true);
+  const running = useRef(false);
 
-    // Glow pulse
-    Animated.loop(
+  const clearTimers = () => {
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+  };
+
+  // Decorative loops run for the whole screen life.
+  useEffect(() => {
+    const glow = Animated.loop(
       Animated.sequence([
         Animated.timing(glowAnim, { toValue: 0.55, duration: 1400, useNativeDriver: false }),
         Animated.timing(glowAnim, { toValue: 0.2, duration: 1400, useNativeDriver: false }),
       ])
-    ).start();
-
-    // Scan line
-    Animated.loop(
+    );
+    glow.start();
+    const scan = Animated.loop(
       Animated.sequence([
         Animated.timing(scanY, { toValue: 300, duration: 2200, useNativeDriver: false }),
         Animated.timing(scanY, { toValue: 0, duration: 0, useNativeDriver: false }),
         Animated.delay(400),
       ])
-    ).start();
-
-    // Step reveals
-    STEPS.forEach((_, i) => {
-      setTimeout(() => setStepIndex(i), i * 720 + 200);
-    });
-
-    // Navigate out
-    const t = setTimeout(async () => {
-      await initUser();
-      router.replace("/onboarding/schedule");
-    }, 4400);
-
-    return () => clearTimeout(t);
+    );
+    scan.start();
+    return () => {
+      glow.stop();
+      scan.stop();
+    };
   }, []);
 
-  const initUser = async () => {
-    const ratings = params.ratings
-      ? (JSON.parse(params.ratings as string) as Record<Domain, number>)
-      : null;
-    const username = (params.username as string) || "OPERATOR";
-    const primaryGoal = (params.primaryGoal as string) || "Reach my potential";
-    const weakness = ((params.weakness as Domain) || "DISCIPLINE") as Domain;
-    const identity = (params.identity as "anonymous" | "semi-public" | "public") || "semi-public";
-
-    await setUser({
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-      username,
-      identitySetting: identity,
-      rank: "E",
-      primaryGoal,
-      biggestWeakness: weakness,
-      morningTime: "07:00",
-      nightlyTime: "21:00",
-      onboardingComplete: true,
-      createdAt: new Date().toISOString(),
-      dayNumber: 1,
+  const startAnimation = useCallback(() => {
+    clearTimers();
+    setStepIndex(0);
+    progressAnim.setValue(0);
+    Animated.timing(progressAnim, {
+      toValue: 1,
+      duration: MIN_CALIBRATION_MS - 800,
+      useNativeDriver: false,
+    }).start();
+    STEPS.forEach((_, i) => {
+      timers.current.push(setTimeout(() => setStepIndex(i), i * STEP_INTERVAL_MS + 200));
     });
+  }, []);
 
-    if (ratings) {
-      const domains: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
-      for (const domain of domains) {
-        const rating = ratings[domain] ?? 5;
-        await updateDomainScore(domain, rating * 4 - 50);
-      }
-      // Compute the actual starting scores for shadow initialization
-      const startScores: Record<Domain, number> = {
-        BODY: 50 + (ratings.BODY ?? 5) * 4 - 50,
-        MIND: 50 + (ratings.MIND ?? 5) * 4 - 50,
-        WEALTH: 50 + (ratings.WEALTH ?? 5) * 4 - 50,
-        DISCIPLINE: 50 + (ratings.DISCIPLINE ?? 5) * 4 - 50,
-      };
-      await initializeShadowSelf(startScores, username);
-    } else {
-      await initializeShadowSelf(
-        { BODY: 50, MIND: 50, WEALTH: 50, DISCIPLINE: 50 },
-        username
-      );
+  const userId = user?.id ?? null;
+  const calibrate = useCallback(async () => {
+    const current = draftRef.current;
+    if (running.current || !current || !userId) return;
+    running.current = true;
+    setPhase("running");
+    setFailure(null);
+    startAnimation();
+    try {
+      // The animation and the request run together; leaving waits for both.
+      const [state] = await Promise.all([
+        submitOnboarding(api, buildOnboardingPayload(current, clientId)),
+        wait(MIN_CALIBRATION_MS),
+      ]);
+      applyOnboarded(queryClient, userId, state);
+      if (alive.current) router.replace("/onboarding/schedule");
+    } catch (e) {
+      if (!alive.current) return;
+      clearTimers();
+      progressAnim.stopAnimation();
+      setFailure({ message: describeOnboardingError(e), retry: canRetry(e) });
+      setPhase("failed");
+    } finally {
+      running.current = false;
     }
-  };
+  }, [userId, queryClient, clientId, startAnimation]);
+
+  const hasDraft = draft !== null;
+  useEffect(() => {
+    alive.current = true;
+    if (!hasDraft) {
+      // Opened out of order (no goal or weakness): back to the start of the assessment.
+      router.replace("/onboarding/assessment");
+    } else {
+      void calibrate();
+    }
+    return () => {
+      alive.current = false;
+      clearTimers();
+    };
+  }, [hasDraft, calibrate]);
 
   const progressWidth = progressAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ["0%", "100%"],
   });
 
-  const ratings = params.ratings
-    ? (JSON.parse(params.ratings as string) as Record<string, number>)
-    : { BODY: 5, MIND: 5, WEALTH: 5, DISCIPLINE: 5 };
+  const ratings = draft?.ratings ?? { BODY: 5, MIND: 5, WEALTH: 5, SOCIAL: 5, DISCIPLINE: 5 };
 
   return (
     <View style={styles.root}>
@@ -167,8 +198,9 @@ export default function CalibratingScreen() {
         {/* Domain score preview */}
         <View style={[styles.scoresCard, { backgroundColor: "#0D1018", borderColor: "#1E2230" }]}>
           <Text style={styles.scoresTitle}>CALIBRATED SCORES</Text>
-          {(["BODY", "MIND", "WEALTH", "DISCIPLINE"] as Domain[]).map(d => {
-            const score = ((ratings[d] ?? 5) / 10) * 100;
+          {RANKED_DOMAINS.map(d => {
+            // The server starts each domain at rating x 4, so this is the score you actually begin with.
+            const score = (ratings[d] ?? 5) * 4;
             const color = DOMAIN_COLORS[d];
             return (
               <View key={d} style={styles.scoreRow}>
@@ -188,6 +220,26 @@ export default function CalibratingScreen() {
             <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
           </View>
         </View>
+
+        {/* Failure: SYSTEM voice + retry */}
+        {phase === "failed" && failure ? (
+          <View style={styles.failure} accessibilityLiveRegion="polite">
+            <Text style={[styles.failureText, { color: colors.foreground }]}>{failure.message}</Text>
+            {failure.retry ? (
+              <TouchableOpacity onPress={() => void calibrate()} accessibilityRole="button" style={styles.retryBtn}>
+                <Text style={[styles.retryText, { color: colors.primary }]}>RETRY</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                onPress={() => router.replace("/onboarding/assessment")}
+                accessibilityRole="button"
+                style={styles.retryBtn}
+              >
+                <Text style={[styles.retryText, { color: colors.primary }]}>REVIEW ANSWERS</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : null}
 
         {/* Steps */}
         <View style={styles.steps}>
@@ -260,6 +312,11 @@ const styles = StyleSheet.create({
   progressBlock: { gap: 6 },
   progressTrack: { height: 2, backgroundColor: "#12151E", borderRadius: 1, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: "#3A7BD5", borderRadius: 1 },
+
+  failure: { gap: 4, alignItems: "flex-start" },
+  failureText: { fontSize: 13, lineHeight: 20 },
+  retryBtn: { paddingVertical: 8, paddingRight: 16 },
+  retryText: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 3 },
 
   steps: { gap: 8 },
   stepRow: { flexDirection: "row", alignItems: "center", gap: 10 },

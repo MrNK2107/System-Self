@@ -35,6 +35,18 @@ export default function StatsScreen() {
     achievements, milestones, getShadowPhase,
   } = useApp();
   const { signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut();
+    } catch {
+      // The session is already cleared; the signed-out guard routes to sign-in.
+    } finally {
+      setSigningOut(false);
+    }
+  };
   const { generateMessage, loading } = useSystemAI();
   const [debrief, setDebrief] = useState("");
   const [debriefLoading, setDebriefLoading] = useState(false);
@@ -554,9 +566,11 @@ export default function StatsScreen() {
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <TouchableOpacity
             style={styles.settingRow}
-            onPress={() => void signOut()}
+            onPress={() => void handleSignOut()}
+            disabled={signingOut}
             activeOpacity={0.7}
             accessibilityRole="button"
+            accessibilityState={{ disabled: signingOut, busy: signingOut }}
           >
             <Feather name="log-out" size={14} color={colors.mutedForeground} />
             <Text style={[styles.settingLabel, { color: colors.foreground }]}>Sign Out</Text>

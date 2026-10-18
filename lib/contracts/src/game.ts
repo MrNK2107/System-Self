@@ -55,6 +55,18 @@ export const OnboardingRequestSchema = z.object({
 });
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
 
+/** PATCH /api/profile: any subset of these, at least one. */
+export const ProfileUpdateSchema = z
+  .object({
+    morningTime: HHMM,
+    nightlyTime: HHMM,
+    identitySetting: IdentitySettingSchema,
+    primaryGoal: z.string().trim().min(5).max(200),
+  })
+  .partial()
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "Nothing to update" });
+export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
+
 /** Notice kinds written by the server. */
 export const NOTICE_KINDS = [
   "achievement",

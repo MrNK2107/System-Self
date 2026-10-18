@@ -4,17 +4,26 @@ import { AuthResponseSchema, secureTokenStore, type Session, type TokenStore } f
 
 export type ApiErrorKind = "network" | "http" | "parse" | "storage";
 
+/** One validation problem from a 400 response: `path` is dotted ("timezone", "ratings.SOCIAL"). */
+export interface ApiIssue {
+  path: string;
+  message: string;
+}
+
 export class ApiError extends Error {
   readonly kind: ApiErrorKind;
   readonly status?: number;
   readonly code?: string;
+  /** The server's validation issues (400 responses); empty otherwise. */
+  readonly issues: ApiIssue[];
 
-  constructor(init: { kind: ApiErrorKind; message: string; status?: number; code?: string }) {
+  constructor(init: { kind: ApiErrorKind; message: string; status?: number; code?: string; issues?: ApiIssue[] }) {
     super(init.message);
     this.name = "ApiError";
     this.kind = init.kind;
     this.status = init.status;
     this.code = init.code;
+    this.issues = init.issues ?? [];
   }
 }
 
@@ -23,6 +32,18 @@ export function shouldRetryQuery(failureCount: number, error: unknown): boolean 
   if (failureCount >= 2) return false;
   if (!(error instanceof ApiError)) return false;
   return error.kind === "network" || (error.kind === "http" && (error.status ?? 0) >= 500);
+}
+
+function parseIssues(raw: unknown): ApiIssue[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ApiIssue[] = [];
+  for (const i of raw) {
+    if (i && typeof i === "object" && typeof (i as ApiIssue).message === "string") {
+      const path = (i as ApiIssue).path;
+      out.push({ path: typeof path === "string" ? path : "", message: (i as ApiIssue).message });
+    }
+  }
+  return out;
 }
 
 export interface RequestOptions<T> {
@@ -105,11 +126,12 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
   }
 
   function httpError(status: number, body: unknown): ApiError {
-    const b = (body && typeof body === "object" ? body : {}) as { error?: unknown; code?: unknown };
+    const b = (body && typeof body === "object" ? body : {}) as { error?: unknown; code?: unknown; issues?: unknown };
     return new ApiError({
       kind: "http",
       status,
       code: typeof b.code === "string" ? b.code : undefined,
+      issues: parseIssues(b.issues),
       message: typeof b.error === "string" ? b.error : `Request failed (${status})`,
     });
   }
