@@ -1,21 +1,25 @@
 import { Router, type IRouter } from "express";
 import type { Db } from "@workspace/db";
+import type { AiDeps } from "../lib/ai";
 import type { Mailer } from "../lib/mailer";
 import { createRequireAuth } from "../middlewares/auth";
 import { adminRoutes } from "./admin";
 import { authRoutes } from "./auth";
 import { chainsRoutes } from "./chains";
+import { debriefRoutes } from "./debrief";
 import { healthRoutes } from "./health";
 import { historyRoutes } from "./history";
 import { logsRoutes } from "./logs";
+import { messagesRoutes } from "./messages";
 import { noticesRoutes } from "./notices";
 import { onboardingRoutes } from "./onboarding";
 import { questsRoutes } from "./quests";
 import { stateRoutes } from "./state";
 import { systemRoutes } from "./system";
 
-export function createRouter(deps: { db: Db | null; mailer: Mailer }): IRouter {
+export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps }): IRouter {
   const { db, mailer } = deps;
+  const ai = deps.ai ?? {};
   const router: IRouter = Router();
   const requireAuth = createRequireAuth(db);
 
@@ -24,17 +28,19 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer }): IRouter {
   router.use(authRoutes({ db, mailer, requireAuth }));
 
   // Private surfaces. requireAuth is mounted per prefix so unknown /api paths fall through to 404.
-  router.use(["/system", "/admin", "/onboarding", "/state", "/logs", "/quests", "/chains", "/notices"], requireAuth);
+  router.use(["/system", "/admin", "/onboarding", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap"], requireAuth);
   router.use(systemRoutes(db));
-  router.use(historyRoutes(db));
+  router.use(historyRoutes(db, ai));
   if (db) {
     router.use(adminRoutes(db));
     router.use(onboardingRoutes(db));
     router.use(stateRoutes(db));
     router.use(logsRoutes(db));
-    router.use(questsRoutes(db));
+    router.use(questsRoutes(db, ai));
     router.use(chainsRoutes(db));
     router.use(noticesRoutes(db));
+    router.use(messagesRoutes(db, ai));
+    router.use(debriefRoutes(db, ai));
   }
   return router;
 }

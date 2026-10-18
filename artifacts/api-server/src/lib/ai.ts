@@ -31,7 +31,12 @@ function isRetryableError(error: unknown): boolean {
   );
 }
 
-type ModelCaller = (model: string, options: AiCallOptions) => Promise<string>;
+export type ModelCaller = (model: string, options: AiCallOptions) => Promise<string>;
+
+/** Injectable AI dependency (tests pass a fake model; production leaves it unset for Gemini). */
+export interface AiDeps {
+  call?: ModelCaller;
+}
 
 export function aiAvailable(): boolean {
   return Boolean(env.GEMINI_API_KEY);

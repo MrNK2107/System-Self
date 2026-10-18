@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateSystemMessageBodySchema } from "./schemas";
+import { MESSAGE_TYPES } from "./schemas";
 import { templateQuests, templateSystemMessage } from "./ai-fallback";
 import { aiAvailable, generateOrTemplate, generateWithFallback } from "./ai";
 import { env } from "./env";
@@ -9,7 +9,7 @@ const ctx = { rank: "C", dayNumber: 12, shadowGap: 7.5, trajectory: "down" as co
 const OPTIONS = { systemInstruction: "s", prompt: "p", maxOutputTokens: 10, temperature: 0.1 };
 
 test("templateSystemMessage covers every message type, contains no '!' and no emoji", () => {
-  const types = generateSystemMessageBodySchema.shape.messageType.options;
+  const types = MESSAGE_TYPES;
   assert.ok(types.length > 0);
   for (const type of types) {
     for (const trajectory of ["up", "stable", "down"] as const) {
@@ -24,15 +24,19 @@ test("templateSystemMessage covers every message type, contains no '!' and no em
   assert.equal(templateSystemMessage("shadow_self", ctx), templateSystemMessage("shadow_self", ctx));
 });
 
-test("templateQuests returns 3 with the weakest domain first", () => {
-  for (const weakestDomain of ["BODY", "MIND", "WEALTH", "DISCIPLINE"]) {
+test("templateQuests returns 3 dailies (weakest first), 1 weekly and 1 arc", () => {
+  for (const weakestDomain of ["BODY", "MIND", "WEALTH", "SOCIAL", "DISCIPLINE"]) {
     const quests = templateQuests({ weakestDomain });
-    assert.equal(quests.length, 3);
-    assert.equal(quests[0]!.domain, weakestDomain);
-    assert.equal(new Set(quests.map((q) => q.domain)).size, 3);
-    assert.ok(quests.every((q) => q.type === "daily" && q.title && q.description));
+    assert.equal(quests.length, 5);
+    const dailies = quests.filter((q) => q.type === "daily");
+    assert.equal(dailies.length, 3);
+    assert.equal(dailies[0]!.domain, weakestDomain);
+    assert.equal(new Set(dailies.map((q) => q.domain)).size, 3);
+    assert.equal(quests.filter((q) => q.type === "weekly").length, 1);
+    assert.equal(quests.filter((q) => q.type === "arc").length, 1);
+    assert.ok(quests.every((q) => q.title && q.description));
   }
-  assert.equal(templateQuests({ weakestDomain: "NOPE" }).length, 3);
+  assert.equal(templateQuests({ weakestDomain: "NOPE" }).length, 5);
 });
 
 test("generateWithFallback without key returns model 'template' and never calls the model", async () => {

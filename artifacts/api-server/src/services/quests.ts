@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, gt } from "drizzle-orm";
 import { questChains, quests } from "@workspace/db";
 import type { Tx } from "./user-lock";
 
@@ -60,4 +60,22 @@ export async function abandonChain(tx: Pick<Tx, "update">, chainId: string): Pro
     .update(questChains)
     .set({ status: "abandoned" })
     .where(and(eq(questChains.id, chainId), eq(questChains.status, "active")));
+}
+
+/** Active, unexpired quests, soonest expiry first (same order as GET /quests). */
+export async function activeBoard(tx: Pick<Tx, "select">, userId: string, now: Date) {
+  return tx
+    .select()
+    .from(quests)
+    .where(and(eq(quests.userId, userId), eq(quests.status, "active"), gt(quests.expiresAt, now)))
+    .orderBy(asc(quests.expiresAt), asc(quests.createdAt));
+}
+
+export async function hasActiveChain(tx: Pick<Tx, "select">, userId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: questChains.id })
+    .from(questChains)
+    .where(and(eq(questChains.userId, userId), eq(questChains.status, "active")))
+    .limit(1);
+  return Boolean(row);
 }

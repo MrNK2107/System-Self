@@ -1,77 +1,60 @@
 import { z } from "zod";
+import { RANKED_DOMAINS } from "@workspace/engine";
 
-const domainScoresSchema = z.object({
-  BODY: z.number(),
-  MIND: z.number(),
-  WEALTH: z.number(),
-  DISCIPLINE: z.number(),
+const clientIdSchema = z.string().min(1).max(200);
+
+export const MESSAGE_TYPES = [
+  "morning_briefing",
+  "nightly_debrief",
+  "quest_assignment",
+  "rank_change",
+  "shadow_self",
+  "milestone",
+  "failure_response",
+  "streak_break",
+  "shadow_confrontation",
+  "rival_taunt",
+  "chain_complete",
+  "domain_milestone",
+  "forbidden_log",
+  "rank_up_prep",
+  "weekly_debrief",
+] as const;
+export type MessageType = (typeof MESSAGE_TYPES)[number];
+
+/** The server builds all context itself; the client only names the message and may add a short note. */
+export const systemMessageRequestSchema = z.object({
+  type: z.enum(MESSAGE_TYPES),
+  extraContext: z.string().max(500).optional(),
+  clientId: clientIdSchema.optional(),
 });
 
-export const generateSystemMessageBodySchema = z.object({
-  messageType: z.enum([
-    "morning_briefing",
-    "nightly_debrief",
-    "quest_assignment",
-    "rank_change",
-    "shadow_self",
-    "milestone",
-    "failure_response",
-    "streak_break",
-    "shadow_confrontation",
-    "rival_taunt",
-    "chain_complete",
-    "domain_milestone",
-    "forbidden_log",
-    "rank_up_prep",
-  ]),
-  rank: z.string().min(1),
-  domainScores: domainScoresSchema,
-  trajectory: z.enum(["up", "stable", "down"]),
-  shadowActive: z.boolean(),
-  shadowGap: z.number(),
-  questCount: z.number().int().min(0),
-  completedQuestCount: z.number().int().min(0),
-  primaryGoal: z.string().min(1),
-  dayNumber: z.number().int().min(1),
-  rivalMovement: z.string().nullish(),
-  extraContext: z.string().nullish(),
+export const generateQuestsRequestSchema = z.object({ clientId: clientIdSchema.optional() });
+
+export const aiMetaSchema = z.object({
+  promptVersion: z.string().min(1),
+  model: z.string().min(1),
+  attempts: z.number().int().min(1),
 });
 
-export const generateQuestsBodySchema = z.object({
-  rank: z.string().min(1),
-  domainScores: domainScoresSchema,
-  primaryGoal: z.string().min(1),
-  weakestDomain: z.string().min(1),
-  recentLogs: z.array(z.string()).default([]),
-  shadowGap: z.number().optional(),
-  dayNumber: z.number().int().min(1).optional(),
-});
-
-export const generateSystemMessageResponseSchema = z.object({
+export const systemMessageResponseSchema = z.object({
   message: z.string().min(1),
-  messageType: z.string().min(1),
-  meta: z.object({
-    promptVersion: z.string().min(1),
-    model: z.string().min(1),
-    attempts: z.number().int().min(1),
-  }),
+  meta: aiMetaSchema,
 });
 
 export const generatedQuestSchema = z.object({
   title: z.string().min(1).max(120),
   description: z.string().min(1).max(400),
-  domain: z.enum(["BODY", "MIND", "WEALTH", "DISCIPLINE"]),
+  domain: z.enum(RANKED_DOMAINS),
   type: z.enum(["daily", "weekly", "arc"]),
 });
 
-export const generateQuestsResponseSchema = z.object({
+/** The JSON a model must return for quest generation. */
+export const generatedQuestsPayloadSchema = z.object({
   quests: z.array(generatedQuestSchema).min(1),
-  meta: z.object({
-    promptVersion: z.string().min(1),
-    model: z.string().min(1),
-    attempts: z.number().int().min(1),
-  }),
 });
+
+export const generateQuestsResponseSchema = generatedQuestsPayloadSchema.extend({ meta: aiMetaSchema });
 
 export const questCompletionEventBodySchema = z.object({
   questId: z.string().min(1),

@@ -7,13 +7,14 @@ import { db as defaultDb, type Db } from "@workspace/db";
 import { createRouter } from "./routes";
 import { logger } from "./lib/logger";
 import { env, resolveCorsOrigins } from "./lib/env";
+import type { AiDeps } from "./lib/ai";
 import { createMailer, type Mailer } from "./lib/mailer";
 import { errorHandler, notFoundHandler } from "./middlewares/errors";
 
 const HEALTH_PATHS = new Set(["/api/healthz", "/api/readyz"]);
 
 export function createApp(
-  deps: { db?: Db | null; mailer?: Mailer; trustProxy?: boolean | number } = {},
+  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; trustProxy?: boolean | number } = {},
 ): Express {
   const db = deps.db === undefined ? defaultDb : deps.db;
   const mailer = deps.mailer ?? createMailer();
@@ -72,7 +73,7 @@ export function createApp(
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  app.use("/api", createRouter({ db, mailer }));
+  app.use("/api", createRouter({ db, mailer, ai: deps.ai }));
   app.use(notFoundHandler);
   app.use(errorHandler);
 

@@ -2,8 +2,12 @@ import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import { Router, type IRouter } from "express";
 import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { z, ZodError } from "zod";
-import { generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages, type Db } from "@workspace/db";
-import { generateOrTemplate } from "../lib/ai";
+import { generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages, users, type Db } from "@workspace/db";
+import { localDate } from "@workspace/engine";
+import type { AiDeps } from "../lib/ai";
+import { buildUserContext, generateMessage } from "../services/ai-context";
+import { buildWeeklyRecap } from "../services/recap";
+import { ensureRolledOver } from "../services/rollover";
 
 const messageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -26,7 +30,7 @@ const completionSummaryQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(90).default(14),
 });
 
-export function historyRoutes(db: Db | null): IRouter {
+export function historyRoutes(db: Db | null, ai: AiDeps = {}): IRouter {
 const router = Router();
 
 router.get("/system/messages", async (req, res) => {
@@ -108,147 +112,30 @@ router.get("/system/quests/history", async (req, res) => {
   }
 });
 
-router.get("/system/recap/weekly", async (req, res) => {
-  try {
-    if (!db) return res.status(503).json(DB_UNAVAILABLE);
-    const { id: userId, username } = req.user!;
-
-    const from = new Date();
-    from.setDate(from.getDate() - 7);
-
-    const [messageStats] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(systemMessages)
-      .where(and(eq(systemMessages.userId, userId), gte(systemMessages.createdAt, from)));
-
-    const [questStats] = await db
-      .select({
-        batchCount: sql<number>`count(distinct ${generatedQuestBatches.id})::int`,
-        questCount: sql<number>`count(${generatedQuests.id})::int`,
-      })
-      .from(generatedQuestBatches)
-      .leftJoin(generatedQuests, eq(generatedQuestBatches.id, generatedQuests.batchId))
-      .where(and(eq(generatedQuestBatches.userId, userId), gte(generatedQuestBatches.createdAt, from)));
-
-    const domainBreakdown = await db
-      .select({
-        domain: generatedQuests.domain,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(generatedQuests)
-      .where(and(eq(generatedQuests.userId, userId), gte(generatedQuests.createdAt, from)))
-      .groupBy(generatedQuests.domain);
-
-    const [completionStats] = await db
-      .select({
-        attempts: sql<number>`count(*)::int`,
-        completed: sql<number>`sum(case when ${questCompletionEvents.status} = 'complete' then 1 else 0 end)::int`,
-      })
-      .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.userId, userId), gte(questCompletionEvents.completedAt, from)));
-
-    return res.json({
-      username,
-      windowDays: 7,
-      from: from.toISOString(),
-      to: new Date().toISOString(),
-      messagesGenerated: messageStats?.count ?? 0,
-      questBatchesGenerated: questStats?.batchCount ?? 0,
-      questsGenerated: questStats?.questCount ?? 0,
-      questAttempts: completionStats?.attempts ?? 0,
-      questsCompleted: completionStats?.completed ?? 0,
-      completionRate:
-        (completionStats?.attempts ?? 0) > 0
-          ? Math.round(((completionStats?.completed ?? 0) / (completionStats?.attempts ?? 1)) * 100)
-          : 0,
-      domainBreakdown,
-    });
-  } catch (error) {
-    req.log.error({ error }, "Failed to fetch weekly recap");
-    return res.status(500).json({ error: "Failed to fetch weekly recap" });
-  }
+router.get("/recap/weekly", async (req, res) => {
+  if (!db) return res.status(503).json(DB_UNAVAILABLE);
+  const userId = req.user!.id;
+  const now = new Date();
+  await ensureRolledOver(db, userId, now);
+  const [user] = await db.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) return res.status(404).json({ error: "User not found" });
+  return res.json(await buildWeeklyRecap(db, userId, localDate(now, user.tz), user.tz));
 });
 
-router.get("/system/recap/weekly/debrief", async (req, res) => {
-  try {
-    if (!db) return res.status(503).json(DB_UNAVAILABLE);
-    const { id: userId, username } = req.user!;
-
-    const from = new Date();
-    from.setDate(from.getDate() - 7);
-
-    const [messageStats] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(systemMessages)
-      .where(and(eq(systemMessages.userId, userId), gte(systemMessages.createdAt, from)));
-
-    const [questStats] = await db
-      .select({
-        batchCount: sql<number>`count(distinct ${generatedQuestBatches.id})::int`,
-        questCount: sql<number>`count(${generatedQuests.id})::int`,
-      })
-      .from(generatedQuestBatches)
-      .leftJoin(generatedQuests, eq(generatedQuestBatches.id, generatedQuests.batchId))
-      .where(and(eq(generatedQuestBatches.userId, userId), gte(generatedQuestBatches.createdAt, from)));
-
-    const domainBreakdown = await db
-      .select({
-        domain: generatedQuests.domain,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(generatedQuests)
-      .where(and(eq(generatedQuests.userId, userId), gte(generatedQuests.createdAt, from)))
-      .groupBy(generatedQuests.domain);
-    const [completionStats] = await db
-      .select({
-        attempts: sql<number>`count(*)::int`,
-        completed: sql<number>`sum(case when ${questCompletionEvents.status} = 'complete' then 1 else 0 end)::int`,
-      })
-      .from(questCompletionEvents)
-      .where(and(eq(questCompletionEvents.userId, userId), gte(questCompletionEvents.completedAt, from)));
-    const completionRate =
-      (completionStats?.attempts ?? 0) > 0
-        ? Math.round(((completionStats?.completed ?? 0) / (completionStats?.attempts ?? 1)) * 100)
-        : 0;
-
-    const prompt = `Generate a strict weekly debrief for ${username}.
-Data window: last 7 days.
-Messages generated: ${messageStats?.count ?? 0}
-Quest batches generated: ${questStats?.batchCount ?? 0}
-Quests generated: ${questStats?.questCount ?? 0}
-Quest attempts tracked: ${completionStats?.attempts ?? 0}
-Quests completed: ${completionStats?.completed ?? 0}
-Completion rate: ${completionRate}%
-Domain quest distribution: ${domainBreakdown.map((d) => `${d.domain}:${d.count}`).join(", ") || "none"}
-
-Style:
-- Second person
-- Clinical and direct
-- 4-6 sentences
-- Include one verdict word at the end: Acceptable, Insufficient, or Pathetic`;
-
-    const ai = await generateOrTemplate({
-      systemInstruction: "You are THE SYSTEM. Output only the debrief text.",
-      prompt,
-      maxOutputTokens: 220,
-      temperature: 0.5,
-    });
-
-    return res.json({
-      username,
-      windowDays: 7,
-      from: from.toISOString(),
-      to: new Date().toISOString(),
-      debrief:
-        ai.model === "template"
-          ? `Seven days logged for ${username}. ${completionStats?.completed ?? 0} of ${completionStats?.attempts ?? 0} quest attempts completed, a rate of ${completionRate}%. ${completionRate >= 75 ? "Acceptable." : "Insufficient."}`
-          : ai.text,
-      meta: { model: ai.model, attempts: ai.attempts, promptVersion: "weekly-debrief-v1" },
-    });
-  } catch (error) {
-    req.log.error({ error }, "Failed to generate weekly debrief");
-    return res.status(500).json({ error: "Failed to generate weekly debrief" });
-  }
+router.get("/recap/weekly/debrief", async (req, res) => {
+  if (!db) return res.status(503).json(DB_UNAVAILABLE);
+  const userId = req.user!.id;
+  const now = new Date();
+  await ensureRolledOver(db, userId, now);
+  const ctx = await buildUserContext(db, userId, now);
+  if (!ctx) return res.status(409).json({ error: "Onboarding required", code: "not_onboarded" });
+  ctx.weeklyRecap = await buildWeeklyRecap(db, userId, ctx.today, ctx.timezone);
+  const generated = await generateMessage("weekly_debrief", ctx, ai);
+  return res.json({
+    weekStart: ctx.weeklyRecap.weekStart,
+    debrief: generated.message,
+    meta: { model: generated.model, attempts: generated.attempts, promptVersion: generated.promptVersion },
+  });
 });
 
 router.get("/system/completions/summary", async (req, res) => {

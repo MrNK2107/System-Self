@@ -45,6 +45,7 @@ const TEMPLATES: Record<string, Template[]> = {
   domain_milestone: [(c) => `A domain milestone is logged. Rank ${c.rank}. The weakest domain is still waiting.`],
   forbidden_log: [(c) => `Forbidden entry recorded on day ${c.dayNumber}. The gap to your shadow is ${gap(c)} points.`],
   rank_up_prep: [(c) => `Your trajectory is ${trend(c)}. Rank ${c.rank} is within reach.`],
+  weekly_debrief: [(c) => `Seven days reviewed at rank ${c.rank}. Trajectory ${trend(c)}. The record stands as logged.`],
 };
 
 export function templateSystemMessage(messageType: string, ctx: TemplateContext): string {
@@ -56,17 +57,39 @@ const DOMAIN_QUESTS: Record<string, { title: string; description: string }> = {
   BODY: { title: "Log your workout", description: "Complete and log any physical activity today." },
   MIND: { title: "Deep work session", description: "Complete one uninterrupted 90-minute focus session." },
   WEALTH: { title: "Review expenses", description: "Categorize all uncategorized expenses from this week." },
+  SOCIAL: { title: "Contact someone who matters", description: "Hold one real conversation with a person you have neglected." },
   DISCIPLINE: { title: "Maintain your streak", description: "Log at least one entry today in every domain." },
 };
-const DOMAIN_ORDER = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
+const WEEKLY_QUESTS: Record<string, { title: string; description: string }> = {
+  BODY: { title: "Four training sessions", description: "Log four separate workouts before the week closes." },
+  MIND: { title: "Finish one deep project block", description: "Spend five hours of focused work on one thing this week." },
+  WEALTH: { title: "Weekly money review", description: "Reconcile every expense and set next week's limit." },
+  SOCIAL: { title: "Three real conversations", description: "Meet or call three people you have been avoiding." },
+  DISCIPLINE: { title: "Log every day", description: "Log at least one entry on each of the next seven days." },
+};
+const ARC_QUESTS: Record<string, { title: string; description: string }> = {
+  BODY: { title: "Twenty-one day training arc", description: "Train at least five days in each of the next three weeks." },
+  MIND: { title: "Three week study arc", description: "Complete a daily focus block for twenty-one days." },
+  WEALTH: { title: "Three week savings arc", description: "Track every expense and move a fixed amount to savings each week." },
+  SOCIAL: { title: "Three week connection arc", description: "Reach out to one person a day for twenty-one days." },
+  DISCIPLINE: { title: "Three week consistency arc", description: "Complete one quest every day for twenty-one days." },
+};
+const DOMAIN_ORDER = ["BODY", "MIND", "WEALTH", "SOCIAL", "DISCIPLINE"];
 
-export function templateQuests(ctx: { weakestDomain: string }): {
+export interface TemplateQuest {
   title: string;
   description: string;
   domain: string;
-  type: "daily";
-}[] {
+  type: "daily" | "weekly" | "arc";
+}
+
+/** Template board candidates: 3 dailies (weakest domain first), then one weekly and one arc in the weakest domain. */
+export function templateQuests(ctx: { weakestDomain: string }): TemplateQuest[] {
   const first = DOMAIN_QUESTS[ctx.weakestDomain] ? ctx.weakestDomain : "DISCIPLINE";
   const domains = [first, ...DOMAIN_ORDER.filter((d) => d !== first)].slice(0, 3);
-  return domains.map((domain) => ({ ...DOMAIN_QUESTS[domain]!, domain, type: "daily" as const }));
+  return [
+    ...domains.map((domain) => ({ ...DOMAIN_QUESTS[domain]!, domain, type: "daily" as const })),
+    { ...WEEKLY_QUESTS[first]!, domain: first, type: "weekly" as const },
+    { ...ARC_QUESTS[first]!, domain: first, type: "arc" as const },
+  ];
 }

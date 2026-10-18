@@ -5,12 +5,13 @@ import { getTestDb } from "@workspace/db/testing";
 import { domainScores } from "@workspace/db";
 import { createApp } from "../app-factory";
 import type { Mailer } from "../lib/mailer";
+import type { AiDeps } from "../lib/ai";
 
 export const db = getTestDb();
 export const skip = db ? false : "TEST_DATABASE_URL not set";
 const mailer: Mailer = { async send() {} };
 
-export const app = () => createApp({ db, mailer });
+export const app = (extra: { ai?: AiDeps } = {}) => createApp({ db, mailer, ...extra });
 export const TZ = "Asia/Kolkata";
 export const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 

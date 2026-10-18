@@ -1,4 +1,4 @@
-import { boolean, index, integer, jsonb, pgTable, serial, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, jsonb, pgTable, serial, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { users } from "./users";
@@ -22,8 +22,12 @@ export const systemMessages = pgTable("system_messages", {
   promptVersion: text("prompt_version").notNull(),
   attempts: integer("attempts").notNull(),
   context: jsonb("context"),
+  localDate: date("local_date", { mode: "string" }), // user's local day; null on rows from before server-built messages
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [index("system_messages_user_created_idx").on(t.userId, t.createdAt)]);
+}, (t) => [
+  index("system_messages_user_created_idx").on(t.userId, t.createdAt),
+  index("system_messages_user_local_date_idx").on(t.userId, t.localDate),
+]);
 
 export const generatedQuestBatches = pgTable("generated_quest_batches", {
   id: serial("id").primaryKey(),
@@ -36,8 +40,12 @@ export const generatedQuestBatches = pgTable("generated_quest_batches", {
   model: text("model").notNull(),
   promptVersion: text("prompt_version").notNull(),
   attempts: integer("attempts").notNull(),
+  localDate: date("local_date", { mode: "string" }), // user's local day the batch was generated for
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [index("generated_quest_batches_user_created_idx").on(t.userId, t.createdAt)]);
+}, (t) => [
+  index("generated_quest_batches_user_created_idx").on(t.userId, t.createdAt),
+  index("generated_quest_batches_user_local_date_idx").on(t.userId, t.localDate),
+]);
 
 export const generatedQuests = pgTable("generated_quests", {
   id: serial("id").primaryKey(),
