@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: system_self
+      POSTGRES_PASSWORD: system_self
+      POSTGRES_DB: system_self
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/db/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+
+volumes:
+  pgdata:
