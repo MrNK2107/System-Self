@@ -52,3 +52,9 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 **Need:** the region-specific helplines you want shown (the PRD asks for a crisis resource link in settings).
 **Doing instead:** a Settings → "Need support?" screen listing international resources plus India's Tele-MANAS (14416). Easy to edit in `constants/support.ts`.
 **Resolution:**
+
+## H-10 🟨 Hands-on device QA in Expo Go
+**Need:** someone to open the app in Expo Go on a real phone (iOS and Android) and walk through sign-up → onboarding → logging → quests → gym → settings, reporting anything that looks or behaves wrong.
+**Why I can't:** I can't operate a phone, and the browser automation tools failed to connect in this session.
+**Doing instead:** every screen is verified by typecheck, a full Android bundle export (`expo export`), unit tests, and node smoke scripts that drive the same API calls the screens make against a real local server. Run it yourself with: `docker compose up -d postgres`, migrate, `pnpm --filter @workspace/api-server dev`, then `pnpm exec expo start --lan` in `artifacts/system-self` and scan the QR code.
+**Resolution:**
