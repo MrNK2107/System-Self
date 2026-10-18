@@ -19,3 +19,5 @@
 
 export * from "./system_ai";
 export * from "./users";
+export * from "./game";
+export * from "./gym";

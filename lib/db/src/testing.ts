@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import type { Pool } from "pg";
 import { createDb, type Db } from "./index";
+import { exercises } from "./schema/gym";
+import { SEED_EXERCISES } from "./seed";
 
 let cached: Db | null = null;
 let cachedPool: Pool | null = null;
@@ -37,6 +39,8 @@ export async function resetDb(db: Db): Promise<void> {
   const names = res.rows.map((r) => `"${String((r as { tablename: string }).tablename)}"`);
   if (names.length === 0) return;
   await db.execute(sql.raw(`TRUNCATE ${names.join(", ")} RESTART IDENTITY CASCADE`));
+  // Seeded reference rows (migration data) are wiped by the truncate: restore them.
+  await db.insert(exercises).values(SEED_EXERCISES.map((e) => ({ ...e, userId: null })));
 }
 
 export async function closeTestDb(): Promise<void> {
