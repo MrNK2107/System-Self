@@ -86,7 +86,7 @@ export function trajectory(snapshots: Snapshot[], currentHidden: number): "up" |
   if (!newest) return "stable";
   const target = addDays(newest.date, -7);
   const reference = snapshots.find((s) => s.date === target) ?? snapshots[0]!;
-  const diff = currentHidden - reference.hidden;
+  const diff = round2(currentHidden - reference.hidden);
   if (diff > 1.0) return "up";
   if (diff < -1.0) return "down";
   return "stable";

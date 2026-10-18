@@ -114,3 +114,9 @@ test("generateCodename", () => {
   }
   assert.equal(generateCodename("D", () => 0), "VECTOR // AAA-1");
 });
+
+test("trajectory: an exact +1.00 difference (float noise) is stable", () => {
+  const s = [{ date: "2026-01-01", hidden: 1.14 }];
+  assert.equal(trajectory(s, 2.14), "stable");
+  assert.equal(trajectory([{ date: "2026-01-01", hidden: 2.14 }], 1.14), "stable");
+});
