@@ -448,10 +448,10 @@ router.post("/system/quest-completion", validateBody(questCompletionEventBodySch
       completedAt: req.body.completedAt ? new Date(req.body.completedAt) : new Date(),
       source: req.body.source,
     });
-    res.status(201).json({ status: "ok" });
+    return res.status(201).json({ status: "ok" });
   } catch (error) {
     req.log.error({ error }, "Failed to persist quest completion event");
-    res.status(500).json({ error: "Failed to persist completion event" });
+    return res.status(500).json({ error: "Failed to persist completion event" });
   }
 });
 

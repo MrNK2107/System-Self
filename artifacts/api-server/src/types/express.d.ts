@@ -1,11 +1,13 @@
-import "express-serve-static-core";
+export {};
 
-declare module "express-serve-static-core" {
-  interface Request {
-    auth?: {
-      username: string;
-      token: string;
-      isAdmin?: boolean;
-    };
+declare global {
+  namespace Express {
+    interface Request {
+      auth?: {
+        username: string;
+        token: string;
+        isAdmin?: boolean;
+      };
+    }
   }
 }
