@@ -10,10 +10,16 @@ import { env, resolveCorsOrigins } from "./lib/env";
 import { createMailer, type Mailer } from "./lib/mailer";
 import { errorHandler, notFoundHandler } from "./middlewares/errors";
 
-export function createApp(deps: { db?: Db | null; mailer?: Mailer } = {}): Express {
+const HEALTH_PATHS = new Set(["/api/healthz", "/api/readyz"]);
+
+export function createApp(
+  deps: { db?: Db | null; mailer?: Mailer; trustProxy?: boolean | number } = {},
+): Express {
   const db = deps.db === undefined ? defaultDb : deps.db;
   const mailer = deps.mailer ?? createMailer();
   const app: Express = express();
+  // Client IPs (and so rate-limit buckets) come from X-Forwarded-For only for trusted proxy hops.
+  app.set("trust proxy", deps.trustProxy ?? env.TRUST_PROXY);
 
   app.use(
     pinoHttp({
@@ -47,6 +53,7 @@ export function createApp(deps: { db?: Db | null; mailer?: Mailer } = {}): Expre
       max: env.RATE_LIMIT_MAX,
       standardHeaders: true,
       legacyHeaders: false,
+      skip: (req) => HEALTH_PATHS.has(req.path),
     }),
   );
   // One limiter per auth surface so abuse of one (e.g. failed logins) does not lock out the others.
