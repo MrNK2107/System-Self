@@ -238,7 +238,7 @@ export const idempotencyKeys = pgTable(
     responseBody: jsonb("response_body"),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+  (t) => [primaryKey({ columns: [t.userId, t.key] }), index("idempotency_keys_created_idx").on(t.createdAt)],
 );
 
 export type Profile = typeof profiles.$inferSelect;

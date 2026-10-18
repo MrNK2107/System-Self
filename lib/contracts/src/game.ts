@@ -44,9 +44,23 @@ export const OnboardingRequestSchema = z.object({
 });
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
 
+/** Notice kinds written by the server. */
+export const NOTICE_KINDS = [
+  "achievement",
+  "milestone",
+  "rank_change",
+  "chain_complete",
+  "quest_failed",
+  "streak_break",
+  "shadow_activated",
+  "shadow_resolved",
+] as const;
+export const NoticeKindSchema = z.enum(NOTICE_KINDS);
+export type NoticeKind = z.infer<typeof NoticeKindSchema>;
+
 export const NoticeSchema = z.object({
   id: z.string(),
-  kind: z.string(),
+  kind: NoticeKindSchema,
   payload: z.unknown(),
   createdAt: z.string(),
 });
@@ -111,7 +125,7 @@ export const LogRequestSchema = z.object({
   logType: z.string().min(1).max(40),
   data: z
     .record(z.string(), z.unknown())
-    .refine((v) => JSON.stringify(v).length <= 4096, { message: "data must be at most 4 KB" })
+    .refine((v) => new TextEncoder().encode(JSON.stringify(v)).length <= 4096, { message: "data must be at most 4 KB" })
     .optional(),
   freeText: z.string().max(2000).optional(),
   forbidden: z.boolean().optional(),
@@ -238,5 +252,3 @@ export const NoticesSeenRequestSchema = z.object({
   clientId: ClientIdSchema.optional(),
 });
 
-/** Notice kinds written by the server. */
-export const NOTICE_KINDS = ["achievement", "milestone", "rank_change", "chain_complete"] as const;

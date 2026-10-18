@@ -106,3 +106,10 @@ test("refusalOutcome", () => {
   assert.deepEqual(refusalOutcome(1), { allowed: true, penalty: 1.5 });
   assert.deepEqual(refusalOutcome(2), { allowed: false, penalty: 0 });
 });
+
+test("applyDelta activity on an earlier date than lastLogDate keeps streak and lastLogDate", () => {
+  const r = applyDelta(st({ streak: 4, lastLogDate: "2026-10-19" }), 2.5, { bonus: false, activity: true, date: "2026-10-17" });
+  assert.equal(r.next.streak, 4);
+  assert.equal(r.next.lastLogDate, "2026-10-19");
+  assert.equal(r.next.score, 52.5);
+});

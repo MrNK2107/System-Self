@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { notices, type Db } from "@workspace/db";
 import { NoticesSeenRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
+import { toNotice } from "../services/scoring";
 
 export function noticesRoutes(db: Db): IRouter {
   const router = Router();
@@ -14,7 +15,7 @@ export function noticesRoutes(db: Db): IRouter {
       .where(and(eq(notices.userId, req.user!.id), isNull(notices.seenAt)))
       .orderBy(asc(notices.createdAt), asc(notices.id));
     res.json({
-      items: rows.map((n) => ({ id: n.id, kind: n.kind, payload: n.payload, createdAt: n.createdAt.toISOString() })),
+      items: rows.map(toNotice),
     });
   });
 

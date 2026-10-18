@@ -15,11 +15,11 @@ export const TZ = "Asia/Kolkata";
 export const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 
 /** Registers and onboards a user through the real routes; returns their token and id. */
-export async function setup(a: ReturnType<typeof app>) {
+export async function setup(a: ReturnType<typeof app>, who: { email?: string; username?: string } = {}) {
   const res = await request(a).post("/api/auth/register").send({
-    email: "alice@example.com",
+    email: who.email ?? "alice@example.com",
     password: "correct horse battery",
-    username: "alice_1",
+    username: who.username ?? "alice_1",
     birthYear: 1990,
     acceptTerms: true,
     timezone: TZ,

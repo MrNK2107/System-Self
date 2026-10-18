@@ -26,7 +26,7 @@ import {
   type RankedDomain,
 } from "@workspace/engine";
 import type { GameState } from "@workspace/contracts";
-import { toShadowState } from "./scoring";
+import { toNotice, toShadowState } from "./scoring";
 
 /** Builds the client-facing game state. The hidden score is used internally but never included. */
 export async function buildGameState(db: Pick<Db, "select">, userId: string, now: Date): Promise<GameState | null> {
@@ -104,12 +104,7 @@ export async function buildGameState(db: Pick<Db, "select">, userId: string, now
     tierProgress: tierProgress(hidden, rank),
     trajectory: trajectory(snapshots, hidden),
     shadow,
-    unseenNotices: unseen.map((n) => ({
-      id: n.id,
-      kind: n.kind,
-      payload: n.payload,
-      createdAt: n.createdAt.toISOString(),
-    })),
+    unseenNotices: unseen.map(toNotice),
     today,
   };
 }

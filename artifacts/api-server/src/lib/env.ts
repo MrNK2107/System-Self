@@ -37,6 +37,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32).optional(),
   ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().min(1).default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(30),
+  WORKER_TICK_MS: z.coerce.number().int().min(1000).default(60_000),
 });
 
 export type Env = Omit<z.infer<typeof envSchema>, "JWT_SECRET"> & { JWT_SECRET: string };

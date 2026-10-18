@@ -6,6 +6,7 @@ import {
   generateSystemMessageBodySchema,
   generateSystemMessageResponseSchema,
 } from "./schemas";
+import { NOTICE_KINDS, NoticeSchema } from "@workspace/contracts";
 
 test("generateSystemMessageBodySchema accepts extended message types", () => {
   const parsed = generateSystemMessageBodySchema.parse({
@@ -55,4 +56,13 @@ test("generateQuestsResponseSchema supports arc quests", () => {
     meta: { promptVersion: "system-quests-v2", model: "gemini-1.5-flash", attempts: 2 },
   });
   assert.equal(parsed.quests[2]?.type, "arc");
+});
+
+test("NoticeSchema.kind is restricted to NOTICE_KINDS", () => {
+  const base = { id: "n1", payload: {}, createdAt: "2026-01-01T00:00:00.000Z" };
+  for (const kind of ["quest_failed", "streak_break", "shadow_activated", "shadow_resolved", "rank_change"]) {
+    assert.ok((NOTICE_KINDS as readonly string[]).includes(kind), kind);
+    assert.equal(NoticeSchema.parse({ ...base, kind }).kind, kind);
+  }
+  assert.throws(() => NoticeSchema.parse({ ...base, kind: "bogus" }));
 });

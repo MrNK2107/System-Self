@@ -142,3 +142,16 @@ test("chain: start -> step-0 quest; complete steps; chain_complete notice at the
   const again = await request(a).post("/api/chains").set(auth(token)).send({ templateKey: "physical_protocol" });
   assert.equal(again.status, 201);
 });
+
+test("refusing a chain-step quest abandons the chain and frees the template", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const start = await request(a).post("/api/chains").set(auth(token)).send({ templateKey: "mind_sharpening" });
+  assert.equal(start.status, 201);
+  const ref = await request(a).post(`/api/quests/${start.body.quest.id}/refuse`).set(auth(token)).send({});
+  assert.equal(ref.status, 200);
+  const [chain] = await db!.select().from(questChains).where(eq(questChains.userId, id));
+  assert.equal(chain!.status, "abandoned");
+  const again = await request(a).post("/api/chains").set(auth(token)).send({ templateKey: "mind_sharpening" });
+  assert.equal(again.status, 201);
+});

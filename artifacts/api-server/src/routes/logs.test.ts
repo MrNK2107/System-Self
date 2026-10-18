@@ -146,3 +146,14 @@ test("notices seen are not returned again", { skip }, async () => {
   const after2 = await request(a).get("/api/notices").set(auth(token));
   assert.deepEqual(after2.body.items, []);
 });
+
+test("data limit counts UTF-8 bytes, not characters", { skip }, async () => {
+  const a = app();
+  const { token } = await setup(a);
+  // ~2.1k characters but ~4.2 KB of UTF-8.
+  const res = await request(a)
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "mb", domain: "BODY", logType: "x", data: { blob: "é".repeat(2100) } });
+  assert.equal(res.status, 400);
+});

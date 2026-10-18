@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, gte, ne } from "drizzle-orm";
-import { notices, questChains, quests, users, type Db } from "@workspace/db";
+import { and, asc, desc, eq, gt, gte, ne } from "drizzle-orm";
+import { questChains, quests, users, type Db } from "@workspace/db";
 import {
   QUEST_COMPLETE_DELTA,
   addDays,
@@ -11,8 +11,8 @@ import {
 } from "@workspace/engine";
 import { QuestRefuseRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
-import { createQuests, toQuestDto } from "../services/quests";
-import { applyChanges } from "../services/scoring";
+import { abandonChain, createQuests, toQuestDto } from "../services/quests";
+import { applyChanges, insertNotice } from "../services/scoring";
 import type { Tx } from "../services/user-lock";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -38,7 +38,7 @@ export function questsRoutes(db: Db): IRouter {
     const active = await db
       .select()
       .from(quests)
-      .where(and(eq(quests.userId, userId), eq(quests.status, "active"), gte(quests.expiresAt, now)))
+      .where(and(eq(quests.userId, userId), eq(quests.status, "active"), gt(quests.expiresAt, now)))
       .orderBy(asc(quests.expiresAt), asc(quests.createdAt));
     const recent = await db
       .select()
@@ -72,8 +72,9 @@ export function questsRoutes(db: Db): IRouter {
       const [done] = await tx
         .update(quests)
         .set({ status: "complete", resolvedAt: now, resolvedLocalDate: today })
-        .where(eq(quests.id, quest.id))
+        .where(and(eq(quests.id, quest.id), eq(quests.status, "active")))
         .returning();
+      if (!done) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
 
       const applied = await applyChanges(
         tx,
@@ -112,16 +113,9 @@ export function questsRoutes(db: Db): IRouter {
               .update(questChains)
               .set({ currentStep: chain.totalSteps, status: "complete", completedAt: now })
               .where(eq(questChains.id, chain.id));
-            const [n] = await tx
-              .insert(notices)
-              .values({
-                userId,
-                kind: "chain_complete",
-                payload: { name: chain.name, templateKey: chain.templateKey },
-                createdAt: now,
-              })
-              .returning();
-            outNotices.push({ id: n!.id, kind: n!.kind, payload: n!.payload, createdAt: n!.createdAt.toISOString() });
+            outNotices.push(
+              await insertNotice(tx, userId, "chain_complete", { name: chain.name, templateKey: chain.templateKey }, now),
+            );
           }
         }
       }
@@ -166,8 +160,10 @@ export function questsRoutes(db: Db): IRouter {
       const [refused] = await tx
         .update(quests)
         .set({ status: "refused", resolvedAt: now, resolvedLocalDate: today, refusalReason: body.reason ?? null })
-        .where(eq(quests.id, quest.id))
+        .where(and(eq(quests.id, quest.id), eq(quests.status, "active")))
         .returning();
+      if (!refused) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+      if (quest.chainId) await abandonChain(tx, quest.chainId);
       const applied =
         outcome.penalty > 0
           ? await applyChanges(

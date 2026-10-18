@@ -2,7 +2,8 @@ import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import { Router, type IRouter, type Request, type RequestHandler } from "express";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { users, type Db, type User } from "@workspace/db";
+import { userDayState, users, type Db, type User } from "@workspace/db";
+import { endOfLocalDay, localDate } from "@workspace/engine";
 import { hashPassword, verifyPassword } from "../lib/auth/passwords";
 import { signAccessToken } from "../lib/auth/tokens";
 import {
@@ -14,6 +15,7 @@ import {
 import { consumeEmailCode, createEmailCode, type CodePurpose } from "../lib/auth/codes";
 import { toPublicUser, type PublicUser } from "../lib/auth/public-user";
 import type { Mailer } from "../lib/mailer";
+import { withUserLock } from "../services/user-lock";
 
 const MIN_AGE = 16;
 
@@ -224,13 +226,25 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
     if (body.timezone) changes.timezone = body.timezone;
     if (body.username) changes.username = body.username;
     try {
+      const userId = req.user!.id;
       const [row] = Object.keys(changes).length
-        ? await database()
-            .update(users)
-            .set({ ...changes, updatedAt: new Date() })
-            .where(eq(users.id, req.user!.id))
-            .returning()
-        : [await loadUser(req.user!.id)];
+        ? await withUserLock(database(), userId, async (tx) => {
+            const now = new Date();
+            const rows = await tx
+              .update(users)
+              .set({ ...changes, updatedAt: now })
+              .where(eq(users.id, userId))
+              .returning();
+            if (rows[0] && changes.timezone) {
+              // The local day boundary moved: schedule the next rollover at the end of today in the new zone.
+              await tx
+                .update(userDayState)
+                .set({ nextRolloverAt: endOfLocalDay(localDate(now, changes.timezone), changes.timezone) })
+                .where(eq(userDayState.userId, userId));
+            }
+            return rows;
+          })
+        : [await loadUser(userId)];
       if (!row) {
         res.status(401).json({ error: "Unauthorized" });
         return;

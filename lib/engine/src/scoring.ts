@@ -37,14 +37,9 @@ export function applyDelta(
   const actualDelta = round1(score - s.score);
 
   let { streak, lastLogDate } = s;
-  if (o.activity) {
-    if (lastLogDate === o.date) {
-      // same local day: unchanged
-    } else if (lastLogDate !== null && lastLogDate === addDays(o.date, -1)) {
-      streak += 1;
-    } else {
-      streak = 1;
-    }
+  // Same local day, or an earlier date than the last activity (e.g. after a timezone change): unchanged.
+  if (o.activity && (lastLogDate === null || lastLogDate < o.date)) {
+    streak = lastLogDate !== null && lastLogDate === addDays(o.date, -1) ? streak + 1 : 1;
     lastLogDate = o.date;
   }
   return { next: { domain: s.domain, score, streak, lastLogDate }, actualDelta };

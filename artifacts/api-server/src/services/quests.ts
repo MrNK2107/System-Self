@@ -1,4 +1,5 @@
-import { quests } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
+import { questChains, quests } from "@workspace/db";
 import type { Tx } from "./user-lock";
 
 export interface NewQuest {
@@ -51,4 +52,12 @@ export function toQuestDto(q: typeof quests.$inferSelect) {
     refusalReason: q.refusalReason,
     createdAt: q.createdAt.toISOString(),
   };
+}
+
+/** Marks an active chain abandoned (its quest was refused or failed), freeing the template to start again. */
+export async function abandonChain(tx: Pick<Tx, "update">, chainId: string): Promise<void> {
+  await tx
+    .update(questChains)
+    .set({ status: "abandoned" })
+    .where(and(eq(questChains.id, chainId), eq(questChains.status, "active")));
 }

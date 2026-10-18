@@ -23,7 +23,7 @@ import {
   type RankedDomain,
   type ShadowState,
 } from "@workspace/engine";
-import type { Notice } from "@workspace/contracts";
+import type { Notice, NoticeKind } from "@workspace/contracts";
 import type { Tx } from "./user-lock";
 
 export type ScoreReason =
@@ -31,7 +31,7 @@ export type ScoreReason =
   | "log"
   | "forbidden"
   | "quest_complete"
-  | "quest_fail"
+  | "quest_failed"
   | "quest_refusal"
   | "gym"
   | "streak_break"
@@ -56,8 +56,20 @@ export function toShadowState(row: typeof shadowSelves.$inferSelect | undefined)
   };
 }
 
-function toNotice(row: typeof noticesTable.$inferSelect): Notice {
-  return { id: row.id, kind: row.kind, payload: row.payload, createdAt: row.createdAt.toISOString() };
+export function toNotice(row: typeof noticesTable.$inferSelect): Notice {
+  return { id: row.id, kind: row.kind as NoticeKind, payload: row.payload, createdAt: row.createdAt.toISOString() };
+}
+
+/** Inserts one notice row and returns it as a client notice. */
+export async function insertNotice(
+  tx: Pick<Tx, "insert">,
+  userId: string,
+  kind: NoticeKind,
+  payload: unknown,
+  now: Date,
+): Promise<Notice> {
+  const [n] = await tx.insert(noticesTable).values({ userId, kind, payload, createdAt: now }).returning();
+  return toNotice(n!);
 }
 
 /**
@@ -125,7 +137,7 @@ export async function applyChanges(
   }
 
   const created: (typeof noticesTable.$inferSelect)[] = [];
-  const addNotice = async (kind: string, payload: unknown) => {
+  const addNotice = async (kind: NoticeKind, payload: unknown) => {
     const [n] = await tx.insert(noticesTable).values({ userId, kind, payload, createdAt: ctx.now }).returning();
     created.push(n!);
   };
