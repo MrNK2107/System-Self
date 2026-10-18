@@ -14,6 +14,9 @@
     },
     {
       "path": "./lib/engine"
+    },
+    {
+      "path": "./lib/contracts"
     }
   ]
 }

@@ -12,6 +12,12 @@
     },
     {
       "path": "../../lib/api-zod"
+    },
+    {
+      "path": "../../lib/engine"
+    },
+    {
+      "path": "../../lib/contracts"
     }
   ]
 }

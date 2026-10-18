@@ -39,9 +39,9 @@ export const ACHIEVEMENT_DEFS: Record<AchievementId, { title: string; descriptio
   challenge_5: { title: "SERIAL CHALLENGER", description: "Win 5 challenges total", icon: "users" },
   domain_80: { title: "MASTERY INITIATED", description: "Push any domain to 80+", icon: "bar-chart-2" },
   domain_100: { title: "DOMAIN SOVEREIGN", description: "Max out any domain at 100", icon: "maximize" },
-  all_domains_60: { title: "BALANCED ENTITY", description: "All 4 domains above 60 simultaneously", icon: "grid" },
+  all_domains_60: { title: "BALANCED ENTITY", description: "All 5 domains above 60 simultaneously", icon: "grid" },
   discipline_master: { title: "IRON PROTOCOL", description: "Reach 90+ in DISCIPLINE", icon: "shield" },
-  seven_days_straight: { title: "NO GAPS", description: "Log all 4 domains for 7 consecutive days", icon: "lock" },
+  seven_days_straight: { title: "NO GAPS", description: "Log all 5 domains for 7 consecutive days", icon: "lock" },
 };
 
 export interface AchievementContext {

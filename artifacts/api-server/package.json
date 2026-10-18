@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm run build && pnpm run start",
+    "dev": "tsx src/dev.ts",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -15,7 +15,9 @@
     "@google/genai": "^2.30.0",
     "@node-rs/argon2": "^2.2.2",
     "@workspace/api-zod": "workspace:*",
+    "@workspace/contracts": "workspace:*",
     "@workspace/db": "workspace:*",
+    "@workspace/engine": "workspace:*",
     "cors": "^2",
     "drizzle-orm": "catalog:",
     "express": "^5",
