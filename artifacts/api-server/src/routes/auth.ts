@@ -2,8 +2,7 @@ import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import { Router, type IRouter, type Request, type RequestHandler } from "express";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { userDayState, users, type Db, type User } from "@workspace/db";
-import { localDate } from "@workspace/engine";
+import { users, type Db, type User } from "@workspace/db";
 import { hashPassword, verifyPassword } from "../lib/auth/passwords";
 import { signAccessToken } from "../lib/auth/tokens";
 import {
@@ -15,7 +14,7 @@ import {
 import { consumeEmailCode, createEmailCode, type CodePurpose } from "../lib/auth/codes";
 import { toPublicUser, type PublicUser } from "../lib/auth/public-user";
 import type { Mailer } from "../lib/mailer";
-import { rolloverDueAt } from "../services/rollover";
+import { rollOverDue } from "../services/rollover";
 import { withUserLock } from "../services/user-lock";
 
 const MIN_AGE = 16;
@@ -231,18 +230,15 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
       const [row] = Object.keys(changes).length
         ? await withUserLock(database(), userId, async (tx) => {
             const now = new Date();
+            // Dates already due in the old zone roll under it before the day boundary moves.
+            if (changes.timezone) await rollOverDue(tx, userId, now);
             const rows = await tx
               .update(users)
               .set({ ...changes, updatedAt: now })
               .where(eq(users.id, userId))
               .returning();
-            if (rows[0] && changes.timezone) {
-              // The local day boundary moved: schedule the next rollover for today in the new zone.
-              await tx
-                .update(userDayState)
-                .set({ nextRolloverAt: rolloverDueAt(localDate(now, changes.timezone), changes.timezone) })
-                .where(eq(userDayState.userId, userId));
-            }
+            // Reschedule (and roll anything already due) in the new zone.
+            if (rows[0] && changes.timezone) await rollOverDue(tx, userId, now);
             return rows;
           })
         : [await loadUser(userId)];

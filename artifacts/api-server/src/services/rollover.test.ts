@@ -478,10 +478,10 @@ test("runWorkerTick prunes idempotency keys older than 7 days", { skip }, async 
 
 test("PATCH /auth/me timezone recomputes nextRolloverAt", { skip }, async (t) => {
   const a = app();
-  const { id } = await setup(a);
   // Fixed instant: 2026-10-20 15:00Z = 20:30 Kolkata / 11:00 New York (same local date, far from midnight).
+  // Onboarded at that instant too, so the result does not depend on the real clock.
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-20T15:00:00Z") });
-  const { token } = await signAccessToken({ id, role: "user", tokenVersion: 0 }); // valid at the mocked time
+  const { id, token } = await setup(a);
   const res = await request(a).patch("/api/auth/me").set(auth(token)).send({ timezone: "America/New_York" });
   t.mock.timers.reset();
   assert.equal(res.status, 200);
@@ -591,4 +591,21 @@ test("POST /logs rolls dates before the log's date, applies it, then rolls the r
     .from(dailySnapshots)
     .where(and(eq(dailySnapshots.userId, id), eq(dailySnapshots.localDate, d1)));
   assert.equal((snap!.scores as Record<string, number>).BODY, (await score(id, "BODY")).score); // includes the log
+});
+
+test("PATCH /auth/me timezone first rolls the dates already due in the old zone", { skip }, async (t) => {
+  const { id } = await onboardAtD0();
+  const q = await dailyQuest(id, at(D0, "20:00"));
+  // 12:00 Kolkata on D0+1 is 01:30 in New York, where D0 would not be rollable until 02:00.
+  t.mock.timers.enable({ apis: ["Date"], now: at(addDays(D0, 1)) });
+  const { token } = await signAccessToken({ id, role: "user", tokenVersion: 0 });
+  const res = await request(app()).patch("/api/auth/me").set(auth(token)).send({ timezone: "America/New_York" });
+  t.mock.timers.reset();
+  assert.equal(res.status, 200);
+  const uds = await dayStateOf(id);
+  assert.equal(uds.lastRolledDate, D0);
+  const [failed] = await db!.select().from(quests).where(eq(quests.id, q.id));
+  assert.equal(failed!.status, "failed");
+  assert.equal(failed!.resolvedLocalDate, D0);
+  assert.equal(uds.nextRolloverAt.getTime(), endOfLocalDay(addDays(D0, 1), "America/New_York").getTime() + GRACE_MS);
 });
