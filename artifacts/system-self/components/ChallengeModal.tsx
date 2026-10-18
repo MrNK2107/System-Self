@@ -11,7 +11,8 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
-import { useApp, type Domain, type Rank, type Rival } from "@/context/AppContext";
+// Challenges cover the four domains rivals are rated on (device-simulated until P5).
+import { useApp, type RivalDomain as Domain, type Rank, type Rival } from "@/context/AppContext";
 
 const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
 const DOMAIN_COLORS: Record<Domain, string> = {

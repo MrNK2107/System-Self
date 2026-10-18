@@ -15,6 +15,8 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, getStreakMultiplier, getStreakTier, type Domain } from "@/context/AppContext";
+import { DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
+import { BASE_LOG_DELTAS, FORBIDDEN_DOMAIN_DELTA } from "@workspace/engine";
 
 interface LogModalProps {
   visible: boolean;
@@ -30,44 +32,43 @@ interface LogConfig {
   types: { key: string; label: string }[];
 }
 
-const LOG_CONFIGS: LogConfig[] = [
-  {
-    domain: "BODY", icon: "activity", color: "#E05555",
-    types: [
-      { key: "workout", label: "Workout" },
-      { key: "sleep", label: "Sleep" },
-      { key: "meal", label: "Meal" },
-    ],
-  },
-  {
-    domain: "MIND", icon: "book", color: "#3A7BD5",
-    types: [
-      { key: "deep_work", label: "Deep Work" },
-      { key: "reading", label: "Reading" },
-      { key: "journal", label: "Journal" },
-    ],
-  },
-  {
-    domain: "WEALTH", icon: "trending-up", color: "#4B8B6F",
-    types: [
-      { key: "income", label: "Income" },
-      { key: "expense", label: "Expense" },
-      { key: "savings", label: "Savings" },
-    ],
-  },
-  {
-    domain: "DISCIPLINE", icon: "zap", color: "#C4873A",
-    types: [
-      { key: "quest_complete", label: "Quest Done" },
-      { key: "routine", label: "Routine" },
-      { key: "habit", label: "Habit" },
-    ],
-  },
-];
-
-const BASE_DELTAS: Record<Domain, number> = {
-  BODY: 2.5, MIND: 2.5, WEALTH: 2.0, DISCIPLINE: 3.0,
+const LOG_TYPES: Record<Domain, { key: string; label: string }[]> = {
+  BODY: [
+    { key: "workout", label: "Workout" },
+    { key: "sleep", label: "Sleep" },
+    { key: "meal", label: "Meal" },
+  ],
+  MIND: [
+    { key: "deep_work", label: "Deep Work" },
+    { key: "reading", label: "Reading" },
+    { key: "journal", label: "Journal" },
+  ],
+  WEALTH: [
+    { key: "income", label: "Income" },
+    { key: "expense", label: "Expense" },
+    { key: "savings", label: "Savings" },
+  ],
+  SOCIAL: [
+    { key: "conversation", label: "Conversation" },
+    { key: "outreach", label: "Outreach" },
+    { key: "gathering", label: "Gathering" },
+  ],
+  DISCIPLINE: [
+    { key: "quest_complete", label: "Quest Done" },
+    { key: "routine", label: "Routine" },
+    { key: "habit", label: "Habit" },
+  ],
 };
+
+const LOG_CONFIGS: LogConfig[] = (Object.keys(LOG_TYPES) as Domain[]).map((domain) => ({
+  domain,
+  icon: DOMAIN_ICONS[domain],
+  color: DOMAIN_COLORS[domain],
+  types: LOG_TYPES[domain],
+}));
+
+// Preview only: the server applies the real delta.
+const BASE_DELTAS = BASE_LOG_DELTAS;
 
 const TIER_LABELS: Record<string, string> = {
   none: "NO STREAK", low: "BUILDING", mid: "ON STREAK",
@@ -91,6 +92,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [isForbidden, setIsForbidden] = useState(false);
   const [showForbiddenWarning, setShowForbiddenWarning] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const config = LOG_CONFIGS.find(c => c.domain === selectedDomain)!;
 
@@ -98,8 +100,8 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const streak = domainScore?.streak ?? 0;
   const tier = getStreakTier(streak);
   const multiplier = getStreakMultiplier(streak);
-  const baseDelta = isForbidden ? 5.0 : BASE_DELTAS[selectedDomain];
-  const bonusDelta = isForbidden ? 5.0 : Math.round(baseDelta * multiplier * 10) / 10;
+  const baseDelta = isForbidden ? FORBIDDEN_DOMAIN_DELTA : BASE_DELTAS[selectedDomain];
+  const bonusDelta = isForbidden ? FORBIDDEN_DOMAIN_DELTA : Math.round(baseDelta * multiplier * 10) / 10;
   const bonusGain = Math.round((bonusDelta - BASE_DELTAS[selectedDomain]) * 10) / 10;
   const tierColor = TIER_COLORS[tier] ?? config.color;
 
@@ -157,14 +159,17 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const handleSubmit = async () => {
     if (submitting) return;
     setSubmitting(true);
+    setSubmitError(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    await addLog({
-      domain: selectedDomain,
-      type: selectedType,
-      forbidden: isForbidden,
-      data: { note, intensity, forbidden: isForbidden },
-    });
+    try {
+      // Queued in the outbox: it is kept on the device and sent when there is a connection.
+      await addLog({ domain: selectedDomain, type: selectedType, forbidden: isForbidden, note, intensity });
+    } catch {
+      setSubmitError("The entry could not be recorded on this device. Sign in again, then retry.");
+      setSubmitting(false);
+      return;
+    }
 
     setNote("");
     setIntensity(3);
@@ -449,6 +454,10 @@ export function LogModal({ visible, onClose }: LogModalProps) {
           </View>
         </ScrollView>
 
+        {submitError && (
+          <Text style={[styles.submitError, { color: "#E05555" }]}>{submitError}</Text>
+        )}
+
         {/* Submit */}
         <TouchableOpacity
           style={[styles.submitBtn, {
@@ -477,6 +486,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
 }
 
 const styles = StyleSheet.create({
+  submitError: { fontSize: 11, lineHeight: 16, marginBottom: 8, textAlign: "center" },
   container: { flex: 1, padding: 20 },
   header: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",

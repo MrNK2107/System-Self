@@ -16,8 +16,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import {
   useApp,
+  scoreRecord,
   type Challenge,
-  type Domain,
+  // Rivals rate the four original domains; they stay device-simulated until P5.
+  type RivalDomain as Domain,
   type Rank,
   type Rival,
   type Trajectory,
@@ -670,7 +672,7 @@ export default function RivalsScreen() {
   const insets = useSafeAreaInsets();
   const {
     rivals, domainScores, shadowSelf, user,
-    getShadowScores, getShadowRank, getHiddenScore, computeRank,
+    getShadowScores, getShadowRank,
     updateRivals, challenges, challengeRecord,
     declareChallenge, acknowledgeChallenge,
     rivalTaunts, addRivalTaunt, markRivalTauntsRead,
@@ -725,17 +727,17 @@ export default function RivalsScreen() {
     setRefreshing(false);
   };
 
+  // Server scores; rivals compare on the four domains they have.
   const userScores: Record<Domain, number> = {
-    BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-    MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-    WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-    DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
+    BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 0,
+    MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 0,
+    WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 0,
+    DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 0,
   };
 
   const shadowScores = getShadowScores();
   const shadowRank = getShadowRank();
-  const hiddenScore = getHiddenScore();
-  const userRank = user?.rank ?? computeRank(hiddenScore);
+  const userRank = user?.rank ?? "E";
   const userComposite = computeUserComposite(userScores);
 
   const shadowComposite = shadowSelf.active
@@ -920,7 +922,7 @@ export default function RivalsScreen() {
             shadow={shadowSelf}
             shadowScores={shadowScores}
             shadowRank={shadowRank}
-            userScores={userScores}
+            userScores={scoreRecord(domainScores)}
           />
         )}
 
@@ -931,7 +933,7 @@ export default function RivalsScreen() {
             <RivalDetailCard
               key={rival.codename}
               rival={rival}
-              userScores={userScores}
+              userScores={scoreRecord(domainScores)}
               userComposite={userComposite}
               activeChallenge={getActiveChallenge(rival.codename)}
               onChallenge={setChallengeTarget}

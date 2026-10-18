@@ -11,24 +11,11 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
-import { useApp, type Domain } from "@/context/AppContext";
+import { scoreRecord, useApp, type Domain } from "@/context/AppContext";
 import { useSystemAI } from "@/hooks/useSystemAI";
+import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
 
 const { width: SW } = Dimensions.get("window");
-
-const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
-const DOMAIN_ICONS: Record<Domain, string> = {
-  BODY: "◈",
-  MIND: "◉",
-  WEALTH: "◆",
-  DISCIPLINE: "▲",
-};
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555",
-  MIND: "#3A7BD5",
-  WEALTH: "#4B8B6F",
-  DISCIPLINE: "#C4873A",
-};
 
 interface Props {
   visible: boolean;
@@ -141,12 +128,7 @@ export function ShadowConfrontationModal({ visible, onClose }: Props) {
   const shadowScores = getShadowScores();
   const shadowRank = getShadowRank();
 
-  const userScoreMap: Record<Domain, number> = {
-    BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-    MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-    WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-    DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
-  };
+  const userScoreMap: Record<Domain, number> = scoreRecord(domainScores);
 
   const domainDeltas = DOMAINS.map(d => ({
     domain: d,

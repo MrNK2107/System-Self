@@ -12,17 +12,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
+// P3-T6: weekly recap moves to GET /api/recap/weekly (+ /debrief); getWeeklyRecapData is a placeholder.
 import { useApp, ACHIEVEMENT_DEFS, type Domain, type WeeklyRecapData } from "@/context/AppContext";
 import { useSystemAI } from "@/hooks/useSystemAI";
 import { SystemMessage } from "@/components/SystemMessage";
-
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555", MIND: "#3A7BD5", WEALTH: "#4B8B6F", DISCIPLINE: "#C4873A",
-};
-const DOMAIN_ICONS: Record<Domain, string> = {
-  BODY: "◈", MIND: "◉", WEALTH: "◆", DISCIPLINE: "▲",
-};
-const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
+import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
 
 function DeltaBar({ domain, delta, max }: { domain: Domain; delta: number; max: number }) {
   const colors = useColors();

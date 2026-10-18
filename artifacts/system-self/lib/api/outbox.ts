@@ -41,6 +41,8 @@ export interface Outbox {
   clearFailed(): Promise<void>;
   /** Forget everything for every user (sign-out / account switch). */
   reset(): Promise<void>;
+  /** Called after every change to the queued or failed items. Returns an unsubscribe function. */
+  subscribe(listener: () => void): () => void;
 }
 
 export const OUTBOX_KEY = "system_self.outbox.v1";
@@ -67,6 +69,7 @@ export function createOutbox(deps: {
   let flushing: Promise<{ sent: number; remaining: number; processed: number }> | null = null;
   // Serialises storage writes so persisted state always matches the latest in-memory state.
   let writeChain: Promise<void> = Promise.resolve();
+  const listeners = new Set<() => void>();
 
   const hydrated = (async () => {
     try {
@@ -81,9 +84,20 @@ export function createOutbox(deps: {
     }
   })();
 
+  function notify() {
+    for (const l of [...listeners]) {
+      try {
+        l();
+      } catch {
+        // A listener's failure never breaks the queue.
+      }
+    }
+  }
+
   function persist(): Promise<void> {
     const snapshot = JSON.stringify({ items, failed } satisfies Persisted);
     writeChain = writeChain.then(() => deps.storage.setItem(OUTBOX_KEY, snapshot));
+    notify();
     return writeChain;
   }
 
@@ -198,6 +212,10 @@ export function createOutbox(deps: {
       failed = [];
       attempts.clear();
       await persist();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
     },
   };
   return outbox;

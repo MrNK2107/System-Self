@@ -10,14 +10,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { type Domain, type ShadowSelf } from "@/context/AppContext";
-
-const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555",
-  MIND: "#3A7BD5",
-  WEALTH: "#4B8B6F",
-  DISCIPLINE: "#C4873A",
-};
+import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
 
 const { width: SW } = Dimensions.get("window");
 

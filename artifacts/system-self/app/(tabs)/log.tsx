@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Platform,
   StyleSheet,
@@ -10,22 +11,43 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp, type Domain, type LogEntry } from "@/context/AppContext";
+import { useApp, type LogEntry } from "@/context/AppContext";
 import { LogModal } from "@/components/LogModal";
+import { DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
+import { useLogsQuery } from "@/hooks/useGameState";
 
-const DOMAIN_ICONS: Record<Domain, "activity" | "book" | "trending-up" | "zap"> = {
-  BODY: "activity",
-  MIND: "book",
-  WEALTH: "trending-up",
-  DISCIPLINE: "zap",
-};
+/** Outbox items the server rejected (or that kept failing): retry them or drop them. */
+function UnsavedBanner() {
+  const colors = useColors();
+  const { failedCount, retryFailed, discardFailed } = useApp();
+  const [busy, setBusy] = useState(false);
+  if (failedCount === 0) return null;
 
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555",
-  MIND: "#3A7BD5",
-  WEALTH: "#4B8B6F",
-  DISCIPLINE: "#C4873A",
-};
+  const run = async (fn: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View style={[styles.unsaved, { borderColor: colors.destructive + "80", backgroundColor: colors.destructive + "14" }]}>
+      <Feather name="alert-triangle" size={12} color="#E05555" />
+      <Text style={[styles.unsavedText, { color: colors.foreground }]}>
+        {failedCount === 1 ? "1 entry was not saved." : `${failedCount} entries were not saved.`}
+      </Text>
+      <TouchableOpacity onPress={() => void run(retryFailed)} disabled={busy} accessibilityRole="button" style={styles.unsavedBtn}>
+        <Text style={[styles.unsavedAction, { color: colors.primary }]}>RETRY</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => void run(discardFailed)} disabled={busy} accessibilityRole="button" style={styles.unsavedBtn}>
+        <Text style={[styles.unsavedAction, { color: colors.mutedForeground }]}>DISCARD</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 function LogItem({ entry }: { entry: LogEntry }) {
   const colors = useColors();
@@ -47,6 +69,9 @@ function LogItem({ entry }: { entry: LogEntry }) {
           <Text style={[styles.logType, { color: colors.mutedForeground }]}>
             {entry.type.replace(/_/g, " ").toUpperCase()}
           </Text>
+          {entry.pending && (
+            <Text style={[styles.logPending, { color: colors.mutedForeground }]}>QUEUED</Text>
+          )}
         </View>
         {(entry.data.note as string) ? (
           <Text style={[styles.logNote, { color: colors.foreground }]} numberOfLines={2}>
@@ -54,7 +79,8 @@ function LogItem({ entry }: { entry: LogEntry }) {
           </Text>
         ) : null}
         <Text style={[styles.logTime, { color: colors.mutedForeground }]}>
-          {dateStr} · {timeStr} · intensity {(entry.data.intensity as number) ?? 3}/5
+          {dateStr} · {timeStr}
+          {typeof entry.data.intensity === "number" ? ` · intensity ${entry.data.intensity}/5` : ""}
         </Text>
       </View>
     </View>
@@ -65,6 +91,7 @@ export default function LogScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { logs } = useApp();
+  const logsQuery = useLogsQuery();
   const [logVisible, setLogVisible] = useState(false);
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
@@ -83,27 +110,44 @@ export default function LogScreen() {
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={sortedLogs}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => <LogItem entry={item} />}
-        contentContainerStyle={[
-          styles.list,
-          { paddingBottom: insets.bottom + 80 },
-          sortedLogs.length === 0 && styles.emptyContainer,
-        ]}
-        showsVerticalScrollIndicator={false}
-        scrollEnabled={sortedLogs.length > 0}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Feather name="inbox" size={32} color={colors.mutedForeground} />
-            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No logs yet.</Text>
-            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-              Every entry is permanent. Start logging.
-            </Text>
-          </View>
-        }
-      />
+      <UnsavedBanner />
+
+      {logsQuery.isPending && sortedLogs.length === 0 ? (
+        <View style={styles.empty}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : logsQuery.isError && !logsQuery.data && sortedLogs.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+            The log archive is out of reach. Check your connection.
+          </Text>
+          <TouchableOpacity onPress={() => void logsQuery.refetch()} accessibilityRole="button" style={styles.unsavedBtn}>
+            <Text style={[styles.unsavedAction, { color: colors.primary }]}>RETRY</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={sortedLogs}
+          keyExtractor={item => item.id}
+          renderItem={({ item }) => <LogItem entry={item} />}
+          contentContainerStyle={[
+            styles.list,
+            { paddingBottom: insets.bottom + 80 },
+            sortedLogs.length === 0 && styles.emptyContainer,
+          ]}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={sortedLogs.length > 0}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Feather name="inbox" size={32} color={colors.mutedForeground} />
+              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No logs yet.</Text>
+              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+                Every entry is permanent. Start logging.
+              </Text>
+            </View>
+          }
+        />
+      )}
 
       <LogModal visible={logVisible} onClose={() => setLogVisible(false)} />
     </View>
@@ -175,6 +219,37 @@ const styles = StyleSheet.create({
   logNote: {
     fontSize: 12,
     lineHeight: 18,
+  },
+  logPending: {
+    fontSize: 8,
+    fontWeight: "700" as const,
+    letterSpacing: 2,
+    marginLeft: "auto",
+  },
+  unsaved: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 4,
+  },
+  unsavedText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  unsavedBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+  },
+  unsavedAction: {
+    fontSize: 10,
+    fontWeight: "700" as const,
+    letterSpacing: 2,
   },
   logTime: {
     fontSize: 10,

@@ -4,23 +4,23 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
-import type { Domain, Quest } from "@/context/AppContext";
 import { useSystemAI } from "@/hooks/useSystemAI";
 import { useApp } from "@/context/AppContext";
+import type { FailureItem } from "@/lib/game/notices";
 
 const { width: SW } = Dimensions.get("window");
 
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555", MIND: "#3A7BD5", WEALTH: "#4B8B6F", DISCIPLINE: "#C4873A",
-};
-
 interface Props {
   visible: boolean;
-  quest: Quest | null;
+  /** Quests the server failed (expired) since the last visit; shown together in one modal. */
+  failures: FailureItem[];
   onAcknowledge: () => void;
 }
 
-export function FailureModal({ visible, quest, onAcknowledge }: Props) {
+const MAX_TITLES = 4;
+
+export function FailureModal({ visible, failures, onAcknowledge }: Props) {
+  const quest = failures[0] ?? null;
   const { user, domainScores, shadowSelf, trajectory, quests } = useApp();
   const { generateMessage } = useSystemAI();
 
@@ -90,13 +90,13 @@ export function FailureModal({ visible, quest, onAcknowledge }: Props) {
       Animated.timing(btnOpacity, { toValue: 1, duration: 400, useNativeDriver: false }).start();
     }, 3200));
 
-    // Fetch AI failure message
+    // Fetch AI failure message. P3-T6: POST /api/messages.
     if (user) {
       const scores = {
-        BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-        MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-        WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-        DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
+        BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 0,
+        MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 0,
+        WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 0,
+        DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 0,
       };
       generateMessage({
         messageType: "failure_response",
@@ -117,7 +117,7 @@ export function FailureModal({ visible, quest, onAcknowledge }: Props) {
     }
 
     return () => timers.forEach(clearTimeout);
-  }, [visible, quest]);
+  }, [visible, failures]);
 
   // Typewriter
   useEffect(() => {
@@ -134,7 +134,10 @@ export function FailureModal({ visible, quest, onAcknowledge }: Props) {
 
   if (!visible || !quest) return null;
 
-  const domColor = DOMAIN_COLORS[quest.domain];
+  const totalPenalty = failures.reduce((sum, f) => sum + f.penalty, 0);
+  const types = [...new Set(failures.map(f => f.type))];
+  const shown = failures.slice(0, MAX_TITLES);
+  const hidden = failures.length - shown.length;
 
   return (
     <Modal transparent animationType="none" visible={visible} statusBarTranslucent>
@@ -153,22 +156,28 @@ export function FailureModal({ visible, quest, onAcknowledge }: Props) {
           {/* Label */}
           <Animated.View style={[styles.labelWrap, { opacity: labelOpacity }]}>
             <View style={styles.labelDot} />
-            <Text style={styles.labelText}>OPERATION FAILED</Text>
+            <Text style={styles.labelText}>
+              {failures.length === 1 ? "OPERATION FAILED" : `${failures.length} OPERATIONS FAILED`}
+            </Text>
           </Animated.View>
 
-          {/* Quest title */}
-          <Animated.View style={{ opacity: titleOpacity, transform: [{ translateX: titleX }] }}>
-            <Text style={styles.questTitle} numberOfLines={2}>{quest.title}</Text>
+          {/* Quest titles */}
+          <Animated.View style={{ opacity: titleOpacity, transform: [{ translateX: titleX }], gap: 6 }}>
+            {shown.map((f, i) => (
+              <Text key={i} style={failures.length === 1 ? styles.questTitle : styles.questTitleSmall} numberOfLines={failures.length === 1 ? 2 : 1}>
+                {f.title}
+              </Text>
+            ))}
+            {hidden > 0 && <Text style={styles.moreText}>+{hidden} MORE</Text>}
           </Animated.View>
 
-          {/* Domain + type */}
+          {/* Types */}
           <Animated.View style={[styles.metaRow, { opacity: titleOpacity }]}>
-            <View style={[styles.domainBadge, { borderColor: domColor + "50" }]}>
-              <Text style={[styles.domainText, { color: domColor }]}>{quest.domain}</Text>
-            </View>
-            <View style={[styles.typeBadge, { borderColor: "#E0555540" }]}>
-              <Text style={styles.typeText}>{quest.type.toUpperCase()}</Text>
-            </View>
+            {types.map(t => (
+              <View key={t} style={[styles.typeBadge, { borderColor: "#E0555540" }]}>
+                <Text style={styles.typeText}>{t.toUpperCase()}</Text>
+              </View>
+            ))}
           </Animated.View>
 
           {/* Penalty */}
@@ -177,7 +186,7 @@ export function FailureModal({ visible, quest, onAcknowledge }: Props) {
             { opacity: penaltyOpacity, transform: [{ scale: penaltyScale }] },
           ]}>
             <Text style={styles.penaltyLabel}>DISCIPLINE PENALTY</Text>
-            <Text style={styles.penaltyVal}>−1.5</Text>
+            <Text style={styles.penaltyVal}>−{totalPenalty.toFixed(1)}</Text>
             <Text style={styles.penaltyNote}>Timestamp is permanent.</Text>
           </Animated.View>
 
@@ -227,8 +236,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5, textAlign: "center", lineHeight: 26,
   },
   metaRow: { flexDirection: "row", gap: 8 },
-  domainBadge: { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 2 },
-  domainText: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 2 },
+  questTitleSmall: { fontSize: 14, fontWeight: "700" as const, color: "#E8E8EC", textAlign: "center", letterSpacing: 0.5 },
+  moreText: { fontSize: 9, fontWeight: "700" as const, letterSpacing: 2, color: "#E05555", textAlign: "center" },
   typeBadge: { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 2, borderColor: "#E0555440" },
   typeText: { fontSize: 9, fontWeight: "700" as const, letterSpacing: 2, color: "#E05555" },
   penaltyBlock: { alignItems: "center", gap: 6, paddingVertical: 16 },

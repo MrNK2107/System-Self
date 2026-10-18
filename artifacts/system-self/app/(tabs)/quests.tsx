@@ -13,14 +13,11 @@ import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp, PREDEFINED_CHAINS, type Quest, type QuestChain } from "@/context/AppContext";
+import { useApp, PREDEFINED_CHAINS, type Domain, type Quest, type QuestChain } from "@/context/AppContext";
 import { QuestCard } from "@/components/QuestCard";
 import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
 import { useQuestScheduler } from "@/hooks/useQuestScheduler";
-
-const DOMAIN_COLORS = {
-  BODY: "#E05555", MIND: "#3A7BD5", WEALTH: "#4B8B6F", DISCIPLINE: "#C4873A",
-};
+import { DOMAIN_COLORS } from "@/constants/domains";
 
 function GeneratingState() {
   const colors = useColors();
@@ -83,7 +80,7 @@ const genStyles = StyleSheet.create({
 
 // ---- Rank-up prep quests ---------------------------------------------------
 
-const RANK_UP_PREP_QUESTS: Record<string, { title: string; description: string; domain: "BODY" | "MIND" | "WEALTH" | "DISCIPLINE" }[]> = {
+const RANK_UP_PREP_QUESTS: Record<string, { title: string; description: string; domain: Domain }[]> = {
   D: [
     { title: "LOG 7 CONSECUTIVE DAYS", description: "Log at least one domain per day for 7 days without missing. This establishes the baseline for D-rank.", domain: "DISCIPLINE" },
     { title: "AWARENESS AUDIT", description: "Log one detailed entry across all 4 domains this week. The system requires a complete assessment.", domain: "MIND" },
@@ -113,7 +110,7 @@ export default function QuestsScreen() {
   const insets = useSafeAreaInsets();
   const {
     quests, completeQuest, refuseQuest, shadowSelf, domainScores, getWeakestDomain,
-    questChains, startQuestChain, user, getHiddenScore, computeRank,
+    questChains, startQuestChain, user, tierProgress,
   } = useApp();
   const { generating, lastGenRecord, triggerGeneration } = useQuestScheduler();
 
@@ -131,6 +128,7 @@ export default function QuestsScreen() {
     params.domain === "BODY" ||
     params.domain === "MIND" ||
     params.domain === "WEALTH" ||
+    params.domain === "SOCIAL" ||
     params.domain === "DISCIPLINE"
   ) ? params.domain : null;
 
@@ -156,19 +154,10 @@ export default function QuestsScreen() {
   const shadowPressure = shadowGap > 20 ? "critical" : shadowGap > 10 ? "elevated" : shadowGap > 0 ? "active" : "none";
   const weakest = getWeakestDomain();
 
-  // Rank-up prep
-  const hiddenScore = getHiddenScore();
-  const rank = user?.rank ?? computeRank(hiddenScore);
-  const rankThresholds: Record<string, { min: number; max: number }> = {
-    E: { min: 0, max: 25 }, D: { min: 26, max: 40 },
-    C: { min: 41, max: 55 }, B: { min: 56, max: 70 },
-    A: { min: 71, max: 85 }, S: { min: 86, max: 100 },
-  };
-  const threshold = rankThresholds[rank];
+  // Rank-up prep: progress through the current rank band comes from the server (tierProgress).
+  const rank = user?.rank ?? "E";
   const nextRank = ({ E: "D", D: "C", C: "B", B: "A", A: "S", S: null } as Record<string, string | null>)[rank];
-  const progressToNext = threshold
-    ? ((hiddenScore - threshold.min) / (threshold.max - threshold.min)) * 100
-    : 100;
+  const progressToNext = tierProgress;
   const showRankUpPrep = nextRank && progressToNext >= 75;
   const rankUpPrepItems = nextRank ? (RANK_UP_PREP_QUESTS[nextRank] ?? []) : [];
 
@@ -182,10 +171,11 @@ export default function QuestsScreen() {
   nextGen.setHours(4, 0, 0, 0);
   const nextGenStr = nextGen.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+  // P3-T5: surface sync_pending / chain_active results on this screen.
   const handleStartChain = async (template: typeof PREDEFINED_CHAINS[0]) => {
-    const alreadyActive = questChains.some(c => c.name === template.name && c.status === "active");
+    const alreadyActive = questChains.some(c => c.templateKey === template.templateKey && c.status === "active");
     if (!alreadyActive) {
-      await startQuestChain(template);
+      await startQuestChain(template.templateKey);
     }
   };
 
@@ -467,7 +457,7 @@ export default function QuestsScreen() {
             <View style={styles.catalogList}>
               {PREDEFINED_CHAINS.map(chain => {
                 const alreadyStarted = questChains.some(
-                  c => c.name === chain.name && c.status === "active"
+                  c => c.templateKey === chain.templateKey && c.status === "active"
                 );
                 return (
                   <QuestChainCatalogCard

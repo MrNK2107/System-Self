@@ -13,27 +13,16 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp, type Domain } from "@/context/AppContext";
+import { useApp } from "@/context/AppContext";
+import { ALL_DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
 import { DomainBar } from "@/components/DomainBar";
 import { RankBadge } from "@/components/RankBadge";
 import { SystemMessage } from "@/components/SystemMessage";
 import { LogModal } from "@/components/LogModal";
 import { useSystemAI } from "@/hooks/useSystemAI";
-import { RankUpModal } from "@/components/RankUpModal";
 import { NightlyDebriefModal } from "@/components/NightlyDebriefModal";
 import { useNightlyDebrief } from "@/hooks/useNightlyDebrief";
-import { StreakBrokenModal } from "@/components/StreakBrokenModal";
 import { ShadowConfrontationModal } from "@/components/ShadowConfrontationModal";
-import { AchievementModal } from "@/components/AchievementModal";
-import { MilestoneModal } from "@/components/MilestoneModal";
-
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555",
-  MIND: "#3A7BD5",
-  WEALTH: "#4B8B6F",
-  DISCIPLINE: "#C4873A",
-};
-const ALL_DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
 
 function ShadowAlertBanner({ onConfront }: { onConfront: () => void }) {
   const colors = useColors();
@@ -51,7 +40,7 @@ function ShadowAlertBanner({ onConfront }: { onConfront: () => void }) {
 
   const shadowScores = getShadowScores();
   const losingDomains = ALL_DOMAINS.filter(d => {
-    const user = domainScores.find(s => s.domain === d)?.score ?? 50;
+    const user = domainScores.find(s => s.domain === d)?.score ?? 0;
     return shadowScores[d] > user;
   });
   const isLosing = losingDomains.length > 0;
@@ -84,7 +73,7 @@ function ShadowAlertBanner({ onConfront }: { onConfront: () => void }) {
       {isLosing && (
         <View style={shadowStyles.domainRow}>
           {ALL_DOMAINS.map(d => {
-            const user = domainScores.find(s => s.domain === d)?.score ?? 50;
+            const user = domainScores.find(s => s.domain === d)?.score ?? 0;
             const shadow = shadowScores[d];
             const losing = shadow > user;
             const color = DOMAIN_COLORS[d];
@@ -155,7 +144,7 @@ const shadowStyles = StyleSheet.create({
 export default function Dashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, domainScores, quests, shadowSelf, trajectory, getHiddenScore, computeRank, getShadowScores, pendingRankUp, acknowledgeRankUp, pendingStreakBreak, acknowledgeStreakBreak, pendingAchievement, acknowledgePendingAchievement, pendingMilestone, acknowledgePendingMilestone } = useApp();
+  const { user, domainScores, quests, shadowSelf, trajectory, loading, loadError, refresh } = useApp();
   const { generateMessage, loading: aiLoading } = useSystemAI();
   const { checkAndTriggerDebrief, pendingDebrief, acknowledgeDebrief } = useNightlyDebrief();
 
@@ -167,8 +156,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [confrontVisible, setConfrontVisible] = useState(false);
 
-  const hiddenScore = getHiddenScore();
-  const rank = user?.rank ?? computeRank(hiddenScore);
+  const rank = user?.rank ?? "E";
   const activeQuests = quests.filter(q => q.status === "active");
   const completedToday = quests.filter(q => q.status === "complete").length;
 
@@ -182,13 +170,14 @@ export default function Dashboard() {
     return () => sub.remove();
   }, [user, checkAndTriggerDebrief]);
 
+  // P3-T6: messages move to POST /api/messages (the server builds the context itself).
   const loadBriefing = useCallback(async () => {
     if (!user || briefingLoaded) return;
     const scores: { BODY: number; MIND: number; WEALTH: number; DISCIPLINE: number } = {
-      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
+      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 0,
+      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 0,
+      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 0,
+      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 0,
     };
     const msg = await generateMessage({
       messageType: "morning_briefing",
@@ -210,10 +199,10 @@ export default function Dashboard() {
   const loadSystemIntel = useCallback(async () => {
     if (!user || systemIntelLoaded) return;
     const scores: { BODY: number; MIND: number; WEALTH: number; DISCIPLINE: number } = {
-      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
+      BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 0,
+      MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 0,
+      WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 0,
+      DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 0,
     };
     const msg = await generateMessage({
       messageType: "nightly_debrief",
@@ -242,28 +231,38 @@ export default function Dashboard() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setBriefingLoaded(false);
-    setSystemIntelLoaded(false);
-    await loadBriefing();
-    await loadSystemIntel();
-    setRefreshing(false);
-  }, [loadBriefing, loadSystemIntel]);
-
-  if (!user) return null;
+    try {
+      await refresh();
+      setBriefingLoaded(false);
+      setSystemIntelLoaded(false);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
+  if (!user) {
+    return (
+      <View style={[styles.container, styles.center, { backgroundColor: colors.background }]}>
+        {loading || !loadError ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : (
+          <>
+            <Text style={[styles.stateLine, { color: colors.mutedForeground }]}>
+              The System is out of reach. Check your connection.
+            </Text>
+            <TouchableOpacity onPress={() => void refresh()} accessibilityRole="button" style={styles.retryBtn}>
+              <Text style={[styles.retryText, { color: colors.primary }]}>RETRY</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {pendingRankUp && (
-        <RankUpModal
-          visible={!!pendingRankUp}
-          fromRank={pendingRankUp.fromRank}
-          toRank={pendingRankUp.toRank}
-          newCodename={pendingRankUp.newCodename}
-          onAcknowledge={acknowledgeRankUp}
-        />
-      )}
       {pendingDebrief && (
         <NightlyDebriefModal
           visible={!!pendingDebrief}
@@ -271,13 +270,6 @@ export default function Dashboard() {
           username={user.username}
           dayNumber={user.dayNumber}
           onAcknowledge={acknowledgeDebrief}
-        />
-      )}
-      {pendingStreakBreak && (
-        <StreakBrokenModal
-          visible={!!pendingStreakBreak}
-          data={pendingStreakBreak}
-          onAcknowledge={acknowledgeStreakBreak}
         />
       )}
       <ShadowConfrontationModal
@@ -413,20 +405,6 @@ export default function Dashboard() {
       </TouchableOpacity>
 
       <LogModal visible={logVisible} onClose={() => setLogVisible(false)} />
-
-      {/* Achievement unlock modal */}
-      <AchievementModal
-        visible={pendingAchievement !== null}
-        achievement={pendingAchievement}
-        onAcknowledge={acknowledgePendingAchievement}
-      />
-
-      {/* Domain milestone modal */}
-      <MilestoneModal
-        visible={pendingMilestone !== null}
-        milestone={pendingMilestone}
-        onAcknowledge={acknowledgePendingMilestone}
-      />
     </View>
   );
 }
@@ -435,6 +413,10 @@ import { Platform } from "react-native";
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  center: { alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
+  stateLine: { fontSize: 13, lineHeight: 20, textAlign: "center" },
+  retryBtn: { paddingVertical: 8, paddingHorizontal: 16 },
+  retryText: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 3 },
   scroll: { paddingHorizontal: 20, gap: 12 },
   headerRow: {
     flexDirection: "row",

@@ -7,7 +7,8 @@ export default function OnboardingLayout() {
       <Stack.Screen name="assessment" />
       <Stack.Screen name="identity" />
       <Stack.Screen name="calibrating" />
-      <Stack.Screen name="schedule" />
+      {/* No way back to calibrating from here: it would re-run onboarding. */}
+      <Stack.Screen name="schedule" options={{ gestureEnabled: false }} />
     </Stack>
   );
 }

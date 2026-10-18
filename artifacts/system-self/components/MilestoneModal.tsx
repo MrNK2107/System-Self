@@ -4,15 +4,9 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import type { Domain, PendingMilestone } from "@/context/AppContext";
+import { DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
 
 const { width: SW } = Dimensions.get("window");
-
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555", MIND: "#3A7BD5", WEALTH: "#4B8B6F", DISCIPLINE: "#C4873A",
-};
-const DOMAIN_ICONS: Record<Domain, string> = {
-  BODY: "◈", MIND: "◉", WEALTH: "◆", DISCIPLINE: "▲",
-};
 
 interface Props {
   visible: boolean;

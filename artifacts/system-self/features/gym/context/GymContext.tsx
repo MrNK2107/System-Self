@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { useApp } from "@/context/AppContext";
 import { BODY_PARTS, DEFAULT_EXERCISES, WEEKDAYS } from "@/features/gym/model/constants";
 import type {
   BodyPartScore,
@@ -90,7 +89,6 @@ function defaultPlan(): WorkoutPlan {
 }
 
 export function GymProvider({ children }: { children: React.ReactNode }) {
-  const { updateDomainScore } = useApp();
   const [state, setState] = useState<GymState>({
     exercises: DEFAULT_EXERCISES,
     workoutPlans: [],
@@ -206,9 +204,8 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
     const points = computeGymPoints(completedSession, plannedBlocks, exercisesById);
     const bodyPartScores = mergeBodyPartScores(state.bodyPartScores, points.bodyPartPoints, now);
 
-    if (points.totalPoints > 0) {
-      await updateDomainScore("BODY", points.totalPoints, false);
-    }
+    // P3-T7: BODY points for a session come from the server (POST /api/gym/sessions/:id/complete). Until then
+    // a gym session is tracked here only and does not change the BODY score (no local scoring).
 
     const prRes = computePrUpdates(completedSession, exercisesById, state.personalRecords);
 
@@ -224,7 +221,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       bodyPartScores,
       personalRecords: prRes.updatedRecords,
     });
-  }, [persist, state.bodyPartScores, state.exercises, state.personalRecords, state.workoutPlans, state.workoutSessions, updateDomainScore]);
+  }, [persist, state.bodyPartScores, state.exercises, state.personalRecords, state.workoutPlans, state.workoutSessions]);
 
   const getBodyPartScores = useCallback(() => state.bodyPartScores, [state.bodyPartScores]);
 

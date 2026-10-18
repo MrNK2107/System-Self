@@ -18,11 +18,8 @@ import { RankBadge } from "@/components/RankBadge";
 import { useSystemAI } from "@/hooks/useSystemAI";
 import { SystemMessage } from "@/components/SystemMessage";
 import { StreakCalendar } from "@/components/StreakCalendar";
+import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
 
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555", MIND: "#3A7BD5", WEALTH: "#4B8B6F", DISCIPLINE: "#C4873A",
-};
-const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
 const MILESTONE_TIERS: MilestoneTier[] = [60, 70, 80, 90, 100];
 
 export default function StatsScreen() {
@@ -31,7 +28,7 @@ export default function StatsScreen() {
   const insets = useSafeAreaInsets();
   const {
     user, domainScores, shadowSelf, logs, quests, trajectory,
-    getHiddenScore, computeRank, resetAll,
+    tierProgress,
     achievements, milestones, getShadowPhase,
   } = useApp();
   const { signOut } = useAuth();
@@ -50,7 +47,6 @@ export default function StatsScreen() {
   const { generateMessage, loading } = useSystemAI();
   const [debrief, setDebrief] = useState("");
   const [debriefLoading, setDebriefLoading] = useState(false);
-  const [showReset, setShowReset] = useState(false);
   const [showAchievements, setShowAchievements] = useState(false);
   const [showMilestones, setShowMilestones] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -64,8 +60,7 @@ export default function StatsScreen() {
     daily: { day: string; status: string; count: number }[];
   } | null>(null);
 
-  const hiddenScore = getHiddenScore();
-  const rank = user?.rank ?? computeRank(hiddenScore);
+  const rank = user?.rank ?? "E";
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const completedQuests = quests.filter(q => q.status === "complete").length;
@@ -73,18 +68,14 @@ export default function StatsScreen() {
   const forbiddenLogs = logs.filter(l => l.forbidden).length;
   const shadowPhase = getShadowPhase();
 
-  const rankThresholds: Record<string, { min: number; max: number }> = {
-    E: { min: 0, max: 25 }, D: { min: 26, max: 40 },
-    C: { min: 41, max: 55 }, B: { min: 56, max: 70 },
-    A: { min: 71, max: 85 }, S: { min: 86, max: 100 },
-  };
-  const threshold = rankThresholds[rank];
+  // Progress through the current rank band comes from the server (tierProgress); the hidden score never reaches the device.
   const nextRank = ({ E: "D", D: "C", C: "B", B: "A", A: "S", S: null } as Record<string, string | null>)[rank];
-  const progressToNext = threshold ? ((hiddenScore - threshold.min) / (threshold.max - threshold.min)) * 100 : 100;
+  const progressToNext = tierProgress;
 
   // Rank-up prep: show when within last 20% of current rank
   const showRankUpPrep = nextRank && progressToNext >= 75;
 
+  // P3-T6: debrief and completion summary move to the server endpoints.
   const requestDebrief = async () => {
     if (!user || debriefLoading) return;
     setDebriefLoading(true);
@@ -155,6 +146,7 @@ export default function StatsScreen() {
       BODY: { attempts: 0, completed: 0 },
       MIND: { attempts: 0, completed: 0 },
       WEALTH: { attempts: 0, completed: 0 },
+      SOCIAL: { attempts: 0, completed: 0 },
       DISCIPLINE: { attempts: 0, completed: 0 },
     };
     for (const row of perfSummary.byDomain) {
@@ -576,27 +568,6 @@ export default function StatsScreen() {
             <Text style={[styles.settingLabel, { color: colors.foreground }]}>Sign Out</Text>
             <Feather name="chevron-right" size={14} color={colors.mutedForeground} />
           </TouchableOpacity>
-          <View style={[styles.separator, { backgroundColor: colors.border }]} />
-          <TouchableOpacity
-            style={styles.settingRow}
-            onPress={() => setShowReset(r => !r)}
-            activeOpacity={0.7}
-          >
-            <Feather name="rotate-ccw" size={14} color={colors.destructive} />
-            <Text style={[styles.settingLabel, { color: colors.destructive }]}>Reset All Data</Text>
-            <Feather name="chevron-right" size={14} color={colors.destructive} />
-          </TouchableOpacity>
-          {showReset && (
-            <TouchableOpacity
-              style={[styles.resetConfirm, { backgroundColor: colors.destructive + "20", borderColor: colors.destructive }]}
-              onPress={resetAll}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.resetConfirmText, { color: colors.destructive }]}>
-                CONFIRM RESET — ALL DATA WILL BE LOST
-              </Text>
-            </TouchableOpacity>
-          )}
         </View>
       </ScrollView>
     </View>
@@ -671,6 +642,4 @@ const styles = StyleSheet.create({
   settingLabel: { flex: 1, fontSize: 13 },
   settingValue: { fontSize: 11, letterSpacing: 1 },
   separator: { height: StyleSheet.hairlineWidth },
-  resetConfirm: { padding: 12, borderRadius: 2, borderWidth: 1, alignItems: "center" },
-  resetConfirmText: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 1.5, textAlign: "center" },
 });

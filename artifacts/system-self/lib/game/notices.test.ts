@@ -1,0 +1,138 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { NOTICE_KINDS } from "@workspace/contracts";
+import { NOTICE_ORDER, mergeNotices, nextNoticeGroup, noticeView, parseNotices } from "./notices";
+
+let seq = 0;
+const at = () => new Date(Date.UTC(2026, 9, 19, 10, 0, seq++)).toISOString();
+const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+const rank = (n: number) => ({
+  id: id(n),
+  kind: "rank_change",
+  payload: { from: "E", to: "D", kind: "promotion", newCodename: "VECTOR // AB1-2" },
+  createdAt: at(),
+});
+const ach = (n: number) => ({
+  id: id(n),
+  kind: "achievement",
+  payload: { id: "first_log", title: "FIRST TRANSMISSION", description: "Log your first entry", icon: "zap" },
+  createdAt: at(),
+});
+const mile = (n: number) => ({ id: id(n), kind: "milestone", payload: { domain: "BODY", tier: 60, title: "CONDITIONED" }, createdAt: at() });
+const failed = (n: number) => ({
+  id: id(n),
+  kind: "quest_failed",
+  payload: { questId: id(900 + n), title: `Quest ${n}`, type: "daily", penalty: 0.8 },
+  createdAt: at(),
+});
+const streak = (n: number) => ({
+  id: id(n),
+  kind: "streak_break",
+  payload: { domains: [{ domain: "SOCIAL", lostStreak: 4 }], penalty: 2 },
+  createdAt: at(),
+});
+
+test("NOTICE_ORDER covers every server notice kind exactly once", () => {
+  assert.deepEqual([...NOTICE_ORDER].sort(), [...NOTICE_KINDS].sort());
+  assert.deepEqual(NOTICE_ORDER, [
+    "rank_change",
+    "achievement",
+    "milestone",
+    "streak_break",
+    "chain_complete",
+    "shadow_activated",
+    "shadow_resolved",
+    "quest_failed",
+  ]);
+});
+
+test("parseNotices keeps known notices and reports the ids of unknown or malformed ones", () => {
+  const raw = [
+    ach(1),
+    { id: id(2), kind: "future_kind", payload: { x: 1 }, createdAt: at() },
+    { id: id(3), kind: "milestone", payload: { domain: "NOPE", tier: 60, title: "x" }, createdAt: at() },
+    { kind: "achievement" }, // no id: cannot be marked seen, dropped
+    "garbage",
+  ];
+  const { notices, unknownIds } = parseNotices(raw);
+  assert.deepEqual(notices.map((n) => n.id), [id(1)]);
+  assert.deepEqual(unknownIds, [id(2), id(3)]);
+});
+
+test("nextNoticeGroup shows one notice at a time in kind order, oldest first within a kind", () => {
+  const { notices } = parseNotices([failed(1), mile(2), ach(3), ach(4), rank(5), streak(6)]);
+  const done = new Set<string>();
+  const shown: string[] = [];
+  for (let g = nextNoticeGroup(notices, done); g; g = nextNoticeGroup(notices, done)) {
+    shown.push(`${g.kind}:${g.notices.map((n) => n.id.slice(-1)).join(",")}`);
+    g.notices.forEach((n) => done.add(n.id));
+  }
+  assert.deepEqual(shown, ["rank_change:5", "achievement:3", "achievement:4", "milestone:2", "streak_break:6", "quest_failed:1"]);
+});
+
+test("quest_failed notices are grouped into one batch", () => {
+  const { notices } = parseNotices([failed(1), failed(2), failed(3)]);
+  const g = nextNoticeGroup(notices, new Set());
+  assert.equal(g?.kind, "quest_failed");
+  assert.deepEqual(g?.notices.map((n) => n.id), [id(1), id(2), id(3)]);
+  assert.equal(nextNoticeGroup(notices, new Set([id(1), id(2), id(3)])), null);
+});
+
+test("nextNoticeGroup skips acknowledged notices and returns null when none remain", () => {
+  const { notices } = parseNotices([rank(1), ach(2)]);
+  assert.equal(nextNoticeGroup(notices, new Set([id(1)]))?.notices[0]?.id, id(2));
+  assert.equal(nextNoticeGroup(notices, new Set([id(1), id(2)])), null);
+  assert.equal(nextNoticeGroup([], new Set()), null);
+});
+
+test("mergeNotices de-duplicates by id, keeping the first copy", () => {
+  const a = parseNotices([ach(1), mile(2)]).notices;
+  const b = parseNotices([mile(2), rank(3)]).notices;
+  assert.deepEqual(mergeNotices(a, b).map((n) => n.id), [id(1), id(2), id(3)]);
+});
+
+test("noticeView maps payloads to the existing modals' props", () => {
+  const one = (raw: unknown) => {
+    const { notices } = parseNotices([raw]);
+    const g = nextNoticeGroup(notices, new Set());
+    assert.ok(g);
+    return noticeView(g);
+  };
+
+  assert.deepEqual(one(rank(1)), { modal: "rank_up", fromRank: "E", toRank: "D", newCodename: "VECTOR // AB1-2" });
+
+  const demotion = one({ ...rank(2), payload: { from: "C", to: "D", kind: "demotion", newCodename: "VECTOR // ZZ9-1" } });
+  assert.equal(demotion.modal, "system");
+  assert.ok(demotion.modal === "system" && demotion.title.includes("D") && demotion.body.includes("VECTOR // ZZ9-1"));
+
+  assert.deepEqual(one(ach(3)), {
+    modal: "achievement",
+    achievement: { id: "first_log", title: "FIRST TRANSMISSION", description: "Log your first entry", icon: "zap" },
+  });
+  assert.deepEqual(one(mile(4)), { modal: "milestone", milestone: { domain: "BODY", tier: 60, title: "CONDITIONED" } });
+
+  const s = streak(5);
+  assert.deepEqual(one(s), {
+    modal: "streak_break",
+    data: { detectedAt: s.createdAt, brokenDomains: [{ domain: "SOCIAL", lostStreak: 4 }], penalty: 2, aiText: "" },
+  });
+
+  const chain = one({ id: id(6), kind: "chain_complete", payload: { name: "DISCIPLINE FORGE", templateKey: "discipline_forge" }, createdAt: at() });
+  assert.ok(chain.modal === "system" && chain.title === "DISCIPLINE FORGE");
+  const act = one({ id: id(7), kind: "shadow_activated", payload: { gap: 12.5, codename: "SHADOW // ALPHA" }, createdAt: at() });
+  assert.ok(act.modal === "system" && act.body.includes("12.5"));
+  const res = one({ id: id(8), kind: "shadow_resolved", payload: { codename: "SHADOW // ALPHA" }, createdAt: at() });
+  assert.ok(res.modal === "system" && res.title === "SHADOW // ALPHA");
+
+  const { notices } = parseNotices([failed(9), { ...failed(10), payload: { questId: id(1), title: "Weekly", type: "weekly", penalty: 2 } }]);
+  const g = nextNoticeGroup(notices, new Set());
+  assert.ok(g);
+  assert.deepEqual(noticeView(g), {
+    modal: "failure",
+    failures: [
+      { title: "Quest 9", type: "daily", penalty: 0.8 },
+      { title: "Weekly", type: "weekly", penalty: 2 },
+    ],
+  });
+});

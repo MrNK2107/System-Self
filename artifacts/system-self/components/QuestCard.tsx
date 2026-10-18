@@ -4,19 +4,13 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useColors } from "@/hooks/useColors";
 import type { Quest } from "@/context/AppContext";
+import { DOMAIN_COLORS } from "@/constants/domains";
 
 interface QuestCardProps {
   quest: Quest;
   onComplete: (id: string) => void;
   onRefuse?: (id: string) => void;
 }
-
-const DOMAIN_COLORS: Record<string, string> = {
-  BODY: "#E05555",
-  MIND: "#3A7BD5",
-  WEALTH: "#4B8B6F",
-  DISCIPLINE: "#C4873A",
-};
 
 const TYPE_LABELS: Record<string, string> = {
   daily: "DAILY",

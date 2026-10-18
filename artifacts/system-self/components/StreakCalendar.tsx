@@ -2,14 +2,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import type { Domain, LogEntry } from "@/context/AppContext";
-
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555", MIND: "#3A7BD5", WEALTH: "#4B8B6F", DISCIPLINE: "#C4873A",
-};
-const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
-const DOMAIN_ICONS: Record<Domain, string> = {
-  BODY: "◈", MIND: "◉", WEALTH: "◆", DISCIPLINE: "▲",
-};
+import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
 
 interface Props {
   logs: LogEntry[];

@@ -11,15 +11,9 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import type { Domain, DebriefData, DebriefVerdict } from "@/context/AppContext";
+import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
 
 const { width: SW } = Dimensions.get("window");
-
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555",
-  MIND: "#3A7BD5",
-  WEALTH: "#4B8B6F",
-  DISCIPLINE: "#C4873A",
-};
 
 const VERDICT_COLORS: Record<DebriefVerdict, string> = {
   ACCEPTABLE: "#4B8B6F",
@@ -32,8 +26,6 @@ const VERDICT_SUB: Record<DebriefVerdict, string> = {
   INSUFFICIENT: "Below projection. Adjust.",
   PATHETIC: "This is a data point. Act on it.",
 };
-
-const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
 
 interface Props {
   visible: boolean;

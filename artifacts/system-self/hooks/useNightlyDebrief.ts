@@ -1,9 +1,18 @@
+// P3-T6: replaced by GET /api/debrief/today + POST /api/debrief/:date/ack. Until then the debrief stays a
+// device-side summary (baseline and verdict below are display only; the server never reads them).
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useCallback, useRef } from "react";
-import { useApp, type Domain, type DebriefVerdict, STORAGE_KEYS } from "@/context/AppContext";
+import { useCallback, useRef, useState } from "react";
+import { scoreRecord, useApp, type DebriefData, type Domain, type DebriefVerdict } from "@/context/AppContext";
+import { ALL_DOMAINS as DOMAINS } from "@/constants/domains";
 import { useSystemAI } from "@/hooks/useSystemAI";
 
-const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
+const LAST_DEBRIEF_KEY = "@system_self:last_debrief";
+const BASELINE_KEY = "@system_self:baseline";
+
+interface DailyBaseline {
+  date: string;
+  scores: Record<Domain, number>;
+}
 
 function computeVerdict(
   deltas: Record<Domain, number>,
@@ -37,19 +46,17 @@ function isPastDebriefTime(nightlyTime: string): boolean {
 }
 
 export function useNightlyDebrief() {
-  const {
-    user,
-    domainScores,
-    quests,
-    shadowSelf,
-    trajectory,
-    dailyBaseline,
-    pendingDebrief,
-    setPendingDebrief,
-    acknowledgeDebrief,
-  } = useApp();
+  const { user, domainScores, quests, shadowSelf, trajectory } = useApp();
   const { generateMessage } = useSystemAI();
   const checking = useRef(false);
+  const [pendingDebrief, setPendingDebrief] = useState<DebriefData | null>(null);
+
+  const acknowledgeDebrief = useCallback(async () => {
+    const today = new Date().toISOString().split("T")[0]!;
+    await AsyncStorage.setItem(LAST_DEBRIEF_KEY, today);
+    await AsyncStorage.setItem(BASELINE_KEY, JSON.stringify({ date: today, scores: scoreRecord(domainScores) }));
+    setPendingDebrief(null);
+  }, [domainScores]);
 
   const checkAndTriggerDebrief = useCallback(async () => {
     if (!user || pendingDebrief || checking.current) return;
@@ -59,25 +66,30 @@ export function useNightlyDebrief() {
       const today = new Date().toISOString().split("T")[0]!;
 
       // Already debriefed today?
-      const lastDebrief = await AsyncStorage.getItem(STORAGE_KEYS.LAST_DEBRIEF);
+      const lastDebrief = await AsyncStorage.getItem(LAST_DEBRIEF_KEY);
       if (lastDebrief === today) return;
+
+      // The first check of the day records the morning baseline the deltas are measured from.
+      let baseline: DailyBaseline | null = null;
+      try {
+        const raw = await AsyncStorage.getItem(BASELINE_KEY);
+        baseline = raw ? (JSON.parse(raw) as DailyBaseline) : null;
+      } catch {
+        baseline = null;
+      }
+      if (!baseline || baseline.date !== today) {
+        baseline = { date: today, scores: scoreRecord(domainScores) };
+        await AsyncStorage.setItem(BASELINE_KEY, JSON.stringify(baseline));
+      }
 
       // Past the user's scheduled nightly time?
       if (!isPastDebriefTime(user.nightlyTime || "21:00")) return;
 
       // Compute domain deltas from today's baseline
-      const baseline = dailyBaseline;
-      const domainDeltas: Record<Domain, number> = {
-        BODY: 0,
-        MIND: 0,
-        WEALTH: 0,
-        DISCIPLINE: 0,
-      };
-      if (baseline && baseline.date === today) {
-        for (const d of DOMAINS) {
-          const current = domainScores.find(s => s.domain === d)?.score ?? 50;
-          domainDeltas[d] = parseFloat((current - (baseline.scores[d] ?? 50)).toFixed(1));
-        }
+      const domainDeltas = {} as Record<Domain, number>;
+      for (const d of DOMAINS) {
+        const current = domainScores.find(s => s.domain === d)?.score ?? 0;
+        domainDeltas[d] = parseFloat((current - (baseline.scores[d] ?? current)).toFixed(1));
       }
 
       const questCompleted = quests.filter(q => q.status === "complete").length;
@@ -87,10 +99,10 @@ export function useNightlyDebrief() {
 
       // Build domain scores object for API
       const scores = {
-        BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 50,
-        MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 50,
-        WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 50,
-        DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 50,
+        BODY: domainScores.find(s => s.domain === "BODY")?.score ?? 0,
+        MIND: domainScores.find(s => s.domain === "MIND")?.score ?? 0,
+        WEALTH: domainScores.find(s => s.domain === "WEALTH")?.score ?? 0,
+        DISCIPLINE: domainScores.find(s => s.domain === "DISCIPLINE")?.score ?? 0,
       };
 
       const aiText = await generateMessage({
@@ -107,7 +119,7 @@ export function useNightlyDebrief() {
         dayNumber: user.dayNumber,
       });
 
-      await setPendingDebrief({
+      setPendingDebrief({
         date: today,
         domainDeltas,
         questCompleted,
@@ -126,9 +138,7 @@ export function useNightlyDebrief() {
     quests,
     shadowSelf,
     trajectory,
-    dailyBaseline,
     generateMessage,
-    setPendingDebrief,
   ]);
 
   return { checkAndTriggerDebrief, pendingDebrief, acknowledgeDebrief };

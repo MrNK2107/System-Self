@@ -3,6 +3,7 @@ import { Animated, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { getStreakMultiplier, getStreakTier, type Domain } from "@/context/AppContext";
+import { DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
 
 interface DomainBarProps {
   domain: Domain;
@@ -11,13 +12,6 @@ interface DomainBarProps {
   showStreak?: boolean;
   height?: number;
 }
-
-const DOMAIN_ICONS: Record<Domain, string> = {
-  BODY: "◈",
-  MIND: "◉",
-  WEALTH: "◆",
-  DISCIPLINE: "▲",
-};
 
 const STREAK_TIER_COLORS = {
   none: null,

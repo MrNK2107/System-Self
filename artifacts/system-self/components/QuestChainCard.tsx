@@ -3,13 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import type { Domain, QuestChain } from "@/context/AppContext";
-
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555", MIND: "#3A7BD5", WEALTH: "#4B8B6F", DISCIPLINE: "#C4873A",
-};
-const DOMAIN_ICONS: Record<Domain, string> = {
-  BODY: "◈", MIND: "◉", WEALTH: "◆", DISCIPLINE: "▲",
-};
+import { DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
 
 interface Props {
   chain: QuestChain;

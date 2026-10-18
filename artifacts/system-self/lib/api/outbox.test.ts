@@ -169,3 +169,32 @@ test("enqueue with an existing clientId does not duplicate", async () => {
   await outbox.enqueue(item("a"));
   assert.equal(outbox.pending().length, 1);
 });
+
+test("subscribe is notified when queued or failed items change, until unsubscribed", async () => {
+  let fail = true;
+  const outbox = createOutbox({ getUserId: async () => "u1",
+    storage: memoryStorage(),
+    send: async () => {
+      if (fail) throw httpErr(422);
+    },
+  });
+  let calls = 0;
+  const unsubscribe = outbox.subscribe(() => {
+    calls += 1;
+  });
+  await outbox.enqueue(item("a"));
+  assert.ok(calls >= 1, "enqueue notifies");
+  const afterEnqueue = calls;
+  await outbox.flush(); // 422 -> parked as failed
+  assert.ok(calls > afterEnqueue, "a parked item notifies");
+  assert.equal(outbox.failed().length, 1);
+  const afterFail = calls;
+  await outbox.clearFailed();
+  assert.ok(calls > afterFail, "clearFailed notifies");
+  unsubscribe();
+  const before = calls;
+  fail = false;
+  await outbox.enqueue(item("b"));
+  await outbox.flush();
+  assert.equal(calls, before, "no calls after unsubscribe");
+});
