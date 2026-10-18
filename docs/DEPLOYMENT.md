@@ -55,7 +55,7 @@ Warning: `lib/db/migrations/0002_*.sql` was hand-edited to begin with `DELETE FR
 - Verify the mobile app can register/login, refresh, and call `/api/system/message` and `/api/system/quests` with `Authorization: Bearer <accessToken>`.
 
 ## 5. Auth Operations
-- Accounts use email + password (argon2). Sessions are short-lived JWT access tokens plus rotating refresh tokens (`/api/auth/refresh`); reuse of a rotated token revokes its family.
+- Accounts use email + password (argon2). Sessions are short-lived JWT access tokens plus rotating refresh tokens (`/api/auth/refresh`); reuse of a rotated token revokes its family. Grace window: a client whose refresh response was lost may retry with the same token within 30 seconds of the original rotation; if the unseen successor is still live it is revoked (`revoked_reason = 'superseded'`) and a new token is issued in the same family. Replays after 30 seconds, or of tokens revoked by logout/password change, revoke the family.
 - Rotate `JWT_SECRET`: deploying a new value invalidates all access tokens; clients recover via refresh only if the refresh token store is intact (refresh tokens are opaque and not signed with `JWT_SECRET`).
 - Password change/reset bumps the user's `tokenVersion` and revokes all refresh tokens.
 - Operator access: users with `role = "admin"` can use `/api/admin/users`.

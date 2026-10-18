@@ -4,8 +4,8 @@ import { eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "@workspace/db/testing";
 import { emailCodes, refreshTokens, users } from "@workspace/db";
 import { hashPassword, verifyPassword } from "./passwords";
-import { signAccessToken, verifyAccessToken } from "./tokens";
-import { issueRefreshToken, rotateRefreshToken } from "./refresh";
+import { hashToken, signAccessToken, verifyAccessToken } from "./tokens";
+import { issueRefreshToken, revokeRefreshFamilyByToken, rotateRefreshToken } from "./refresh";
 import { consumeEmailCode, createEmailCode } from "./codes";
 
 const db = getTestDb();
@@ -55,7 +55,13 @@ beforeEach(async () => {
   if (db) await resetDb(db);
 });
 
-test("rotate returns new token and old one becomes reused", { skip }, async () => {
+const backdateRevocation = (id: string, ms: number) =>
+  db!.update(refreshTokens).set({ revokedAt: new Date(Date.now() - ms) }).where(eq(refreshTokens.id, id));
+
+const liveTokens = async (uid: string) =>
+  (await db!.select().from(refreshTokens).where(eq(refreshTokens.userId, uid))).filter((x) => !x.revokedAt);
+
+test("rotate returns a new token; unknown token -> invalid", { skip }, async () => {
   const uid = await makeUser();
   const first = await issueRefreshToken(db!, uid, { userAgent: "t" });
   const r = await rotateRefreshToken(db!, first.token);
@@ -64,21 +70,65 @@ test("rotate returns new token and old one becomes reused", { skip }, async () =
     assert.equal(r.userId, uid);
     assert.notEqual(r.token, first.token);
   }
-  const again = await rotateRefreshToken(db!, first.token);
-  assert.deepEqual(again, { ok: false, reason: "reused" });
   assert.deepEqual(await rotateRefreshToken(db!, "nope"), { ok: false, reason: "invalid" });
 });
 
-test("reusing a rotated token revokes the family", { skip }, async () => {
+test("replay within 30s (lost response) -> ok; the lost successor no longer works", { skip }, async () => {
+  const uid = await makeUser();
+  const first = await issueRefreshToken(db!, uid);
+  const lost = await rotateRefreshToken(db!, first.token);
+  assert.ok(lost.ok);
+  const retry = await rotateRefreshToken(db!, first.token);
+  assert.ok(retry.ok);
+  if (!lost.ok || !retry.ok) return;
+  assert.notEqual(retry.token, lost.token);
+  const lostRow = (await db!.select().from(refreshTokens).where(eq(refreshTokens.userId, uid))).find(
+    (x) => x.tokenHash === hashToken(lost.token),
+  );
+  assert.equal(lostRow!.revokedReason, "superseded");
+  // The superseded token was never rotated (no successor), so presenting it is reuse: the family dies.
+  assert.deepEqual(await rotateRefreshToken(db!, lost.token), { ok: false, reason: "reused" });
+  const live = await liveTokens(uid);
+  assert.equal(live.length, 0);
+});
+
+test("replay within 30s keeps the family alive and the retried token usable", { skip }, async () => {
+  const uid = await makeUser();
+  const first = await issueRefreshToken(db!, uid);
+  await rotateRefreshToken(db!, first.token);
+  const retry = await rotateRefreshToken(db!, first.token);
+  assert.ok(retry.ok);
+  const live = await liveTokens(uid);
+  assert.equal(live.length, 1);
+  assert.equal(live[0]!.tokenHash, hashToken(retry.ok ? retry.token : ""));
+  const next = await rotateRefreshToken(db!, retry.ok ? retry.token : "");
+  assert.ok(next.ok);
+});
+
+test("replay after 31s -> reused and the family is revoked", { skip }, async () => {
   const uid = await makeUser();
   const first = await issueRefreshToken(db!, uid);
   const r = await rotateRefreshToken(db!, first.token);
   assert.ok(r.ok);
-  await rotateRefreshToken(db!, first.token); // reuse
+  await backdateRevocation(first.id, 31_000);
+  assert.deepEqual(await rotateRefreshToken(db!, first.token), { ok: false, reason: "reused" });
   const next = await rotateRefreshToken(db!, r.ok ? r.token : "");
   assert.equal(next.ok, false);
   const rows = await db!.select().from(refreshTokens).where(eq(refreshTokens.userId, uid));
   assert.ok(rows.every((x) => x.revokedAt));
+});
+
+test("a logged-out token replayed within 30s -> reused (no grace without a live successor)", { skip }, async () => {
+  const uid = await makeUser();
+  const first = await issueRefreshToken(db!, uid);
+  await revokeRefreshFamilyByToken(db!, first.token);
+  assert.deepEqual(await rotateRefreshToken(db!, first.token), { ok: false, reason: "reused" });
+  const second = await issueRefreshToken(db!, uid);
+  const r = await rotateRefreshToken(db!, second.token);
+  assert.ok(r.ok);
+  await revokeRefreshFamilyByToken(db!, r.ok ? r.token : "");
+  assert.deepEqual(await rotateRefreshToken(db!, second.token), { ok: false, reason: "reused" });
+  assert.equal((await liveTokens(uid)).length, 0);
 });
 
 test("expired refresh token -> expired", { skip }, async () => {
@@ -124,14 +174,16 @@ test("concurrent wrong guesses cannot exceed the attempt limit", { skip }, async
   assert.equal(await consumeEmailCode(db!, uid, "verify", code), "locked");
 });
 
-test("concurrent rotation of one token: exactly one wins, family revoked", { skip }, async () => {
+test("concurrent rotation of one token: both resolve, exactly one live token, family not revoked", { skip }, async () => {
   const uid = await makeUser();
   const t = await issueRefreshToken(db!, uid);
   const results = await Promise.all([rotateRefreshToken(db!, t.token), rotateRefreshToken(db!, t.token)]);
-  assert.equal(results.filter((r) => r.ok).length, 1);
-  const loser = results.find((r) => !r.ok);
-  assert.deepEqual(loser, { ok: false, reason: "reused" });
+  // The loser lands inside the 30s grace window, so it supersedes the winner instead of killing the family.
+  assert.ok(results.every((r) => r.ok));
+  const live = await liveTokens(uid);
+  assert.equal(live.length, 1);
+  const okTokens = results.filter((r) => r.ok).map((r) => (r.ok ? hashToken(r.token) : ""));
+  assert.ok(okTokens.includes(live[0]!.tokenHash));
   const rows = await db!.select().from(refreshTokens).where(eq(refreshTokens.userId, uid));
-  assert.equal(rows.length, 2);
-  assert.ok(rows.every((x) => x.revokedAt));
+  assert.ok(rows.some((x) => !x.revokedAt), "family must not be fully revoked");
 });

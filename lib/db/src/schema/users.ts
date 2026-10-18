@@ -26,6 +26,7 @@ export const refreshTokens = pgTable(
     tokenHash: text("token_hash").notNull().unique(),
     expiresAt: ts("expires_at").notNull(),
     revokedAt: ts("revoked_at"),
+    revokedReason: text("revoked_reason", { enum: ["rotated", "superseded", "reused", "logout", "revoked_all"] }),
     replacedById: uuid("replaced_by_id"),
     userAgent: text("user_agent"),
     createdAt: ts("created_at").defaultNow().notNull(),

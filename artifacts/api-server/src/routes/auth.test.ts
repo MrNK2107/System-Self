@@ -1,9 +1,9 @@
 import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "@workspace/db/testing";
-import { users } from "@workspace/db";
+import { refreshTokens, users } from "@workspace/db";
 import { createApp } from "../app-factory";
 import type { Mailer } from "../lib/mailer";
 
@@ -127,7 +127,7 @@ test("login wrong password and unknown email return identical 401 bodies", { ski
   assert.equal(ok.body.user.username, "alice_1");
 });
 
-test("refresh rotates; replaying the old refresh -> 401 and the new one also fails", { skip }, async () => {
+test("refresh rotates; a retry within 30s supersedes the lost token", { skip }, async () => {
   const a = app();
   const reg = await request(a).post("/api/auth/register").send(validBody());
   const rt1 = reg.body.refreshToken as string;
@@ -135,10 +135,28 @@ test("refresh rotates; replaying the old refresh -> 401 and the new one also fai
   assert.equal(r2.status, 200);
   const rt2 = r2.body.refreshToken as string;
   assert.notEqual(rt2, rt1);
+  const retry = await request(a).post("/api/auth/refresh").send({ refreshToken: rt1 });
+  assert.equal(retry.status, 200);
+  assert.notEqual(retry.body.refreshToken, rt2);
+  const lost = await request(a).post("/api/auth/refresh").send({ refreshToken: rt2 });
+  assert.equal(lost.status, 401);
+  assert.equal(lost.body.code, "invalid_refresh");
+});
+
+test("replaying a rotated refresh after 30s -> 401 and the family is revoked", { skip }, async () => {
+  const a = app();
+  const reg = await request(a).post("/api/auth/register").send(validBody());
+  const rt1 = reg.body.refreshToken as string;
+  const r2 = await request(a).post("/api/auth/refresh").send({ refreshToken: rt1 });
+  assert.equal(r2.status, 200);
+  await db!
+    .update(refreshTokens)
+    .set({ revokedAt: new Date(Date.now() - 31_000) })
+    .where(and(eq(refreshTokens.userId, reg.body.user.id), isNotNull(refreshTokens.revokedAt)));
   const replay = await request(a).post("/api/auth/refresh").send({ refreshToken: rt1 });
   assert.equal(replay.status, 401);
   assert.equal(replay.body.code, "invalid_refresh");
-  const after2 = await request(a).post("/api/auth/refresh").send({ refreshToken: rt2 });
+  const after2 = await request(a).post("/api/auth/refresh").send({ refreshToken: r2.body.refreshToken });
   assert.equal(after2.status, 401);
 });
 
