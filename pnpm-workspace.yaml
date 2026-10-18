@@ -65,6 +65,8 @@ allowBuilds:
   "@swc/core": true
   msw: true
   unrs-resolver: true
+  '@google/genai': false
+  protobufjs: false
 
 overrides:
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it

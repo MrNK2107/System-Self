@@ -49,15 +49,18 @@ export function createApp(deps: { db?: Db | null; mailer?: Mailer } = {}): Expre
       legacyHeaders: false,
     }),
   );
-  const authLimiter = rateLimit({
-    windowMs: 15 * 60_000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many attempts, try again later", code: "rate_limited" },
-  });
+  // One limiter per auth surface so abuse of one (e.g. failed logins) does not lock out the others.
   for (const prefix of ["login", "register", "password", "email"]) {
-    app.use(`/api/auth/${prefix}`, authLimiter);
+    app.use(
+      `/api/auth/${prefix}`,
+      rateLimit({
+        windowMs: 15 * 60_000,
+        max: 10,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: "Too many attempts, try again later", code: "rate_limited" },
+      }),
+    );
   }
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));

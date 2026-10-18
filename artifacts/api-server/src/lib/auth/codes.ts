@@ -11,7 +11,8 @@ const MAX_ATTEMPTS = 5;
 // Salted with userId so identical codes for different users hash differently.
 const hashCode = (userId: string, code: string) => hashToken(`${userId}:${code}`);
 
-export async function createEmailCode(db: Db, userId: string, purpose: CodePurpose): Promise<string> {
+/** Accepts a Db or an open transaction (nested transactions become savepoints). */
+export async function createEmailCode(db: Pick<Db, "transaction">, userId: string, purpose: CodePurpose): Promise<string> {
   const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
   await db.transaction(async (tx) => {
     await tx

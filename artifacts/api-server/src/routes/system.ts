@@ -1,3 +1,4 @@
+import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import { Router, type IRouter } from "express";
 import { generatedQuestBatches, generatedQuests, questCompletionEvents, systemMessages, type Db } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
@@ -10,6 +11,7 @@ import {
   questCompletionEventBodySchema,
 } from "../lib/schemas";
 import { generateWithFallback } from "../lib/ai";
+import { templateQuests, templateSystemMessage } from "../lib/ai-fallback";
 
 const MESSAGE_PROMPT_VERSION = "system-message-v2";
 const QUESTS_PROMPT_VERSION = "system-quests-v3";
@@ -191,7 +193,15 @@ router.post("/system/message", validateBody(generateSystemMessageBodySchema), as
       temperature: 0.7,
     });
     const payload = generateSystemMessageResponseSchema.parse({
-      message: ai.text.trim(),
+      message:
+        ai.model === "template"
+          ? templateSystemMessage(req.body.messageType, {
+              rank: req.body.rank,
+              dayNumber: req.body.dayNumber,
+              shadowGap: req.body.shadowGap,
+              trajectory: req.body.trajectory,
+            })
+          : ai.text.trim(),
       messageType: req.body.messageType,
       meta: {
         promptVersion: MESSAGE_PROMPT_VERSION,
@@ -344,14 +354,16 @@ Return ONLY valid JSON in this exact format:
       maxOutputTokens: 1200,
       temperature: 0.4,
     });
-    const text = ai.text || "{}";
-
-    const jsonMatch = extractJsonObject(text);
-    if (!jsonMatch) throw new Error("No JSON in response");
-
-    const parsed = JSON.parse(jsonMatch);
+    let parsed: unknown;
+    if (ai.model === "template") {
+      parsed = { quests: templateQuests({ weakestDomain }) };
+    } else {
+      const jsonMatch = extractJsonObject(ai.text || "{}");
+      if (!jsonMatch) throw new Error("No JSON in response");
+      parsed = JSON.parse(jsonMatch);
+    }
     const payload = generateQuestsResponseSchema.parse({
-      ...parsed,
+      ...(parsed as object),
       meta: {
         promptVersion: QUESTS_PROMPT_VERSION,
         model: ai.model,
@@ -414,7 +426,7 @@ Return ONLY valid JSON in this exact format:
 
 router.post("/system/quest-completion", validateBody(questCompletionEventBodySchema), async (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: "Database is not configured" });
+    if (!db) return res.status(503).json(DB_UNAVAILABLE);
     const headerKey = typeof req.headers["idempotency-key"] === "string"
       ? req.headers["idempotency-key"].trim()
       : undefined;

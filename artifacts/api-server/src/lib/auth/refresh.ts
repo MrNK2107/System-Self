@@ -87,7 +87,7 @@ export async function revokeRefreshFamilyByToken(db: Db, token: string): Promise
     .where(and(eq(refreshTokens.familyId, row.familyId), isNull(refreshTokens.revokedAt)));
 }
 
-export async function revokeAllForUser(db: Db, userId: string): Promise<void> {
+export async function revokeAllForUser(db: Pick<Db, "update">, userId: string): Promise<void> {
   await db
     .update(refreshTokens)
     .set({ revokedAt: new Date() })

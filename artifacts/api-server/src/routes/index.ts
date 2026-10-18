@@ -4,7 +4,7 @@ import type { Mailer } from "../lib/mailer";
 import { createRequireAuth } from "../middlewares/auth";
 import { adminRoutes } from "./admin";
 import { authRoutes } from "./auth";
-import healthRouter from "./health";
+import { healthRoutes } from "./health";
 import { historyRoutes } from "./history";
 import { systemRoutes } from "./system";
 
@@ -14,7 +14,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer }): IRouter {
   const requireAuth = createRequireAuth(db);
 
   // Public: healthz, readyz, and the public /auth endpoints (the auth router guards its own private ones).
-  router.use(healthRouter);
+  router.use(healthRoutes(db));
   router.use(authRoutes({ db, mailer, requireAuth }));
 
   // Everything below requires a valid user.

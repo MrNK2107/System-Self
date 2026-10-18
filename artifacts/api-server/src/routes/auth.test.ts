@@ -289,3 +289,23 @@ test("healthz is public", async () => {
   const res = await request(createApp({ db: null })).get("/api/healthz");
   assert.equal(res.status, 200);
 });
+
+test("register 503 db_unavailable when db null", async () => {
+  const res = await request(createApp({ db: null, mailer })).post("/api/auth/register").send(validBody());
+  assert.equal(res.status, 503);
+  assert.deepEqual(res.body, { error: "Database unavailable", code: "db_unavailable" });
+});
+
+test("auth limiters are per-surface: 11 failed logins -> 429 while register still reachable", async () => {
+  const a = createApp({ db: null, mailer });
+  for (let i = 0; i < 10; i++) {
+    const res = await request(a).post("/api/auth/login").send({ email: "x@example.com", password: "nope" });
+    assert.equal(res.status, 503, `attempt ${i + 1} should reach the handler chain`);
+  }
+  const limited = await request(a).post("/api/auth/login").send({ email: "x@example.com", password: "nope" });
+  assert.equal(limited.status, 429);
+  assert.equal(limited.body.code, "rate_limited");
+  const reg = await request(a).post("/api/auth/register").send(validBody());
+  assert.notEqual(reg.status, 429);
+  assert.equal(reg.status, 503);
+});

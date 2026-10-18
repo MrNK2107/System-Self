@@ -1,0 +1,69 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { generateSystemMessageBodySchema } from "./schemas";
+import { templateQuests, templateSystemMessage } from "./ai-fallback";
+import { aiAvailable, generateWithFallback } from "./ai";
+import { env } from "./env";
+
+const ctx = { rank: "C", dayNumber: 12, shadowGap: 7.5, trajectory: "down" as const };
+const OPTIONS = { systemInstruction: "s", prompt: "p", maxOutputTokens: 10, temperature: 0.1 };
+
+test("templateSystemMessage covers every message type, contains no '!' and no emoji", () => {
+  const types = generateSystemMessageBodySchema.shape.messageType.options;
+  assert.ok(types.length > 0);
+  for (const type of types) {
+    for (const trajectory of ["up", "stable", "down"] as const) {
+      for (const shadowGap of [-4, 0, 9]) {
+        const text = templateSystemMessage(type, { ...ctx, trajectory, shadowGap });
+        assert.ok(text.length > 0, `${type} produced no text`);
+        assert.ok(!text.includes("!"), `${type} contains "!"`);
+        assert.ok(!/\p{Extended_Pictographic}/u.test(text), `${type} contains emoji`);
+      }
+    }
+  }
+  assert.equal(templateSystemMessage("shadow_self", ctx), templateSystemMessage("shadow_self", ctx));
+});
+
+test("templateQuests returns 3 with the weakest domain first", () => {
+  for (const weakestDomain of ["BODY", "MIND", "WEALTH", "DISCIPLINE"]) {
+    const quests = templateQuests({ weakestDomain });
+    assert.equal(quests.length, 3);
+    assert.equal(quests[0]!.domain, weakestDomain);
+    assert.equal(new Set(quests.map((q) => q.domain)).size, 3);
+    assert.ok(quests.every((q) => q.type === "daily" && q.title && q.description));
+  }
+  assert.equal(templateQuests({ weakestDomain: "NOPE" }).length, 3);
+});
+
+test("generateWithFallback without key returns model 'template' and never calls the model", async () => {
+  const saved = env.GEMINI_API_KEY;
+  env.GEMINI_API_KEY = undefined;
+  try {
+    assert.equal(aiAvailable(), false);
+    const result = await generateWithFallback(OPTIONS, async () => {
+      throw new Error("must not be called");
+    });
+    assert.equal(result.model, "template");
+  } finally {
+    env.GEMINI_API_KEY = saved;
+  }
+});
+
+test("generateWithFallback with a key uses the injected caller and falls back to the second model", async () => {
+  const saved = env.GEMINI_API_KEY;
+  env.GEMINI_API_KEY = "test-key";
+  const models: string[] = [];
+  try {
+    assert.equal(aiAvailable(), true);
+    const result = await generateWithFallback(OPTIONS, async (model) => {
+      models.push(model);
+      if (models.length === 1) throw new Error("400 bad request");
+      return "hello";
+    });
+    assert.equal(result.text, "hello");
+    assert.equal(result.model, env.GEMINI_FALLBACK_MODEL);
+    assert.equal(models.length, 2);
+  } finally {
+    env.GEMINI_API_KEY = saved;
+  }
+});

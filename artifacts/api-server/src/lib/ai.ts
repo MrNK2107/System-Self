@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { env } from "./env";
 
 export interface AiCallOptions {
@@ -30,25 +30,38 @@ function isRetryableError(error: unknown): boolean {
   );
 }
 
+type ModelCaller = (model: string, options: AiCallOptions) => Promise<string>;
+
+export function aiAvailable(): boolean {
+  return Boolean(env.GEMINI_API_KEY);
+}
+
 async function callModel(model: string, options: AiCallOptions): Promise<string> {
   if (!env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY must be set.");
   }
 
-  const client = new GoogleGenerativeAI(env.GEMINI_API_KEY);
-  const gemini = client.getGenerativeModel({ model });
-  const result = await gemini.generateContent({
-    contents: [{ role: "user", parts: [{ text: options.prompt }] }],
-    systemInstruction: options.systemInstruction,
-    generationConfig: {
+  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+  const response = await ai.models.generateContent({
+    model,
+    contents: options.prompt,
+    config: {
+      systemInstruction: options.systemInstruction,
       maxOutputTokens: options.maxOutputTokens,
       temperature: options.temperature,
     },
   });
-  return result.response.text().trim();
+  return (response.text ?? "").trim();
 }
 
-export async function generateWithFallback(options: AiCallOptions): Promise<AiCallResult> {
+/** Without a configured key this resolves with model "template" and empty text; callers substitute a template. */
+export async function generateWithFallback(
+  options: AiCallOptions,
+  call: ModelCaller = callModel,
+): Promise<AiCallResult> {
+  if (!aiAvailable()) {
+    return { text: "", model: "template", attempts: 1 };
+  }
   const models = [env.GEMINI_MODEL, env.GEMINI_FALLBACK_MODEL].filter(
     (m, i, arr) => m && arr.indexOf(m) === i,
   );
@@ -60,7 +73,7 @@ export async function generateWithFallback(options: AiCallOptions): Promise<AiCa
     for (let retry = 0; retry <= env.GEMINI_RETRY_COUNT; retry++) {
       attempts++;
       try {
-        const text = await callModel(model, options);
+        const text = await call(model, options);
         if (!text) {
           throw new Error("Empty model response");
         }

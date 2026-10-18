@@ -1,3 +1,4 @@
+import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import { Router, type IRouter } from "express";
 import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -30,7 +31,7 @@ const router = Router();
 
 router.get("/system/messages", async (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: "Database is not configured" });
+    if (!db) return res.status(503).json(DB_UNAVAILABLE);
     const query = messageQuerySchema.parse(req.query);
 
     const whereClauses = [eq(systemMessages.userId, req.user!.id)];
@@ -60,7 +61,7 @@ router.get("/system/messages", async (req, res) => {
 
 router.get("/system/quests/history", async (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: "Database is not configured" });
+    if (!db) return res.status(503).json(DB_UNAVAILABLE);
     const query = questHistoryQuerySchema.parse(req.query);
 
     const whereClauses = [eq(generatedQuestBatches.userId, req.user!.id)];
@@ -107,7 +108,7 @@ router.get("/system/quests/history", async (req, res) => {
 
 router.get("/system/recap/weekly", async (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: "Database is not configured" });
+    if (!db) return res.status(503).json(DB_UNAVAILABLE);
     const { id: userId, username } = req.user!;
 
     const from = new Date();
@@ -168,7 +169,7 @@ router.get("/system/recap/weekly", async (req, res) => {
 
 router.get("/system/recap/weekly/debrief", async (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: "Database is not configured" });
+    if (!db) return res.status(503).json(DB_UNAVAILABLE);
     const { id: userId, username } = req.user!;
 
     const from = new Date();
@@ -236,7 +237,10 @@ Style:
       windowDays: 7,
       from: from.toISOString(),
       to: new Date().toISOString(),
-      debrief: ai.text,
+      debrief:
+        ai.model === "template"
+          ? `Seven days logged for ${username}. ${completionStats?.completed ?? 0} of ${completionStats?.attempts ?? 0} quest attempts completed, a rate of ${completionRate}%. ${completionRate >= 75 ? "Acceptable." : "Insufficient."}`
+          : ai.text,
       meta: { model: ai.model, attempts: ai.attempts, promptVersion: "weekly-debrief-v1" },
     });
   } catch (error) {
@@ -247,7 +251,7 @@ Style:
 
 router.get("/system/completions/summary", async (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: "Database is not configured" });
+    if (!db) return res.status(503).json(DB_UNAVAILABLE);
     const query = completionSummaryQuerySchema.parse(req.query);
     const from = new Date();
     from.setDate(from.getDate() - query.days);

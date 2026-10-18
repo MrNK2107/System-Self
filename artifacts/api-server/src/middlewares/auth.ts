@@ -1,3 +1,4 @@
+import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { eq } from "drizzle-orm";
 import { users, type Db } from "@workspace/db";
@@ -19,7 +20,7 @@ function readBearerToken(req: Request): string | null {
 export function createRequireAuth(db: Db | null): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {
     if (!db) {
-      res.status(503).json({ error: "Database is not configured" });
+      res.status(503).json(DB_UNAVAILABLE);
       return;
     }
     const deny = (event: string) => {

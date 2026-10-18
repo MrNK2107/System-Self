@@ -1,3 +1,4 @@
+import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import { Router, type IRouter, type Request, type RequestHandler } from "express";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -89,7 +90,7 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
 
   router.use("/auth", (_req, res, next) => {
     if (!db) {
-      res.status(503).json({ error: "Database is not configured" });
+      res.status(503).json(DB_UNAVAILABLE);
       return;
     }
     next();
@@ -130,30 +131,35 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
   }
 
   async function bumpAndRevoke(userId: string, passwordHash: string) {
-    await database()
-      .update(users)
-      .set({ passwordHash, tokenVersion: sql`${users.tokenVersion} + 1`, updatedAt: new Date() })
-      .where(eq(users.id, userId));
-    await revokeAllForUser(database(), userId);
+    await database().transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ passwordHash, tokenVersion: sql`${users.tokenVersion} + 1`, updatedAt: new Date() })
+        .where(eq(users.id, userId));
+      await revokeAllForUser(tx, userId);
+    });
   }
 
   router.post("/auth/register", async (req, res) => {
     const body = registerSchema.parse(req.body);
     const passwordHash = await hashPassword(body.password);
     let user: User;
+    let verifyCode: string;
     try {
-      const [row] = await database()
-        .insert(users)
-        .values({
-          email: body.email,
-          username: body.username,
-          passwordHash,
-          birthYear: body.birthYear,
-          termsAcceptedAt: new Date(),
-          ...(body.timezone ? { timezone: body.timezone } : {}),
-        })
-        .returning();
-      user = row!;
+      ({ user, verifyCode } = await database().transaction(async (tx) => {
+        const [row] = await tx
+          .insert(users)
+          .values({
+            email: body.email,
+            username: body.username,
+            passwordHash,
+            birthYear: body.birthYear,
+            termsAcceptedAt: new Date(),
+            ...(body.timezone ? { timezone: body.timezone } : {}),
+          })
+          .returning();
+        return { user: row!, verifyCode: await createEmailCode(tx, row!.id, "verify") };
+      }));
     } catch (e) {
       const dup = uniqueViolation(e);
       if (!dup) throw e;
@@ -164,7 +170,6 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
       });
       return;
     }
-    const verifyCode = await createEmailCode(database(), user.id, "verify");
     sendCode(req, user.email, "verify", verifyCode);
     res.status(201).json(await issueSession(req, user));
   });
