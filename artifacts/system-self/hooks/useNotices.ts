@@ -38,13 +38,9 @@ export function useNotices(): { group: NoticeGroup | null; view: NoticeView | nu
     ids.forEach((id) => unsent.current.add(id));
     const batch = [...unsent.current];
     if (batch.length === 0) return true;
-    try {
-      await markNoticesSeen(api, batch, newClientId("seen"));
-      batch.forEach((id) => unsent.current.delete(id));
-      return true;
-    } catch {
-      return false; // retried with the next dismissal or state refresh
-    }
+    const { handled, error } = await markNoticesSeen(api, batch, newClientId("seen"));
+    handled.forEach((id) => unsent.current.delete(id)); // only what the server confirmed; the rest is retried
+    return error === null; // retried with the next dismissal or state refresh
   }, []);
 
   // Kinds this build does not know: mark seen and skip, silently.
@@ -61,8 +57,17 @@ export function useNotices(): { group: NoticeGroup | null; view: NoticeView | nu
     if (stateQ.dataUpdatedAt && unsent.current.size > 0) void sendSeen([]);
   }, [stateQ.dataUpdatedAt, sendSeen]);
 
-  const group = useMemo(() => nextNoticeGroup(notices, acknowledged), [notices, acknowledged]);
-  const view = useMemo(() => (group ? noticeView(group) : null), [group]);
+  const nextGroup = useMemo(() => nextNoticeGroup(notices, acknowledged), [notices, acknowledged]);
+  // A state refetch rebuilds the notice objects; the modal must not see a new payload for the same notices
+  // (FailureModal would restart its animation and re-request its AI message). Identity follows the ids.
+  const groupKey = nextGroup ? nextGroup.notices.map((n) => n.id).join(",") : "";
+  const current = useMemo(
+    () => (nextGroup ? { group: nextGroup, view: noticeView(nextGroup) } : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groupKey],
+  );
+  const group = current?.group ?? null;
+  const view = current?.view ?? null;
 
   const dismiss = useCallback(async () => {
     if (!group || busy.current) return;

@@ -62,11 +62,31 @@ export function fetchNotices(api: ApiClient): Promise<{ items: unknown[]; hasMor
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** POST /api/notices/seen. Ids that cannot be server notice ids are dropped (the server would reject the batch). */
-export async function markNoticesSeen(api: ApiClient, ids: readonly string[], clientId: string): Promise<void> {
-  const valid = ids.filter((id) => UUID.test(id)).slice(0, 100);
-  if (valid.length === 0) return;
-  await api.request("POST", "/api/notices/seen", { body: { ids: valid, clientId }, idempotencyKey: clientId });
+const SEEN_BATCH = 100; // the server accepts at most 100 ids per request
+
+/**
+ * POST /api/notices/seen, in chunks of 100. Ids that cannot be server notice ids are dropped (the server would
+ * reject the batch) and count as handled. Never throws: `handled` is exactly the ids the caller may forget
+ * (also on a mid-way failure), `error` is the failure that stopped the rest.
+ */
+export async function markNoticesSeen(
+  api: ApiClient,
+  ids: readonly string[],
+  clientId: string,
+): Promise<{ handled: string[]; error: unknown }> {
+  const handled = ids.filter((id) => !UUID.test(id));
+  const valid = ids.filter((id) => UUID.test(id));
+  for (let i = 0; i < valid.length; i += SEEN_BATCH) {
+    const chunk = valid.slice(i, i + SEEN_BATCH);
+    const key = i === 0 ? clientId : `${clientId}-${i / SEEN_BATCH}`;
+    try {
+      await api.request("POST", "/api/notices/seen", { body: { ids: chunk, clientId: key }, idempotencyKey: key });
+    } catch (error) {
+      return { handled, error };
+    }
+    handled.push(...chunk);
+  }
+  return { handled, error: null };
 }
 
 // --- logs (through the outbox) ---------------------------------------------------

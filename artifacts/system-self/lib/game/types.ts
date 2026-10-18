@@ -76,6 +76,9 @@ export interface QuestChain {
   status: "active" | "complete" | "abandoned";
 }
 
+/** A chain the server offers, started or not. */
+export type ChainTemplate = Omit<QuestChain, "id" | "currentStep" | "status">;
+
 export interface Achievement {
   id: AchievementId;
   unlockedAt: string | null;

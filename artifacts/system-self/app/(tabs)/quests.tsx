@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Platform,
   RefreshControl,
@@ -13,7 +14,9 @@ import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp, PREDEFINED_CHAINS, type Domain, type Quest, type QuestChain } from "@/context/AppContext";
+import { useApp, type ChainTemplate, type Domain, type Quest } from "@/context/AppContext";
+import { ApiError } from "@/lib/api/client";
+import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
 import { QuestCard } from "@/components/QuestCard";
 import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
 import { useQuestScheduler } from "@/hooks/useQuestScheduler";
@@ -83,10 +86,10 @@ const genStyles = StyleSheet.create({
 const RANK_UP_PREP_QUESTS: Record<string, { title: string; description: string; domain: Domain }[]> = {
   D: [
     { title: "LOG 7 CONSECUTIVE DAYS", description: "Log at least one domain per day for 7 days without missing. This establishes the baseline for D-rank.", domain: "DISCIPLINE" },
-    { title: "AWARENESS AUDIT", description: "Log one detailed entry across all 4 domains this week. The system requires a complete assessment.", domain: "MIND" },
+    { title: "AWARENESS AUDIT", description: "Log one detailed entry across all 5 domains this week. The system requires a complete assessment.", domain: "MIND" },
   ],
   C: [
-    { title: "3-DAY STREAK IN ALL DOMAINS", description: "Log all 4 domains for 3 days in a row. Consistency is the only qualifier for rank C.", domain: "DISCIPLINE" },
+    { title: "3-DAY STREAK IN ALL DOMAINS", description: "Log all 5 domains for 3 days in a row. Consistency is the only qualifier for rank C.", domain: "DISCIPLINE" },
     { title: "PUSH WEAKEST DOMAIN TO 60+", description: "Your weakest domain score must clear 60. Any method counts. The number does not lie.", domain: "BODY" },
   ],
   B: [
@@ -109,19 +112,57 @@ export default function QuestsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    quests, completeQuest, refuseQuest, shadowSelf, domainScores, getWeakestDomain,
-    questChains, startQuestChain, user, tierProgress,
+    quests, completeQuest, refuseQuest, shadowSelf, getWeakestDomain,
+    questChains, chainTemplates, startQuestChain, user, tierProgress,
+    loading, loadError, refresh, offline,
   } = useApp();
-  const { generating, lastGenRecord, triggerGeneration } = useQuestScheduler();
+  const { generating, triggerGeneration } = useQuestScheduler();
 
   const [refreshing, setRefreshing] = React.useState(false);
   const [showChainCatalog, setShowChainCatalog] = useState(false);
+  const [refusing, setRefusing] = useState<Quest | null>(null);
+  const [refuseBusy, setRefuseBusy] = useState(false);
+  const [refusalLimit, setRefusalLimit] = useState(false);
+  const [startingKey, setStartingKey] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await triggerGeneration();
-    setRefreshing(false);
+    try {
+      await Promise.all([refresh(), triggerGeneration()]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  /** One SYSTEM-voice line for a failed request; sync_pending is explained by the OFFLINE bar as well. */
+  const describeFailure = (r: { ok: false; reason: "sync_pending" } | { ok: false; reason: "error"; error: unknown }): string => {
+    if (r.reason === "sync_pending") return "Sync pending. Queued logs must land first.";
+    if (r.error instanceof ApiError && r.error.kind === "network") return "No connection. Nothing was sent.";
+    return "Request failed. Try again.";
+  };
+
+  const onComplete = async (id: string) => {
+    setNotice(null);
+    const r = await completeQuest(id);
+    if (!r.ok) setNotice(describeFailure(r));
+  };
+
+  const confirmRefuse = async (reason: string) => {
+    if (!refusing) return;
+    setRefuseBusy(true);
+    setNotice(null);
+    try {
+      const r = await refuseQuest(refusing.id, reason);
+      if (!r.ok) {
+        if (r.reason === "error" && r.error instanceof ApiError && r.error.code === "refusal_limit") setRefusalLimit(true);
+        else setNotice(describeFailure(r));
+      }
+      setRefusing(null);
+    } finally {
+      setRefuseBusy(false);
+    }
   };
 
   const domainFilter = (
@@ -149,6 +190,10 @@ export default function QuestsScreen() {
     ? Math.round((completedCount / (completedCount + totalActive)) * 100)
     : 0;
 
+  const showGenerating = generating && totalActive === 0;
+  const showLoading = loading && quests.length === 0;
+  const showError = !!loadError && quests.length === 0 && !loading;
+
   // Shadow pressure
   const shadowGap = shadowSelf.gap;
   const shadowPressure = shadowGap > 20 ? "critical" : shadowGap > 10 ? "elevated" : shadowGap > 0 ? "active" : "none";
@@ -171,11 +216,19 @@ export default function QuestsScreen() {
   nextGen.setHours(4, 0, 0, 0);
   const nextGenStr = nextGen.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  // P3-T5: surface sync_pending / chain_active results on this screen.
-  const handleStartChain = async (template: typeof PREDEFINED_CHAINS[0]) => {
-    const alreadyActive = questChains.some(c => c.templateKey === template.templateKey && c.status === "active");
-    if (!alreadyActive) {
-      await startQuestChain(template.templateKey);
+  const handleStartChain = async (template: ChainTemplate) => {
+    if (startingKey) return;
+    if (questChains.some(c => c.templateKey === template.templateKey && c.status === "active")) return;
+    setStartingKey(template.templateKey);
+    setNotice(null);
+    try {
+      const r = await startQuestChain(template.templateKey);
+      if (r.ok) return;
+      // chain_active: another device started it; the refetch that follows shows it as active.
+      if (r.reason === "error" && r.error instanceof ApiError && r.error.code === "chain_active") setNotice("Chain already active.");
+      else setNotice(describeFailure(r));
+    } finally {
+      setStartingKey(null);
     }
   };
 
@@ -193,9 +246,7 @@ export default function QuestsScreen() {
           <View>
             <Text style={[styles.title, { color: colors.foreground }]}>QUEST BOARD</Text>
             <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-              {lastGenRecord
-                ? `ISSUED TODAY AT ${lastGenRecord.time}`
-                : "AWAITING TRANSMISSION"}
+              {totalActive > 0 ? "ISSUED BY THE SYSTEM" : generating ? "TRANSMITTING" : "AWAITING TRANSMISSION"}
             </Text>
           </View>
           <View style={styles.headerRight}>
@@ -229,12 +280,12 @@ export default function QuestsScreen() {
         )}
 
         {/* Calibration banner */}
-        {lastGenRecord && (
+        {totalActive > 0 && (
           <View style={[styles.calibrationBanner, { borderColor: colors.border, backgroundColor: colors.card }]}>
             <View style={styles.calibRow}>
               <View style={styles.calibItem}>
                 <Text style={[styles.calibLabel, { color: colors.mutedForeground }]}>RANK</Text>
-                <Text style={[styles.calibValue, { color: colors.foreground }]}>{lastGenRecord.rank}</Text>
+                <Text style={[styles.calibValue, { color: colors.foreground }]}>{user?.rank ?? "E"}</Text>
               </View>
               <View style={[styles.calibDiv, { backgroundColor: colors.border }]} />
               <View style={styles.calibItem}>
@@ -246,9 +297,9 @@ export default function QuestsScreen() {
                 <Text style={[styles.calibLabel, { color: colors.mutedForeground }]}>SHADOW GAP</Text>
                 <Text style={[
                   styles.calibValue,
-                  { color: lastGenRecord.shadowGap > 0 ? colors.destructive : "#4B8B6F" },
+                  { color: shadowGap > 0 ? colors.destructive : "#4B8B6F" },
                 ]}>
-                  {lastGenRecord.shadowGap > 0 ? `+${lastGenRecord.shadowGap.toFixed(1)}` : lastGenRecord.shadowGap.toFixed(1)}
+                  {shadowGap > 0 ? `+${shadowGap.toFixed(1)}` : shadowGap.toFixed(1)}
                 </Text>
               </View>
               <View style={[styles.calibDiv, { backgroundColor: colors.border }]} />
@@ -311,11 +362,31 @@ export default function QuestsScreen() {
           </View>
         )}
 
+        {notice && <Text style={[styles.notice, { color: colors.destructive }]}>{notice}</Text>}
+
+        {showLoading && (
+          <View style={[styles.emptyCard, { borderColor: colors.border }]}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>Loading operations.</Text>
+          </View>
+        )}
+
+        {showError && (
+          <View style={[styles.emptyCard, { borderColor: colors.border }]}>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+              {offline ? "Offline. No cached board yet." : "The board could not be loaded."}
+            </Text>
+            <TouchableOpacity onPress={() => void refresh()} activeOpacity={0.7}>
+              <Text style={[styles.clearFilterText, { color: colors.primary }]}>RETRY</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Generating state */}
-        {generating && <GeneratingState />}
+        {showGenerating && <GeneratingState />}
 
         {/* Quest sections */}
-        {!generating && (
+        {!showGenerating && !showLoading && !showError && (
           <>
             {/* Daily */}
             {activeDailies.length > 0 && (
@@ -327,8 +398,11 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeDailies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={completeQuest} onRefuse={refuseQuest} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} refuseDisabled={refusalLimit} />
                 ))}
+                {refusalLimit && (
+                  <Text style={[styles.refusalNote, { color: colors.destructive }]}>{REFUSAL_RULE}</Text>
+                )}
               </View>
             )}
 
@@ -342,7 +416,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeWeeklies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={completeQuest} onRefuse={refuseQuest} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} refuseDisabled={refusalLimit} />
                 ))}
               </View>
             )}
@@ -357,7 +431,7 @@ export default function QuestsScreen() {
                   </View>
                 </View>
                 {activeArcs.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={completeQuest} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} />
                 ))}
               </View>
             )}
@@ -385,7 +459,7 @@ export default function QuestsScreen() {
                   <Text style={[styles.sectionMeta, { color: "#4B8B6F" }]}>+{completedQuests.length}</Text>
                 </View>
                 {completedQuests.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={completeQuest} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} />
                 ))}
               </View>
             )}
@@ -415,18 +489,18 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {failedQuests.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={completeQuest} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} />
                 ))}
               </View>
             )}
 
             {/* Empty */}
-            {totalActive === 0 && completedCount === 0 && !generating && (
+            {totalActive === 0 && completedCount === 0 && (
               <View style={[styles.emptyCard, { borderColor: colors.border }]}>
                 <Feather name="inbox" size={24} color={colors.mutedForeground} />
                 <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Board empty.</Text>
                 <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-                  Pull down to force generation. THE SYSTEM will assign new operations.
+                  Pull down to check for new operations. THE SYSTEM issues the board once per day.
                 </Text>
               </View>
             )}
@@ -445,7 +519,7 @@ export default function QuestsScreen() {
             </Text>
             <View style={[styles.catalogCount, { borderColor: colors.border }]}>
               <Text style={[styles.catalogCountText, { color: colors.mutedForeground }]}>
-                {PREDEFINED_CHAINS.length} CHAINS
+                {chainTemplates.length} CHAINS
               </Text>
             </View>
             <Feather
@@ -455,7 +529,7 @@ export default function QuestsScreen() {
           </TouchableOpacity>
           {showChainCatalog && (
             <View style={styles.catalogList}>
-              {PREDEFINED_CHAINS.map(chain => {
+              {chainTemplates.map(chain => {
                 const alreadyStarted = questChains.some(
                   c => c.templateKey === chain.templateKey && c.status === "active"
                 );
@@ -465,6 +539,7 @@ export default function QuestsScreen() {
                     chain={chain}
                     onStart={() => handleStartChain(chain)}
                     alreadyStarted={alreadyStarted}
+                    busy={startingKey !== null}
                   />
                 );
               })}
@@ -473,14 +548,21 @@ export default function QuestsScreen() {
         </View>
 
         {/* Manual refresh hint */}
-        {!generating && totalActive > 0 && (
+        {!showGenerating && totalActive > 0 && (
           <TouchableOpacity onPress={onRefresh} activeOpacity={0.6} style={styles.refreshHint}>
             <Text style={[styles.refreshHintText, { color: colors.mutedForeground }]}>
-              ↓ Pull to force regeneration
+              ↓ Pull to refresh
             </Text>
           </TouchableOpacity>
         )}
       </ScrollView>
+      <RefuseSheet
+        visible={refusing !== null}
+        questTitle={refusing?.title ?? ""}
+        busy={refuseBusy}
+        onCancel={() => setRefusing(null)}
+        onConfirm={(reason) => void confirmRefuse(reason)}
+      />
     </View>
   );
 }
@@ -574,6 +656,8 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 16, fontWeight: "600" as const, marginTop: 4 },
   emptyText: { fontSize: 12, textAlign: "center", lineHeight: 19 },
+  notice: { fontSize: 11, lineHeight: 17, letterSpacing: 0.3 },
+  refusalNote: { fontSize: 10, lineHeight: 15, letterSpacing: 0.3 },
   refreshHint: { alignItems: "center", paddingVertical: 8, marginTop: 4 },
   refreshHintText: { fontSize: 10, letterSpacing: 1 },
 });

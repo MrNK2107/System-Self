@@ -210,6 +210,26 @@ test("fetchNotices and markNoticesSeen use GET /api/notices and POST /api/notice
   assert.equal(api.calls.length, 2, "nothing to send when no id is valid");
 });
 
+test("markNoticesSeen sends more than 100 ids in chunks and reports exactly the ids it handled", async () => {
+  const ids = Array.from({ length: 230 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+  const api = fakeApi(() => null);
+  const ok = await markNoticesSeen(api, [...ids, "junk"], "seen-x");
+  assert.equal(ok.error, null);
+  assert.deepEqual(api.calls.map((c) => (c.opts.body as { ids: string[] }).ids.length), [100, 100, 30]);
+  assert.equal(new Set(api.calls.map((c) => (c.opts.body as { clientId: string }).clientId)).size, 3, "one idempotency key per chunk");
+  assert.equal(ok.handled.length, 231, "junk ids can never be sent, so they are handled too");
+
+  // The second chunk fails: only the first chunk (plus junk) is reported as handled.
+  let n = 0;
+  const flaky = fakeApi(() => {
+    if (++n === 2) throw new ApiError({ kind: "network", message: "down" });
+    return null;
+  });
+  const partial = await markNoticesSeen(flaky, [...ids, "junk"], "seen-y");
+  assert.ok(partial.error);
+  assert.deepEqual(partial.handled.sort(), [...ids.slice(0, 100), "junk"].sort());
+});
+
 test("retryFailedEntries re-queues failed items; discardFailedEntries drops them", async () => {
   let reject = true;
   const outbox = createOutbox({

@@ -4,6 +4,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQueryClient } from "@tanstack/react-query";
 import { BASE_LOG_DELTAS, streakMultiplier } from "@workspace/engine";
+import type { OutboxItem } from "@/lib/api/outbox";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/context/AuthContext";
@@ -32,6 +33,7 @@ import {
   type MutationResult,
 } from "@/lib/game/actions";
 import { invalidateGame } from "@/lib/game/keys";
+import { pendingSetChanged, trackSentLogs } from "@/lib/game/pending";
 import { cleanupLegacyKeys } from "@/lib/game/legacy-cleanup";
 import {
   DOMAINS,
@@ -43,12 +45,14 @@ import {
   toDomainScores,
   toMilestones,
   toQuest,
+  toChainTemplates,
   toQuestChains,
   toShadowSelf,
   weakestDomain,
 } from "@/lib/game/mappers";
 import type {
   Achievement,
+  ChainTemplate,
   Domain,
   DomainMilestone,
   DomainScore,
@@ -89,6 +93,8 @@ interface AppContextType {
   logs: LogEntry[];
   quests: Quest[];
   questChains: QuestChain[];
+  /** Every chain the server offers (GET /api/chains/templates), started or not. */
+  chainTemplates: ChainTemplate[];
   shadowSelf: ShadowSelf;
   trajectory: Trajectory;
   /** 0-100: how far the hidden score is through the current rank band (server-computed). */
@@ -182,33 +188,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const shadowSelf = useMemo(() => toShadowSelf(state?.shadow ?? null), [state]);
   const achievements = useMemo(() => toAchievements(state?.achievements ?? []), [state]);
   const milestones = useMemo(() => toMilestones(state?.milestones ?? []), [state]);
+  // Logs that just left the outbox stay listed until the logs query returns them (no pending -> gone -> back flicker).
+  const [recentlySent, setRecentlySent] = useState<ReadonlyMap<string, LogEntry>>(() => new Map());
+  const prevPendingItems = useRef<readonly OutboxItem[]>([]);
+  useEffect(() => {
+    const prev = prevPendingItems.current;
+    prevPendingItems.current = outboxSnap.pending;
+    const failedIds = new Set(outboxSnap.failed.map((f) => f.item.clientId));
+    const serverIds = new Set((logsQ.data ?? []).map((l) => l.clientId));
+    setRecentlySent((r) => trackSentLogs(r, prev, outboxSnap.pending, failedIds, serverIds));
+  }, [outboxSnap.pending, outboxSnap.failed, logsQ.data]);
+  useEffect(() => {
+    setRecentlySent(new Map()); // a different account starts clean
+  }, [userId]);
+
   const logs = useMemo(
-    () => mergeLogs(logsQ.data ?? [], pendingLogEntries(outboxSnap.pending)),
-    [logsQ.data, outboxSnap.pending],
+    () => mergeLogs(logsQ.data ?? [], [...recentlySent.values(), ...pendingLogEntries(outboxSnap.pending)]),
+    [logsQ.data, outboxSnap.pending, recentlySent],
   );
   const quests = useMemo(
     () => (questsQ.data ? [...questsQ.data.active, ...questsQ.data.recent].map(toQuest) : []),
     [questsQ.data],
   );
   const questChains = useMemo(() => (chainsQ.data ? toQuestChains(chainsQ.data) : []), [chainsQ.data]);
+  const chainTemplates = useMemo(() => (chainsQ.data ? toChainTemplates(chainsQ.data) : []), [chainsQ.data]);
   const trajectory: Trajectory = state?.trajectory ?? "stable";
   const tierProgress = state?.tierProgress ?? 0;
 
   const rivalsState = useLocalRivals(domainScores);
 
-  // Whenever queued items leave the outbox (sent or parked), the server state changed: refetch.
+  // Whenever a queued item leaves the outbox (sent or parked) the server state changed: refetch. Compared as a
+  // set, so one item leaving while another arrives (same count) still refetches.
   const pendingCount = outboxSnap.pending.length;
-  const prevPending = useRef(pendingCount);
+  const prevPendingSet = useRef<readonly OutboxItem[]>([]);
   useEffect(() => {
-    if (pendingCount < prevPending.current) void invalidateGame(queryClient, userId);
-    if (pendingCount === 0) setSyncBlocked(false);
-    prevPending.current = pendingCount;
-  }, [pendingCount, queryClient, userId]);
+    if (pendingSetChanged(prevPendingSet.current, outboxSnap.pending)) void invalidateGame(queryClient, userId);
+    if (outboxSnap.pending.length === 0) setSyncBlocked(false);
+    prevPendingSet.current = outboxSnap.pending;
+  }, [outboxSnap.pending, queryClient, userId]);
 
+  // refetch functions are stable; depending on the whole query result would rebuild this every render.
+  const refetchState = stateQ.refetch;
+  const refetchLogs = logsQ.refetch;
+  const refetchQuests = questsQ.refetch;
+  const refetchChains = chainsQ.refetch;
   const refresh = useCallback(async () => {
     flushOutboxSoon();
-    await Promise.all([stateQ.refetch(), logsQ.refetch(), questsQ.refetch(), chainsQ.refetch()]);
-  }, [stateQ, logsQ, questsQ, chainsQ]);
+    await Promise.all([refetchState(), refetchLogs(), refetchQuests(), refetchChains()]);
+  }, [refetchState, refetchLogs, refetchQuests, refetchChains]);
 
   const addLog = useCallback(async (entry: LogInput) => {
     await enqueueLog(getOutbox(), entry);
@@ -299,6 +326,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       logs,
       quests,
       questChains,
+      chainTemplates,
       shadowSelf,
       trajectory,
       tierProgress,
@@ -327,7 +355,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...rivalsState,
     }),
     [
-      user, domainScores, logs, quests, questChains, shadowSelf, trajectory, tierProgress, achievements, milestones,
+      user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
       state, stateQ.isError, stateQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
       getShadowPhase, addLog, completeQuest, refuseQuest, startQuestChain, generateQuests, syncBlocked, online,
       pendingCount, outboxSnap.failed.length, retryFailed, discardFailed, getWeeklyRecapData, rivalsState,

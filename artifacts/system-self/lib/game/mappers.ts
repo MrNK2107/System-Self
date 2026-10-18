@@ -17,6 +17,7 @@ import type {
   DomainScore,
   LogEntry,
   Quest,
+  ChainTemplate,
   QuestChain,
   ShadowSelf,
   User,
@@ -168,6 +169,16 @@ export function toQuestChains(res: z.infer<typeof ChainTemplatesResponseSchema>)
     });
   }
   return out;
+}
+
+export function toChainTemplates(res: z.infer<typeof ChainTemplatesResponseSchema>): ChainTemplate[] {
+  return res.templates.map((t) => ({
+    templateKey: t.templateKey,
+    name: t.name,
+    description: t.description,
+    domain: t.domain,
+    steps: t.steps,
+  }));
 }
 
 export function toAchievements(unlocked: GameState["achievements"]): Achievement[] {

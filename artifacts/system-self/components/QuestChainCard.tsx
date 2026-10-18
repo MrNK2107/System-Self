@@ -2,7 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
-import type { Domain, QuestChain } from "@/context/AppContext";
+import type { ChainTemplate, QuestChain } from "@/context/AppContext";
 import { DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
 
 interface Props {
@@ -103,7 +103,7 @@ export function QuestChainCard({ chain, onStart }: Props) {
 
       {/* Step counter */}
       <Text style={[styles.counter, { color: colors.mutedForeground }]}>
-        STEP {Math.min(chain.steps.length, chain.currentStep + (chain.status === "active" ? 1 : 0))} OF {chain.steps.length}
+        {progress}/{chain.steps.length} STEPS COMPLETE
       </Text>
     </View>
   );
@@ -111,11 +111,12 @@ export function QuestChainCard({ chain, onStart }: Props) {
 
 // Card for catalog (before starting)
 export function QuestChainCatalogCard({
-  chain, onStart, alreadyStarted,
+  chain, onStart, alreadyStarted, busy = false,
 }: {
-  chain: Omit<QuestChain, "id" | "startedAt" | "currentStep" | "status">;
+  chain: ChainTemplate;
   onStart: () => void;
   alreadyStarted: boolean;
+  busy?: boolean;
 }) {
   const colors = useColors();
   const domColor = DOMAIN_COLORS[chain.domain];
@@ -156,7 +157,7 @@ export function QuestChainCatalogCard({
           },
         ]}
         onPress={onStart}
-        disabled={alreadyStarted}
+        disabled={alreadyStarted || busy}
       >
         <Text style={[styles.startBtnText, { color: alreadyStarted ? colors.mutedForeground : domColor }]}>
           {alreadyStarted ? "CHAIN ACTIVE" : "START CHAIN"}

@@ -1,6 +1,6 @@
 // Rivals, challenges and taunts stay on the device until P5. They are compared against the server scores.
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   Challenge,
   ChallengeOutcome,
@@ -204,17 +204,23 @@ export function useLocalRivals(domainScores: DomainScore[]) {
     });
   }, []);
 
-  return {
-    rivals,
-    challenges,
-    challengeRecord,
-    rivalTaunts,
-    updateRivals,
-    declareChallenge,
-    updateChallengeScores,
-    acknowledgeChallenge,
-    resolveExpiredChallenges,
-    addRivalTaunt,
-    markRivalTauntsRead,
-  };
+  return useMemo(
+    () => ({
+      rivals,
+      challenges,
+      challengeRecord,
+      rivalTaunts,
+      updateRivals,
+      declareChallenge,
+      updateChallengeScores,
+      acknowledgeChallenge,
+      resolveExpiredChallenges,
+      addRivalTaunt,
+      markRivalTauntsRead,
+    }),
+    [
+      rivals, challenges, challengeRecord, rivalTaunts, updateRivals, declareChallenge, updateChallengeScores,
+      acknowledgeChallenge, resolveExpiredChallenges, addRivalTaunt, markRivalTauntsRead,
+    ],
+  );
 }

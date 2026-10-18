@@ -1,56 +1,49 @@
-// P3-T5: minimal server-backed scheduler so the quest board compiles against the new context. Task 5 owns the
-// full rewrite (once per local day on mount/foreground, refusal sheet, chain progress). The server generates
-// the board (POST /api/quests/generate, at most once per local day) and expires quests itself.
+// The server owns the quest board: it generates it (POST /api/quests/generate, a no-op once the local day's board
+// exists) and expires quests itself. This hook asks once per local day, on mount and whenever the app returns to
+// the foreground, and exposes a manual trigger for pull-to-refresh.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useApp } from "@/context/AppContext";
 
-interface GenRecord {
-  date: string;
-  time: string;
-  rank: string;
-  weakestDomain: string;
-  shadowGap: number;
+/** `YYYY-M-D` in the device's local calendar. */
+function localDay(now: Date = new Date()): string {
+  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
 }
 
 export function useQuestScheduler() {
-  const { user, shadowSelf, getWeakestDomain, generateQuests } = useApp();
+  const { user, generateQuests } = useApp();
   const [generating, setGenerating] = useState(false);
-  const [lastGenRecord, setLastGenRecord] = useState<GenRecord | null>(null);
   const running = useRef(false);
-  const lastRunDate = useRef<string | null>(null);
+  const lastDoneDay = useRef<string | null>(null);
+  const userId = user?.id ?? null;
 
-  const triggerGeneration = useCallback(async () => {
-    if (!user || running.current) return;
+  /** Resolves true when the server answered (a board exists for today); false when held back or failed. */
+  const triggerGeneration = useCallback(async (): Promise<boolean> => {
+    if (!userId || running.current) return false;
     running.current = true;
     setGenerating(true);
     try {
       const result = await generateQuests();
-      if (result.ok) {
-        const now = new Date();
-        lastRunDate.current = now.toDateString();
-        setLastGenRecord({
-          date: now.toISOString().split("T")[0]!,
-          time: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          rank: user.rank,
-          weakestDomain: getWeakestDomain(),
-          shadowGap: Math.round(shadowSelf.gap * 10) / 10,
-        });
-      }
+      if (result.ok) lastDoneDay.current = localDay();
+      return result.ok;
     } finally {
       running.current = false;
       setGenerating(false);
     }
-  }, [user, generateQuests, getWeakestDomain, shadowSelf.gap]);
+  }, [userId, generateQuests]);
+
+  // A different account asks again.
+  useEffect(() => {
+    lastDoneDay.current = null;
+  }, [userId]);
 
   const runIfNewDay = useCallback(() => {
-    if (lastRunDate.current !== new Date().toDateString()) void triggerGeneration();
+    if (lastDoneDay.current !== localDay()) void triggerGeneration();
   }, [triggerGeneration]);
 
-  const hasUser = !!user;
   useEffect(() => {
-    if (hasUser) runIfNewDay();
-  }, [hasUser]);
+    if (userId) runIfNewDay();
+  }, [userId, runIfNewDay]);
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
@@ -59,5 +52,5 @@ export function useQuestScheduler() {
     return () => sub.remove();
   }, [runIfNewDay]);
 
-  return { generating, lastGenRecord, triggerGeneration };
+  return { generating, triggerGeneration };
 }

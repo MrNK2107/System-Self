@@ -9,7 +9,9 @@ import { DOMAIN_COLORS } from "@/constants/domains";
 interface QuestCardProps {
   quest: Quest;
   onComplete: (id: string) => void;
-  onRefuse?: (id: string) => void;
+  onRefuse?: (quest: Quest) => void;
+  /** The weekly refusal allowance is used up (server 409 refusal_limit). */
+  refuseDisabled?: boolean;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -18,7 +20,7 @@ const TYPE_LABELS: Record<string, string> = {
   arc: "ARC",
 };
 
-export function QuestCard({ quest, onComplete, onRefuse }: QuestCardProps) {
+export function QuestCard({ quest, onComplete, onRefuse, refuseDisabled = false }: QuestCardProps) {
   const colors = useColors();
   const domainColor = DOMAIN_COLORS[quest.domain] ?? colors.primary;
   const isActive = quest.status === "active";
@@ -33,7 +35,7 @@ export function QuestCard({ quest, onComplete, onRefuse }: QuestCardProps) {
 
   const handleRefuse = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onRefuse?.(quest.id);
+    onRefuse?.(quest);
   };
 
   return (
@@ -54,6 +56,11 @@ export function QuestCard({ quest, onComplete, onRefuse }: QuestCardProps) {
             <Text style={[styles.typeText, { color: domainColor }]}>{TYPE_LABELS[quest.type]}</Text>
           </View>
           <Text style={[styles.domainText, { color: colors.mutedForeground }]}>{quest.domain}</Text>
+          {quest.chainTotal != null && quest.chainStep != null && (
+            <Text style={[styles.domainText, { color: colors.mutedForeground, fontFamily: "SpaceMono" }]}>
+              STEP {quest.chainStep + 1}/{quest.chainTotal}
+            </Text>
+          )}
         </View>
         {isComplete && <Feather name="check" size={16} color={colors.mutedForeground} />}
         {(isFailed || isRefused) && <Feather name="x" size={16} color={colors.destructive} />}
@@ -77,8 +84,10 @@ export function QuestCard({ quest, onComplete, onRefuse }: QuestCardProps) {
           </TouchableOpacity>
           {onRefuse && quest.type === "daily" && (
             <TouchableOpacity
-              style={[styles.refuseBtn, { borderColor: colors.border }]}
+              style={[styles.refuseBtn, { borderColor: colors.border, opacity: refuseDisabled ? 0.35 : 1 }]}
               onPress={handleRefuse}
+              disabled={refuseDisabled}
+              accessibilityLabel="Refuse"
               activeOpacity={0.7}
             >
               <Feather name="x" size={14} color={colors.mutedForeground} />
