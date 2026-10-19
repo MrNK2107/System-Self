@@ -92,22 +92,35 @@ export async function addDispatch(tx: Pick<Db, "insert">, clanId: string, kind: 
   });
 }
 
+/** How a dispatch reader may name a player: by username while they are in the clan, else by public projection. */
+export interface DispatchHandles {
+  /** The username when the player is a current member of the clan, else null. */
+  member: (userId: string) => string | null;
+  /** The public projection's handle (codename unless public), or null for an account that is gone. */
+  outsider: (userId: string) => string | null;
+}
+
 /**
- * Fills a templated dispatch for a member of `clanId`: a player still in the clan by username (the clanmate
- * projection), a former member by the public projection (codename unless public), a deleted account (the id went
- * null) as FORMER OPERATOR, which also replaces a leading `OPERATOR `. Rows without a template key render as stored.
+ * Fills a templated dispatch for a member of `clanId`. `{actor}` / `{subject}` name a player who was in the clan when
+ * the line was written: by username while still a member, else FORMER OPERATOR (gone or left: a username that readers
+ * once saw is never paired with a codename). `{actor.public}` / `{subject.public}` name a player who was outside the
+ * clan (a challenge opponent): by username if they are a member now, else by public projection, or FORMER OPERATOR
+ * when the account is gone. FORMER OPERATOR also absorbs a leading `OPERATOR `. Rows without a template key render as
+ * stored.
  */
 export function renderDispatch(
   row: { text: string; templateKey: string | null; actorId: string | null; subjectId: string | null },
-  handleOf: (userId: string) => string | null,
+  handles: DispatchHandles,
 ): string {
   if (!row.templateKey) return row.text;
   let text = row.text;
-  for (const [role, id] of [["actor", row.actorId], ["subject", row.subjectId]] as const) {
-    const token = `{${role}}`;
-    if (!text.includes(token)) continue;
-    const handle = id ? handleOf(id) : null;
+  const put = (token: string, handle: string | null) => {
+    if (!text.includes(token)) return;
     text = handle === null ? text.split(`OPERATOR ${token}`).join(FORMER_OPERATOR_HANDLE).split(token).join(FORMER_OPERATOR_HANDLE) : text.split(token).join(handle);
+  };
+  for (const [role, id] of [["actor", row.actorId], ["subject", row.subjectId]] as const) {
+    put(`{${role}}`, id ? handles.member(id) : null);
+    put(`{${role}.public}`, id ? (handles.member(id) ?? handles.outsider(id)) : null);
   }
   return text;
 }
@@ -284,11 +297,17 @@ export async function recentDispatches(db: Reader, clanId: string, now: Date, li
         ),
       )
     : new Set<string>();
-  const handleOf = (userId: string) => {
-    const s = subjects.get(userId);
-    return s ? projectUser(s, members.has(userId) ? "clanmate" : "public").handle : null;
+  const handles: DispatchHandles = {
+    member: (userId) => {
+      const s = subjects.get(userId);
+      return s && members.has(userId) ? projectUser(s, "clanmate").handle : null;
+    },
+    outsider: (userId) => {
+      const s = subjects.get(userId);
+      return s ? projectUser(s, "public").handle : null;
+    },
   };
-  return rows.map((r) => ({ id: r.id, kind: r.kind, text: renderDispatch(r, handleOf), createdAt: r.createdAt.toISOString() }));
+  return rows.map((r) => ({ id: r.id, kind: r.kind, text: renderDispatch(r, handles), createdAt: r.createdAt.toISOString() }));
 }
 
 // --- daily jobs ---------------------------------------------------------------------------------

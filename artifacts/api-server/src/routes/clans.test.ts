@@ -745,10 +745,10 @@ test("dispatches record membership changes without emoji", { skip }, async () =>
   assert.equal(rows.length, 3);
   const body = await mine(l);
   assert.equal(body.dispatches.length, 3);
-  // mem_1 has left: the lines name them by their public codename now, never the username
+  // mem_1 has left: the lines read FORMER OPERATOR, never the username or the codename
   const [p] = await db!.select().from(profiles).where(eq(profiles.userId, u.id));
-  assert.ok(body.dispatches.some((d) => d.text.includes(p!.publicCodename)));
-  assert.ok(!body.dispatches.some((d) => d.text.includes("mem_1")));
+  assert.ok(body.dispatches.some((d) => d.text === "FORMER OPERATOR LEFT THE CLAN."));
+  assert.ok(!body.dispatches.some((d) => d.text.includes("mem_1") || d.text.includes(p!.publicCodename)));
   for (const d of body.dispatches) assert.ok(!/\p{Extended_Pictographic}/u.test(d.text), d.text);
   // profiles untouched
   assert.ok((await db!.select().from(profiles)).length >= 2);

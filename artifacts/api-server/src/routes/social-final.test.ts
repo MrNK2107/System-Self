@@ -232,7 +232,7 @@ test("rivals: a ghost transmission replaced by the template is recorded with mod
 
 // --- 2. handles after leaving and after deletion ---------------------------------------------------
 
-test("clan dispatches render handles at read time: a former member by codename, a deleted one as FORMER OPERATOR", { skip }, async () => {
+test("clan dispatches render handles at read time: a former or deleted member reads FORMER OPERATOR", { skip }, async () => {
   clock = new Date();
   const lead = await mk("lead_1");
   await makePro(lead);
@@ -249,9 +249,10 @@ test("clan dispatches render handles at read time: a former member by codename, 
   assert.equal((await request(a()).post(`/api/clans/${clanId}/join`).set(auth(later.token)).send({})).status, 204);
   for (const viewer of [later, lead]) {
     const texts = (await mine(viewer)).dispatches.map((d) => d.text);
-    assert.ok(!texts.some((t) => t.includes("gone_1")), texts.join(" | "));
-    assert.ok(texts.includes(`OPERATOR ${u.codename} JOINED. Roster: 2.`), texts.join(" | "));
-    assert.ok(texts.includes(`OPERATOR ${u.codename} LEFT THE CLAN.`), texts.join(" | "));
+    // left: neither the username nor the codename (old clanmates could link the two)
+    assert.ok(!texts.some((t) => t.includes("gone_1") || t.includes(u.codename)), texts.join(" | "));
+    assert.ok(texts.includes(`${FORMER_OPERATOR_HANDLE} JOINED. Roster: 2.`), texts.join(" | "));
+    assert.ok(texts.includes(`${FORMER_OPERATOR_HANDLE} LEFT THE CLAN.`), texts.join(" | "));
     assert.ok(texts.includes("CLAN Iron Wolves [IRON] FOUNDED BY lead_1. Forming. 8 operators required."), texts.join(" | "));
   }
 
@@ -274,7 +275,7 @@ test("clan dispatches render handles at read time: a former member by codename, 
   assert.ok(!JSON.stringify(handles).includes("gone_1") && !JSON.stringify(handles).includes(u.codename));
 });
 
-test("a deleted leader's FOUNDED BY and line reads FORMER OPERATOR; the leadership line keeps the current leader", { skip }, async () => {
+test("a deleted leader's FOUNDED BY line reads FORMER OPERATOR; the leadership line keeps the current leader", { skip }, async () => {
   clock = new Date();
   const lead = await mk("lead_1");
   await makePro(lead);
@@ -512,4 +513,25 @@ test("concurrent check-ins never pass the daily cap", { skip }, async () => {
   );
   assert.equal(results.filter((r) => r.status === 201).length, 10);
   assert.equal(results.filter((r) => r.status === 429).length, 4);
+});
+
+test("challenge dispatches: a participant who later leaves reads FORMER OPERATOR; an outsider keeps the public projection", { skip }, async () => {
+  clock = at(D0);
+  const x = await mk("xena_1"); // anonymous: outside her clan only her codename is shown
+  const y = await mk("yuri_1", "public");
+  const mate = await mk("mate_1");
+  for (const u of [x, y]) await makePro(u);
+  const clanX = await clanOf(x, mate);
+  await db!.insert(follows).values({ followerId: x.id, followeeId: y.id });
+  const created = await request(a()).post("/api/challenges").set(auth(x.token)).send({ opponent: y.name, domain: "MIND", days: 3 });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal((await request(a()).post(`/api/challenges/${created.body.id}/accept`).set(auth(y.token)).send({})).status, 200);
+  const line = async () => (await mine(mate)).dispatches.find((d) => d.kind === "challenge")!.text;
+  assert.equal(await line(), "CHALLENGE — xena_1 vs yuri_1 — MIND, 3 days.");
+  await db!.delete(clanMembers).where(eq(clanMembers.userId, x.id));
+  assert.equal(await line(), `CHALLENGE — ${FORMER_OPERATOR_HANDLE} vs yuri_1 — MIND, 3 days.`);
+  assert.ok(!(await line()).includes(x.codename));
+  await db!.delete(users).where(eq(users.id, y.id));
+  assert.equal(await line(), `CHALLENGE — ${FORMER_OPERATOR_HANDLE} vs ${FORMER_OPERATOR_HANDLE} — MIND, 3 days.`);
+  void clanX;
 });

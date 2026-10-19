@@ -278,8 +278,9 @@ async function handleFor(tx: Reader, viewerId: string, otherId: string, now: Dat
 
 /**
  * Posts a challenge line to each participant's clan (once when both share one). No scores or gains: only handles,
- * domain and days. The line names players by `{actor}` / `{subject}` placeholders that each clan renders at read time
- * (see renderDispatch): a member of that clan by username, anyone else by the public projection.
+ * domain and days. The line names players by `{actor}` / `{subject}` placeholders, rendered by each clan at read time
+ * (see renderDispatch); for a clan the player is not in, the placeholder becomes `{actor.public}` / `{subject.public}`
+ * (public projection), so only a player who was a member is ever named by username, and only while still a member.
  */
 export async function postChallengeDispatch(
   tx: Tx,
@@ -288,16 +289,20 @@ export async function postChallengeDispatch(
   now: Date,
 ): Promise<void> {
   const members = await tx
-    .select({ clanId: clanMembers.clanId })
+    .select({ userId: clanMembers.userId, clanId: clanMembers.clanId })
     .from(clanMembers)
     .where(inArray(clanMembers.userId, [c.challengerId, c.opponentId]));
   const clanIds = [...new Set(members.map((m) => m.clanId))].sort();
   for (const clanId of clanIds) {
+    const inClan = (userId: string | undefined) => !!userId && members.some((m) => m.userId === userId && m.clanId === clanId);
+    let text = line.text;
+    if (!inClan(line.actorId)) text = text.split("{actor}").join("{actor.public}");
+    if (!inClan(line.subjectId)) text = text.split("{subject}").join("{subject.public}");
     await addDispatch(
       tx,
       clanId,
       "challenge",
-      line.text,
+      text,
       now,
       line.templateKey ? { templateKey: line.templateKey, actorId: line.actorId ?? null, subjectId: line.subjectId ?? null } : undefined,
     );
