@@ -72,6 +72,10 @@ export function describeSocialError(err: unknown): string {
       return "That player is blocked.";
     case "self_target":
       return "That is you.";
+    case "already_reported":
+      return "Already reported. It is under review.";
+    case "report_limit":
+      return "Report limit reached for today.";
     default:
       return (err.status ?? 0) >= 500 ? "The system is unavailable. Retry shortly." : "The request was rejected.";
   }

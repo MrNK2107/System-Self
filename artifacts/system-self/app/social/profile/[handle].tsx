@@ -97,39 +97,45 @@ export default function SocialProfileScreen() {
           {error ? <AuthNotice message={error} /> : null}
           {reported ? <AuthNotice tone="info" message="Report received. It will be reviewed." /> : null}
 
-          {view.following ? (
-            <AuthButton label="UNFOLLOW" loading={busy} onPress={() => void run(() => actions.unfollow(handle))} />
+          {view.isSelf ? (
+            <AuthNotice tone="info" message="This is you." />
           ) : (
-            <AuthButton label="FOLLOW" loading={busy} onPress={() => void run(() => actions.follow(handle))} />
-          )}
+            <>
+            {view.following ? (
+              <AuthButton label="UNFOLLOW" loading={busy} onPress={() => void run(() => actions.unfollow(handle))} />
+            ) : (
+              <AuthButton label="FOLLOW" loading={busy} onPress={() => void run(() => actions.follow(handle))} />
+            )}
 
-          {confirmBlock ? (
-            <View style={s.confirm}>
-              <Text style={[s.hint, { color: colors.mutedForeground }]}>
-                Blocking removes follows both ways. They will not find you, follow you or be matched with you.
-              </Text>
-              <AuthButton
-                label="CONFIRM BLOCK"
-                loading={busy}
-                onPress={() =>
-                  void run(
-                    () => actions.block(handle),
-                    () => router.back(),
-                  )
-                }
-              />
-              <AuthLink label="CANCEL" onPress={() => setConfirmBlock(false)} />
-            </View>
-          ) : (
-            <AuthLink label="BLOCK" onPress={() => setConfirmBlock(true)} />
+            {confirmBlock ? (
+              <View style={s.confirm}>
+                <Text style={[s.hint, { color: colors.mutedForeground }]}>
+                  Blocking removes follows both ways. They will not find you, follow you or be matched with you.
+                </Text>
+                <AuthButton
+                  label="CONFIRM BLOCK"
+                  loading={busy}
+                  onPress={() =>
+                    void run(
+                      () => actions.block(handle),
+                      () => router.back(),
+                    )
+                  }
+                />
+                <AuthLink label="CANCEL" onPress={() => setConfirmBlock(false)} />
+              </View>
+            ) : (
+              <AuthLink label="BLOCK" onPress={() => setConfirmBlock(true)} />
+            )}
+            <AuthLink
+              label="REPORT"
+              onPress={() => {
+                setReportError(null);
+                setReporting(true);
+              }}
+            />
+            </>
           )}
-          <AuthLink
-            label="REPORT"
-            onPress={() => {
-              setReportError(null);
-              setReporting(true);
-            }}
-          />
         </>
       )}
       <ReportSheet

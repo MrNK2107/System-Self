@@ -3,7 +3,7 @@ import { domainScores, profiles, shadowSelves, users, type Db } from "@workspace
 import { RANKED_DOMAINS, localDate, type Rank, type RankedDomain } from "@workspace/engine";
 import type { PublicProfile } from "@workspace/contracts";
 import { toShadowState } from "./scoring";
-import { hiddenAndTrajectory } from "./state";
+import { hiddenAndTrajectoryBatch } from "./state";
 
 /**
  * How the viewer stands to the subject. This is the single place that decides what one player may see of
@@ -66,7 +66,7 @@ export function projectUser(subject: ProjectionSubject, relation: Relation, opts
 }
 
 /**
- * Loads projection subjects (rank from the profile, scores from domain_scores, trajectory from the same
+ * Loads projection subjects in a constant number of queries (rank from the profile, scores from domain_scores, trajectory from the same
  * snapshots as the game state) for onboarded users, keyed by user id. Unknown or un-onboarded ids are absent.
  */
 export async function loadProjectionSubjects(
@@ -92,18 +92,25 @@ export async function loadProjectionSubjects(
   const scoreRows = await db.select().from(domainScores).where(inArray(domainScores.userId, ids));
   const shadowRows = await db.select().from(shadowSelves).where(inArray(shadowSelves.userId, ids));
   const shadowActive = new Set(shadowRows.filter((r) => toShadowState(r) !== null).map((r) => r.userId));
+  const scoresOf = new Map<string, Record<RankedDomain, number>>();
+  for (const r of rows) scoresOf.set(r.userId, Object.fromEntries(RANKED_DOMAINS.map((d) => [d, 0])) as Record<RankedDomain, number>);
+  for (const s of scoreRows) {
+    const m = scoresOf.get(s.userId);
+    if (m && s.domain in m) m[s.domain as RankedDomain] = s.score;
+  }
+  const trends = await hiddenAndTrajectoryBatch(
+    db,
+    rows.map((r) => ({ userId: r.userId, today: localDate(now, r.timezone), scoreMap: scoresOf.get(r.userId)! })),
+  );
   for (const r of rows) {
-    const scores = Object.fromEntries(RANKED_DOMAINS.map((d) => [d, 0])) as Record<RankedDomain, number>;
-    for (const s of scoreRows) if (s.userId === r.userId && s.domain in scores) scores[s.domain as RankedDomain] = s.score;
-    const { trajectory } = await hiddenAndTrajectory(db, r.userId, localDate(now, r.timezone), scores);
     out.set(r.userId, {
       userId: r.userId,
       username: r.username,
       identitySetting: r.identitySetting as IdentitySetting,
       publicCodename: r.publicCodename,
       rank: r.rank as Rank,
-      scores,
-      trajectory,
+      scores: scoresOf.get(r.userId)!,
+      trajectory: trends.get(r.userId)!.trajectory,
       shadowActive: shadowActive.has(r.userId),
     });
   }

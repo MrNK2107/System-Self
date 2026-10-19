@@ -36,6 +36,8 @@ export const SocialProfileResponseSchema = z.object({
   profile: PublicProfileSchema,
   /** The viewer follows this player. */
   following: z.boolean(),
+  /** This is the viewer's own profile (no follow / block / report actions). */
+  isSelf: z.boolean(),
 });
 export type SocialProfileResponse = z.infer<typeof SocialProfileResponseSchema>;
 

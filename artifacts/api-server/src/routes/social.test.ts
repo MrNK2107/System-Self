@@ -80,25 +80,62 @@ test("search requires 3+ chars and a session", { skip }, async () => {
   assert.equal((await request(a).get("/api/social/search?q=abc")).status, 401);
 });
 
-test("anonymous user not searchable; public and semi-public are, projected per identity", { skip }, async () => {
+test("search: public users by username prefix, semi-public only by codename word, anonymous never", { skip }, async () => {
   const a = app();
   const me = await mk(a, "me_1", "public");
   await mk(a, "pubby_1", "public");
   const semi = await mk(a, "pubsemi_1", "semi-public");
   const anon = await mk(a, "pubanon_1", "anonymous");
+  const search = async (q: string) => (await request(a).get(`/api/social/search?q=${encodeURIComponent(q)}`).set(auth(me.token))).body;
 
   const res = await request(a).get("/api/social/search?q=pub").set(auth(me.token));
   assert.equal(res.status, 200);
   const list = assertContract(PublicProfileListSchema, res.body);
-  assert.equal(list.length, 2);
-  const byHandle = new Map(list.map((p) => [p.handle, p]));
-  assert.equal(byHandle.get("pubby_1")!.isCodename, false);
-  assert.equal(byHandle.get(semi.codename)!.isCodename, true);
-  assert.ok(!byHandle.has("pubsemi_1"));
-  for (const p of list) assert.equal("scores" in p, false);
-  deepScan(res.body, [anon.name, anon.codename, "pubsemi_1"]);
-  const exact = await request(a).get("/api/social/search?q=pubanon_1").set(auth(me.token));
-  assert.deepEqual(exact.body, []);
+  assert.deepEqual(list.map((p) => p.handle), ["pubby_1"]);
+  assert.equal(list[0]!.isCodename, false);
+  assert.equal("scores" in list[0]!, false);
+  deepScan(res.body, [anon.name, anon.codename, "pubsemi_1", semi.codename]);
+
+  // a semi-public username (full, or a prefix) says nothing about them
+  assert.deepEqual(await search("pubsemi_1"), []);
+  assert.deepEqual(await search("pubsemi"), []);
+  assert.deepEqual(await search("pubanon_1"), []);
+
+  // the codename word prefix finds them, projected as a codename; the fixed USER prefix matches nobody
+  const word = semi.codename.slice("USER // ".length); // e.g. BOLT-3
+  for (const q of [word.slice(0, 3), word.toLowerCase(), word]) {
+    const hit = await search(q);
+    assert.ok(hit.some((p: { handle: string }) => p.handle === semi.codename), `codename word ${q} finds the semi-public user`);
+    for (const p of hit) assert.equal(p.isCodename, true);
+    deepScan(hit, ["pubsemi_1", anon.name]);
+  }
+  assert.deepEqual(await search("USE"), []);
+  assert.deepEqual(await search("USER"), []);
+  assert.deepEqual(await search("user //"), []);
+  // never the anonymous user's codename word
+  const anonWord = anon.codename.slice("USER // ".length);
+  assert.ok(!(await search(anonWord)).some((p: { handle: string }) => p.handle === anon.codename));
+});
+
+test("search orders codename hits by codename, never by the hidden username", { skip }, async () => {
+  const a = app();
+  const me = await mk(a, "me_1", "public");
+  // usernames sort the opposite way to the codenames we force
+  const x = await mk(a, "aaa_first", "semi-public");
+  const y = await mk(a, "zzz_last", "semi-public");
+  await db!.update(profiles).set({ publicCodename: "USER // ZETA-1" }).where(eq(profiles.userId, x.id));
+  await db!.update(profiles).set({ publicCodename: "USER // ZEST-1" }).where(eq(profiles.userId, y.id));
+  const r = await request(a).get("/api/social/search?q=zes").set(auth(me.token));
+  assert.deepEqual(handles(r.body), ["USER // ZEST-1"]);
+  const r2 = await request(a).get("/api/social/search?q=zet").set(auth(me.token));
+  assert.deepEqual(handles(r2.body), ["USER // ZETA-1"]);
+  await db!.update(profiles).set({ publicCodename: "USER // ZETB-1" }).where(eq(profiles.userId, y.id));
+  const both = await request(a).get("/api/social/search?q=zet").set(auth(me.token));
+  assert.deepEqual(handles(both.body), ["USER // ZETA-1", "USER // ZETB-1"]);
+  // swap the codenames: the order follows the codenames, not the usernames
+  await db!.update(profiles).set({ publicCodename: "USER // ZETC-1" }).where(eq(profiles.userId, x.id));
+  const swapped = await request(a).get("/api/social/search?q=zet").set(auth(me.token));
+  assert.deepEqual(handles(swapped.body), ["USER // ZETB-1", "USER // ZETC-1"]);
 });
 
 test("search excludes self, treats wildcard characters literally, and hides blocked users both ways", { skip }, async () => {
@@ -204,6 +241,7 @@ test("profile view: a follower sees rank/trajectory/shadow only; non-public user
   assert.equal(before.status, 200);
   const view = assertContract(SocialProfileResponseSchema, before.body);
   assert.equal(view.following, false);
+  assert.equal(view.isSelf, false);
   assert.equal(view.profile.handle, semi.codename);
   assert.equal("scores" in view.profile, false);
   deepScan(before.body, [semi.name]);
@@ -216,6 +254,8 @@ test("profile view: a follower sees rank/trajectory/shadow only; non-public user
   assert.equal((await request(a).get(`/api/social/profile/${enc(anon.codename)}`).set(auth(me.token))).status, 404);
   const own = await request(a).get(`/api/social/profile/${me.name}`).set(auth(me.token));
   assert.equal(own.status, 200);
+  assert.equal(own.body.isSelf, true);
+  assert.equal(own.body.following, false);
   assert.ok(own.body.profile.scores);
   deepScan(own.body, []);
 });
@@ -262,6 +302,61 @@ test("report: 201, stored for review; validates reason and subject", { skip }, a
   assert.equal((await db!.select().from(userReports)).length, 2);
 });
 
+test("report: one open report per reporter and subject (409 already_reported); resolved ones can be re-filed", { skip }, async () => {
+  const a = app();
+  const me = await mk(a, "me_1", "public");
+  const pub = await mk(a, "pubby_1", "public");
+  const report = (reason: string) => request(a).post("/api/social/report").set(auth(me.token)).send({ subject: pub.name, reason });
+  assert.equal((await report("one")).status, 201);
+  const dup = await report("two");
+  assert.equal(dup.status, 409);
+  assert.equal(dup.body.code, "already_reported");
+  assert.equal((await db!.select().from(userReports)).length, 1);
+  await db!.update(userReports).set({ resolvedAt: new Date() });
+  assert.equal((await report("three")).status, 201);
+});
+
+test("report: at most 10 per reporter per local day (429 report_limit), the next day is free", { skip }, async () => {
+  let now = new Date("2026-06-08T06:30:00Z"); // 12:00 in Asia/Kolkata
+  const a = app({ now: () => now });
+  const me = await mk(a, "me_1", "public");
+  const targets = [];
+  for (let i = 0; i < 11; i++) targets.push(await mk(app(), `tgt_${i}`, "public")); // a fresh app each: the register limiter is per app
+  const report = (name: string) => request(a).post("/api/social/report").set(auth(me.token)).send({ subject: name, reason: "spam" });
+  for (let i = 0; i < 10; i++) assert.equal((await report(targets[i]!.name)).status, 201, `report ${i}`);
+  const over = await report(targets[10]!.name);
+  assert.equal(over.status, 429);
+  assert.equal(over.body.code, "report_limit");
+  assert.equal((await db!.select().from(userReports)).length, 10);
+  // reports are stamped by the real clock; age them into the previous local day, then the injected clock moves on
+  await db!.update(userReports).set({ createdAt: new Date(now.getTime() - 86_400_000) });
+  assert.equal((await report(targets[10]!.name)).status, 201);
+});
+
+test("block and report by an anonymous user's codename keep working (a codename is not linked to identity)", { skip }, async () => {
+  const a = app();
+  const me = await mk(a, "me_1", "public");
+  const anon = await mk(a, "anony_1", "anonymous");
+  assert.equal((await request(a).post(`/api/social/block/${enc(anon.codename)}`).set(auth(me.token))).status, 204);
+  assert.equal((await request(a).post("/api/social/report").set(auth(me.token)).send({ subject: anon.codename, reason: "x" })).status, 201);
+});
+
+test("following list excludes players blocked in either direction (follow/block race)", { skip }, async () => {
+  const a = app();
+  const me = await mk(a, "me_1", "public");
+  const p1 = await mk(a, "pubby_1", "public");
+  const p2 = await mk(a, "pubby_2", "public");
+  await request(a).post(`/api/social/follow/${p1.name}`).set(auth(me.token));
+  await request(a).post(`/api/social/follow/${p2.name}`).set(auth(me.token));
+  // simulate the race: block rows exist while the follow rows survived
+  await db!.insert(blocks).values({ blockerId: me.id, blockedId: p1.id });
+  await db!.insert(blocks).values({ blockerId: p2.id, blockedId: me.id });
+  assert.equal((await db!.select().from(follows)).length, 2);
+  assert.deepEqual((await request(a).get("/api/social/following").set(auth(me.token))).body, []);
+  // and they do not count as followers either
+  assert.equal((await request(a).get("/api/social/followers/count").set(auth(p1.token))).body.count, 0);
+});
+
 test("mutations replay under the same Idempotency-Key", { skip }, async () => {
   const a = app();
   const me = await mk(a, "me_1", "public");
@@ -294,5 +389,5 @@ test("deep scan: social responses never carry a hidden key or a non-public user'
     (await request(a).post("/api/social/block/nobody_x").set(auth(me.token))).body,
   ];
   for (const b of bodies) deepScan(b, [anon.name, semi.name, "hidden"]);
-  assert.equal((bodies[0] as unknown[]).length, 2);
+  assert.equal((bodies[0] as unknown[]).length, 1); // only the public user matches a username prefix
 });

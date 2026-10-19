@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import {
   achievements,
   dailySnapshots,
@@ -52,37 +52,67 @@ export async function unseenNotices(
   return { items: rows.slice(0, NOTICE_PAGE_SIZE).map(toNotice), hasMore: rows.length > NOTICE_PAGE_SIZE };
 }
 
+export type Trajectory = "up" | "stable" | "down";
+
 /**
- * The user's hidden score (server-side only: callers must never put it in a response) and 7-day trajectory.
- * Shared by the game state and the social projections, so both derive from the same domain scores.
+ * Hidden score (server-side only: callers must never put it in a response) and 7-day trajectory for many users
+ * in a constant number of queries (one for resolved quests, one for the newest 30 snapshots of each user).
+ * Each user is judged on their own `today`. Shared by the game state and the social projections.
  */
+export async function hiddenAndTrajectoryBatch(
+  db: Pick<Db, "select">,
+  entries: readonly { userId: string; today: string; scoreMap: Record<RankedDomain, number> }[],
+): Promise<Map<string, { hidden: number; trajectory: Trajectory }>> {
+  const out = new Map<string, { hidden: number; trajectory: Trajectory }>();
+  if (entries.length === 0) return out;
+  const ids = entries.map((e) => e.userId);
+  const earliest = entries.map((e) => addDays(e.today, -29)).sort()[0]!;
+
+  const resolved = await db
+    .select({ userId: quests.userId, status: quests.status, day: quests.resolvedLocalDate })
+    .from(quests)
+    .where(
+      and(
+        inArray(quests.userId, ids),
+        inArray(quests.status, ["complete", "failed", "refused"]),
+        gte(quests.resolvedLocalDate, earliest),
+      ),
+    );
+  const ranked = db
+    .select({
+      userId: dailySnapshots.userId,
+      date: dailySnapshots.localDate,
+      hidden: dailySnapshots.hidden,
+      rn: sql<number>`row_number() over (partition by ${dailySnapshots.userId} order by ${dailySnapshots.localDate} desc)`.as("rn"),
+    })
+    .from(dailySnapshots)
+    .where(inArray(dailySnapshots.userId, ids))
+    .as("ranked");
+  const recent = await db.select().from(ranked).where(lte(ranked.rn, 30));
+
+  for (const e of entries) {
+    const since = addDays(e.today, -29);
+    const mine = resolved.filter((q) => q.userId === e.userId && q.day !== null && q.day >= since);
+    const completed = mine.filter((q) => q.status === "complete").length;
+    const hidden = hiddenScore(e.scoreMap, completionMultiplier(mine.length, completed));
+    const snapshots = recent
+      .filter((r) => r.userId === e.userId)
+      .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0))
+      .map((r) => ({ date: r.date, hidden: r.hidden }));
+    out.set(e.userId, { hidden, trajectory: trajectory(snapshots, hidden) });
+  }
+  return out;
+}
+
+/** The user's hidden score (never in a response) and trajectory. */
 export async function hiddenAndTrajectory(
   db: Pick<Db, "select">,
   userId: string,
   today: string,
   scoreMap: Record<RankedDomain, number>,
-): Promise<{ hidden: number; trajectory: "up" | "stable" | "down" }> {
-  const resolvedQuests = await db
-    .select({ status: quests.status })
-    .from(quests)
-    .where(
-      and(
-        eq(quests.userId, userId),
-        inArray(quests.status, ["complete", "failed", "refused"]),
-        gte(quests.resolvedLocalDate, addDays(today, -29)),
-      ),
-    );
-  const completed = resolvedQuests.filter((q) => q.status === "complete").length;
-  const hidden = hiddenScore(scoreMap, completionMultiplier(resolvedQuests.length, completed));
-
-  const recent = await db
-    .select({ date: dailySnapshots.localDate, hidden: dailySnapshots.hidden })
-    .from(dailySnapshots)
-    .where(eq(dailySnapshots.userId, userId))
-    .orderBy(desc(dailySnapshots.localDate))
-    .limit(30);
-  const snapshots = recent.reverse().map((s) => ({ date: s.date, hidden: s.hidden }));
-  return { hidden, trajectory: trajectory(snapshots, hidden) };
+): Promise<{ hidden: number; trajectory: Trajectory }> {
+  const r = (await hiddenAndTrajectoryBatch(db, [{ userId, today, scoreMap }])).get(userId);
+  return r!;
 }
 
 /** Builds the client-facing game state. The hidden score is used internally but never included. */

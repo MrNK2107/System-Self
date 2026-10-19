@@ -1,15 +1,17 @@
 // Smoke: identity projection, search, follow, block and report against a running API.
 // register + onboard four users (viewer semi-public, one public, one semi-public, one anonymous) ->
-// search finds the public + semi-public users (by username / codename), never the anonymous one ->
+// search finds the public user by username and semi-public users only by codename word, never the anonymous one ->
 // follow both -> following list is the projection (no scores, no usernames of non-public users) ->
 // block one -> following it again is 403 -> report the anonymous user by codename -> 201.
 // Usage: SMOKE_API_URL=http://localhost:3001 pnpm exec tsx scripts/smoke/social.ts
-// (the register limiter allows 10 per 15 min per IP: restart the API between runs if you see 429)
+// (the register limiter allows 10 per 15 min per IP: restart the API between runs if you see 429; the codename scan
+// makes ~60 searches, so start the API with RATE_LIMIT_MAX=1000)
 import assert from "node:assert/strict";
 import { createApiClient, ApiError, type ApiClient } from "../../lib/api/client";
 import type { KeyValueStorage } from "../../lib/api/outbox";
 import type { Session, TokenStore } from "../../lib/api/session";
 import { createAuthActions } from "../../lib/auth/actions";
+import { CODENAME_WORDS } from "@workspace/engine";
 import { newClientId } from "../../lib/game/actions";
 import { submitOnboarding } from "../../lib/onboarding/actions";
 import { buildOnboardingPayload, draftFromParams, type IdentitySetting } from "../../lib/onboarding/payload";
@@ -94,20 +96,31 @@ async function main() {
   const anon = await makePlayer(prefix, "a", "anonymous");
   step("register + onboard 4 users", { prefix });
 
+  // public users are found by username prefix; semi-public and anonymous users never are
   const found = await searchPlayers(viewer.api, prefix);
-  const handles = found.map((p) => p.handle);
-  assert.equal(found.length, 2, `expected 2 results, got ${JSON.stringify(handles)}`);
-  assert.ok(handles.includes(pub.username), "the public user is found by username");
-  const semiResult = found.find((p) => p.handle !== pub.username)!;
-  assert.equal(semiResult.isCodename, true);
-  assert.match(semiResult.handle, /^USER \/\/ [A-Z]+-[1-9]$/);
+  assert.deepEqual(found.map((p) => p.handle), [pub.username], "only the public user matches the username prefix");
+  assert.equal(found[0]!.isCodename, false);
   assert.ok(!JSON.stringify(found).includes(semi.username), "the semi-public username is not shown");
   assert.ok(!JSON.stringify(found).includes(anon.username), "the anonymous user is not searchable");
   for (const p of found) assert.equal("scores" in p, false);
-  step("search finds public + semi-public, not anonymous", { handles });
+  step("search finds the public user by username prefix only", { handles: found.map((p) => p.handle) });
 
-  assert.deepEqual(await searchPlayers(viewer.api, `${prefix}_a`), []);
-  step("anonymous username search is empty");
+  assert.deepEqual(await searchPlayers(viewer.api, semi.username), []);
+  assert.deepEqual(await searchPlayers(viewer.api, anon.username), []);
+  assert.deepEqual(await searchPlayers(viewer.api, "USER"), []);
+  step("a semi-public or anonymous username (and the fixed USER prefix) finds nothing");
+
+  // semi-public users are found by the codename word. The viewer cannot know it, so scan word prefixes
+  // (the dev database may hold other semi-public users: any codename hit is a valid target).
+  const codenameHits = new Map<string, Awaited<ReturnType<typeof searchPlayers>>[number]>();
+  for (const prefix3 of new Set(CODENAME_WORDS.map((w) => w.slice(0, 3).toLowerCase()))) {
+    for (const p of await searchPlayers(viewer.api, prefix3)) if (p.isCodename) codenameHits.set(p.handle, p);
+  }
+  assert.ok(codenameHits.size >= 1, "a semi-public user is found by codename word");
+  for (const p of codenameHits.values()) assert.match(p.handle, /^USER \/\/ [A-Z]+-[1-9]$/);
+  assert.ok(!JSON.stringify([...codenameHits.values()]).includes(semi.username));
+  const semiResult = [...codenameHits.values()][0]!;
+  step("semi-public users are found by codename word, shown as codenames", { hits: codenameHits.size });
 
   assert.ok((await followPlayer(viewer.api, synced, pub.username, newClientId("f"))).ok);
   assert.ok((await followPlayer(viewer.api, synced, semiResult.handle, newClientId("f"))).ok);
@@ -121,6 +134,7 @@ async function main() {
   }
   assert.ok(!JSON.stringify(following).includes(semi.username));
   assert.equal(await fetchFollowersCount(pub.api), 1);
+  assert.equal((await fetchSocialProfile(viewer.api, viewer.username)).isSelf, true);
   const view = await fetchSocialProfile(viewer.api, semiResult.handle);
   assert.equal(view.following, true);
   assert.equal(view.profile.handle, semiResult.handle);

@@ -85,7 +85,7 @@ test("reads: search, following, followers count, profile", async () => {
     if (c.path.startsWith("/api/social/search")) return [profile()];
     if (c.path === "/api/social/following") return [profile({ rank: "B" })];
     if (c.path === "/api/social/followers/count") return { count: 4 };
-    return { profile: profile(), following: true };
+    return { profile: profile(), following: true, isSelf: false };
   });
   assert.equal((await searchPlayers(api, "bol"))[0]!.handle, "USER // BOLT-3");
   assert.equal((await fetchFollowing(api))[0]!.rank, "B");
@@ -167,6 +167,8 @@ test("errors read in the SYSTEM voice", () => {
   assert.equal(describeSocialError(e(404, "not_found")), "No such player.");
   assert.equal(describeSocialError(e(403, "blocked")), "That player is blocked.");
   assert.equal(describeSocialError(e(400, "self_target")), "That is you.");
+  assert.equal(describeSocialError(e(409, "already_reported")), "Already reported. It is under review.");
+  assert.equal(describeSocialError(e(429, "report_limit")), "Report limit reached for today.");
   assert.equal(describeSocialError(new ApiError({ kind: "network", message: "x" })), "No connection. Check your signal and retry.");
   assert.equal(describeSocialError(e(500)), "The system is unavailable. Retry shortly.");
   assert.equal(describeSocialError(new Error("boom")), "The request failed. Retry.");
