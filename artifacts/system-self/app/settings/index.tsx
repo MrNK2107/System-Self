@@ -17,6 +17,7 @@ import { getOutbox } from "@/lib/api/outbox";
 import { pendingLocalCount } from "@/lib/api/user-scope";
 import { applyProfile } from "@/lib/onboarding/actions";
 import { describeSettingsError, type IdentitySetting } from "@/lib/settings/actions";
+import { shareExportOnDevice } from "@/lib/settings/export-device";
 import { settingsActions } from "@/lib/settings/instance";
 
 const MORNING_TIMES = ["05:00", "05:30", "06:00", "06:30", "07:00", "07:30", "08:00", "09:00"];
@@ -62,6 +63,8 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportNote, setExportNote] = useState<string | null>(null);
   // Entries still on this device after a last flush; set while the sign-out waits for confirmation.
   const [unsent, setUnsent] = useState<number | null>(null);
 
@@ -101,6 +104,21 @@ export default function SettingsScreen() {
   };
 
   // Signing out wipes the device: send what is queued first, and ask before erasing what could not be sent.
+  const exportData = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportNote(null);
+    setError(null);
+    try {
+      const outcome = await shareExportOnDevice(await settingsActions.exportMyData());
+      if (outcome === "too-large") setExportNote("Your export is too large to share as text here. Open the app on a device that supports file sharing.");
+    } catch (e) {
+      setError(describeSettingsError(e, "export").message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleSignOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
@@ -238,7 +256,11 @@ export default function SettingsScreen() {
         <SettingsRow icon="file-text" label="Terms" onPress={() => router.push("/legal/terms")} />
         <Separator />
         <SettingsRow icon="shield" label="Privacy" onPress={() => router.push("/legal/privacy")} />
+        <Separator />
+        <SettingsRow icon="download" label="Export my data" trailing={null} busy={exporting} onPress={() => void exportData()} />
       </SettingsCard>
+
+      {exportNote ? <AuthNotice message={exportNote} /> : null}
 
       <SettingsCard>
         <SettingsRow icon="log-out" label="Sign out" trailing={null} busy={signingOut} onPress={() => void handleSignOut()} />

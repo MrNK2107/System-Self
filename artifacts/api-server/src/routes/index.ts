@@ -4,6 +4,7 @@ import type { AiDeps } from "../lib/ai";
 import type { Mailer } from "../lib/mailer";
 import { createRequireAuth } from "../middlewares/auth";
 import { adherenceRoutes } from "./adherence";
+import { accountRoutes } from "./account";
 import { adminRoutes } from "./admin";
 import { adminMetricsRoutes } from "./admin-metrics";
 import { billingRoutes } from "./billing";
@@ -49,10 +50,11 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
   router.use(authRoutes({ db, mailer, requireAuth, timezoneKnown }));
 
   // Private surfaces. requireAuth is mounted per prefix so unknown /api paths fall through to 404.
-  router.use(["/system", "/admin", "/onboarding", "/profile", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym", "/adherence", "/comeback", "/seasons", "/progress", "/social", "/rivals", "/clans", "/challenges", "/duo", "/finance", "/custom-domains", "/push", "/notifications", "/history", "/rank-freeze"], requireAuth);
+  router.use(["/system", "/admin", "/onboarding", "/profile", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym", "/adherence", "/comeback", "/seasons", "/progress", "/social", "/rivals", "/clans", "/challenges", "/duo", "/finance", "/custom-domains", "/push", "/notifications", "/history", "/rank-freeze", "/account"], requireAuth);
   router.use(systemRoutes(db));
   router.use(historyRoutes(db, ai, deps.now));
   if (db) {
+    router.use(accountRoutes(db, deps.now));
     router.use(billingRoutes(db, requireAuth, deps.now, deps.revenuecatSecret, deps.revenuecat ?? null));
     router.use(adminRoutes(db, deps.now));
     router.use(adminMetricsRoutes(db, deps.now));

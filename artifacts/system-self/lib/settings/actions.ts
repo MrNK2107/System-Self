@@ -72,6 +72,12 @@ export function createSettingsActions(deps: SettingsActionDeps) {
         await tokens.set(null);
       }
     },
+
+    /** Everything the server stores about the user, as pretty JSON text ready to save or share. 429 after a few calls an hour. */
+    async exportMyData(now: Date = new Date()): Promise<{ filename: string; text: string }> {
+      const body = await api.request<unknown>("GET", "/api/account/export", { timeoutMs: 60_000 });
+      return { filename: `system-self-export-${now.toISOString().slice(0, 10)}.json`, text: JSON.stringify(body, null, 2) };
+    },
   };
 }
 
@@ -85,7 +91,7 @@ export function validatePasswordChange(current: string, next: string): string | 
   return null;
 }
 
-export type SettingsErrorContext = "schedule" | "identity" | "verify-request" | "verify" | "password" | "delete";
+export type SettingsErrorContext = "schedule" | "identity" | "verify-request" | "verify" | "password" | "delete" | "export";
 
 const CODE_MESSAGES: Record<string, string> = {
   invalid_code: "That code is incorrect.",
@@ -100,6 +106,7 @@ export function describeSettingsError(err: unknown, context: SettingsErrorContex
 
   const status = err.status ?? 0;
   if (err.code === "code_rate_limited") return { message: "Too many codes requested. Try again later." };
+  if (status === 429 && context === "export") return { message: "You can export a few times an hour. Try again later." };
   if (status === 429) return { message: "Too many attempts. Wait a moment, then retry." };
   if (status >= 500) return { message: "The system is unavailable. Retry shortly." };
   if (err.code === "invalid_password") return { message: "That password is incorrect." };

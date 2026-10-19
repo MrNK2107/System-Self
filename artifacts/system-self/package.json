@@ -7,6 +7,7 @@
     "dev": "pnpm exec expo start --localhost --port 8081",
     "build": "node scripts/build.js",
     "serve": "node server/serve.js",
+    "gen:legal": "node scripts/gen-legal.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test --test-concurrency=1 \"lib/**/*.test.ts\""
   },
@@ -65,8 +66,10 @@
     "@workspace/engine": "workspace:*",
     "expo-audio": "~1.1.1",
     "expo-device": "~8.0.10",
+    "expo-file-system": "~19.0.24",
     "expo-notifications": "~0.32.17",
     "expo-secure-store": "~15.0.8",
+    "expo-sharing": "~14.0.8",
     "react-native-purchases": "^10.14.0"
   }
 }

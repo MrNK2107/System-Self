@@ -3,31 +3,33 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { AuthButton, AuthShell } from "@/components/AuthShell";
+import { MarkdownView } from "@/components/MarkdownView";
 import { useColors } from "@/hooks/useColors";
+import { LEGAL_DOCS } from "@/lib/legal/documents.generated";
 
-const TITLES: Record<string, string> = { terms: "TERMS", privacy: "PRIVACY POLICY" };
+const TITLES: Record<keyof typeof LEGAL_DOCS, string> = { terms: "TERMS", privacy: "PRIVACY POLICY" };
 
-// Placeholder until the real documents ship in P8.
+const isDoc = (v: unknown): v is keyof typeof LEGAL_DOCS => typeof v === "string" && Object.prototype.hasOwnProperty.call(LEGAL_DOCS, v);
+
+// The text is bundled at build time from docs/legal/*.md (scripts/gen-legal.mjs). Both are DRAFTS until legal review (HOLD H-06).
 export default function LegalScreen() {
   const colors = useColors();
   const { doc } = useLocalSearchParams<{ doc?: string }>();
-  const title = TITLES[String(doc)] ?? "DOCUMENT";
+  const key = isDoc(doc) ? doc : null;
 
   return (
-    <AuthShell tag="LEGAL" title={title} back>
-      <View style={[styles.draft, { borderColor: colors.border }]}>
+    <AuthShell tag="LEGAL" title={key ? TITLES[key] : "DOCUMENT"} back>
+      <View style={[styles.draft, { borderColor: colors.border }]} accessibilityRole="alert">
         <Text style={[styles.draftText, { color: colors.mutedForeground }]}>DRAFT — pending legal review</Text>
       </View>
-      <Text style={[styles.body, { color: colors.mutedForeground }]}>
-        This document is not published yet. The final text will appear here before launch.
-      </Text>
+      {key ? <MarkdownView source={LEGAL_DOCS[key]} /> : <Text style={[styles.body, { color: colors.mutedForeground }]}>This document does not exist.</Text>}
       <AuthButton label="BACK" onPress={() => router.back()} />
     </AuthShell>
   );
 }
 
 const styles = StyleSheet.create({
-  draft: { borderWidth: 1, borderRadius: 4, paddingVertical: 24, alignItems: "center" },
-  draftText: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 2, textAlign: "center" as const, fontFamily: "monospace" },
+  draft: { borderWidth: 1, borderRadius: 4, paddingVertical: 10, alignItems: "center" },
+  draftText: { fontSize: 12, fontWeight: "700" as const, letterSpacing: 2, textAlign: "center" as const, fontFamily: "monospace" },
   body: { fontSize: 13, lineHeight: 20 },
 });

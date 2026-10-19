@@ -157,3 +157,20 @@ test("validatePasswordChange", () => {
   assert.equal(validatePasswordChange("same-password-1", "same-password-1"), "Choose a different password.");
   assert.equal(validatePasswordChange("old", "new-password-1"), null);
 });
+
+test("exportMyData fetches the export and returns pretty JSON text with a dated filename", async () => {
+  const t = setup(() => ({ status: 200, body: { meta: { userId: "u1" }, data: { users: [{ id: "u1" }] } } }));
+  const out = await t.actions.exportMyData(new Date("2026-03-04T10:00:00Z"));
+  assert.equal(t.calls[0]!.method, "GET");
+  assert.equal(t.calls[0]!.url, "http://x/api/account/export");
+  assert.equal(out.filename, "system-self-export-2026-03-04.json");
+  assert.deepEqual(JSON.parse(out.text), { meta: { userId: "u1" }, data: { users: [{ id: "u1" }] } });
+});
+
+test("exportMyData surfaces the hourly limit as a plain message", async () => {
+  const t = setup(() => ({ status: 429, body: { error: "Too many export requests, try again later", code: "rate_limited" } }));
+  await assert.rejects(t.actions.exportMyData(), (e) => {
+    assert.match(describeSettingsError(e, "export").message, /try again/i);
+    return true;
+  });
+});
