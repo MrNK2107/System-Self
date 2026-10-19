@@ -3,7 +3,7 @@
 import { PRO_REQUIRED_CODE } from "@workspace/contracts";
 import { ApiError } from "./client";
 
-/** The placeholder paywall screen (P7 builds the real one). */
+/** The paywall screen every ProLock links to (app/paywall.tsx). */
 export const PAYWALL_ROUTE = "/paywall";
 export const PRO_LOCK_LABEL = "PRO";
 

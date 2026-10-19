@@ -38,6 +38,8 @@ const envSchema = z.object({
   ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().min(1).default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(30),
   WORKER_TICK_MS: z.coerce.number().int().min(1000).default(60_000),
+  /** Bearer secret of POST /api/billing/revenuecat. Unset: the webhook answers 503 and accepts nothing. */
+  REVENUECAT_WEBHOOK_SECRET: z.string().min(1).optional(),
   /** Wall-clock budget of one social job pass; the rest of its backlog waits for the next tick. */
   SOCIAL_JOB_BUDGET_MS: z.coerce.number().int().min(0).default(2000),
 });

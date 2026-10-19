@@ -10,7 +10,7 @@ import type { LogProposalDto } from "@workspace/contracts";
 import { ProLock } from "@/components/ProLock";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
-import { useCustomDomainsQuery } from "@/hooks/useCustom";
+import { useBillingStatusQuery } from "@/hooks/usePro";
 import { api } from "@/lib/api/client";
 import {
   FREEFORM_MAX_CHARS,
@@ -37,8 +37,9 @@ export function FreeFormLog({
 }) {
   const colors = useColors();
   const { addLog } = useApp();
-  // PRO as the server last reported it (the custom stats list carries it); unknown until that loads, and then the server decides.
-  const knownPro = useCustomDomainsQuery().data?.isPro;
+  // PRO as the server last reported it (GET /api/billing/status); unknown until that loads, and then the server decides.
+  const billing = useBillingStatusQuery().data;
+  const knownPro = billing ? billing.tier === "pro" : undefined;
   const confirming = useRef(new Set<LogProposalDto>());
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [text, setText] = useState("");

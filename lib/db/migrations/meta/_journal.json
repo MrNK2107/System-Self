@@ -232,6 +232,13 @@
       "when": 1792402444031,
       "tag": "0032_gifted_aaron_stack",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792406348903,
+      "tag": "0033_happy_tempest",
+      "breakpoints": true
     }
   ]
 }

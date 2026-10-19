@@ -15,7 +15,7 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CustomLogSection } from "@/components/CustomLogSection";
 import { ProLock } from "@/components/ProLock";
-import { useCustomDomainsQuery } from "@/hooks/useCustom";
+import { usePro } from "@/hooks/usePro";
 import { deviceTimezone, useAuth } from "@/context/AuthContext";
 import { FREE_DAYS_BACK, dayOptions } from "@/lib/game/log-date";
 import { FreeFormLog } from "@/components/FreeFormLog";
@@ -161,7 +161,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const [showOlder, setShowOlder] = useState(false);
   const accountTz = useAuth().user?.timezone;
   // PRO as the server last reported it; unknown counts as free here, so the chooser never offers a day the server may refuse.
-  const pro = useCustomDomainsQuery().data?.isPro === true;
+  const pro = usePro();
   const days = dayOptions(new Date(), accountTz, pro, deviceTimezone());
 
   const config = LOG_CONFIGS.find(c => c.domain === selectedDomain)!;

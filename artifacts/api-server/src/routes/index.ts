@@ -6,6 +6,7 @@ import { createRequireAuth } from "../middlewares/auth";
 import { adherenceRoutes } from "./adherence";
 import { adminRoutes } from "./admin";
 import { adminMetricsRoutes } from "./admin-metrics";
+import { billingRoutes } from "./billing";
 import { authRoutes } from "./auth";
 import { chainsRoutes } from "./chains";
 import { challengesRoutes } from "./challenges";
@@ -32,7 +33,7 @@ import { socialRoutes } from "./social";
 import { stateRoutes } from "./state";
 import { systemRoutes } from "./system";
 
-export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps; now?: () => Date }): IRouter {
+export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null }): IRouter {
   const { db, mailer } = deps;
   const ai = deps.ai ?? {};
   const router: IRouter = Router();
@@ -47,6 +48,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
   router.use(systemRoutes(db));
   router.use(historyRoutes(db, ai));
   if (db) {
+    router.use(billingRoutes(db, requireAuth, deps.now, deps.revenuecatSecret));
     router.use(adminRoutes(db, deps.now));
     router.use(adminMetricsRoutes(db, deps.now));
     router.use(onboardingRoutes(db));
