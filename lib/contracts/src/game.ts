@@ -110,6 +110,7 @@ export const NOTICE_KINDS = [
   "challenge_result",
   "shame",
   "duo_checkin",
+  "quest_deadline_24h",
 ] as const;
 export const NoticeKindSchema = z.enum(NOTICE_KINDS);
 export type NoticeKind = z.infer<typeof NoticeKindSchema>;
@@ -206,6 +207,8 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
   shame: z.object({ handle: z.string(), questTitle: z.string() }),
   /** The duo partner checked in (`going_now` is a nudge). `handle` is their username (a duo sees usernames). */
   duo_checkin: z.object({ handle: z.string(), kind: z.enum(["going_now", "checked_in", "done"]) }),
+  /** Written by the worker at local 18:00: `count` active non-bonus quests expire tonight (`localDate` makes it once per day). */
+  quest_deadline_24h: z.object({ count: z.number().int().min(1), localDate: z.string() }),
 } as const satisfies Record<NoticeKind, z.ZodTypeAny>;
 
 const noticeOf = <K extends NoticeKind>(kind: K) =>
@@ -232,6 +235,7 @@ export const NoticeSchema = z.discriminatedUnion("kind", [
   noticeOf("challenge_result"),
   noticeOf("shame"),
   noticeOf("duo_checkin"),
+  noticeOf("quest_deadline_24h"),
 ]);
 export type Notice = z.infer<typeof NoticeSchema>;
 export type NoticePayload<K extends NoticeKind> = z.infer<(typeof NOTICE_PAYLOAD_SCHEMAS)[K]>;
@@ -870,3 +874,15 @@ export const AdherenceMetricsResponseSchema = z.object({
   deferralsPerActiveUser: z.number(),
 });
 export type AdherenceMetricsResponse = z.infer<typeof AdherenceMetricsResponseSchema>;
+
+
+// --- notifications ----------------------------------------------------------------------------------------
+
+/** Expo push token as the SDK returns it. */
+export const PushTokenSchema = z.string().regex(/^(Expo|Exponent)PushToken\[[^\]\s]{1,200}\]$/);
+export const PushTokenRegisterRequestSchema = z.object({ token: PushTokenSchema, platform: z.enum(["ios", "android"]) });
+
+/** Which system notifications the user wants. `morning` / `nightly` are the on-device reminders; `events` the server pushes. */
+export const NotificationPrefsSchema = z.object({ morning: z.boolean(), nightly: z.boolean(), events: z.boolean() });
+export type NotificationPrefs = z.infer<typeof NotificationPrefsSchema>;
+export const NotificationPrefsUpdateSchema = NotificationPrefsSchema.partial().strict();

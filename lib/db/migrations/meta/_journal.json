@@ -246,6 +246,13 @@
       "when": 1792407907404,
       "tag": "0034_cloudy_hedge_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792409872797,
+      "tag": "0035_skinny_rhino",
+      "breakpoints": true
     }
   ]
 }

@@ -89,6 +89,7 @@ test("NoticeSchema is a union by kind with the exact payload the server writes f
     challenge_result: { challengeId: "c2", handle: "USER // ASH-3", domain: "MIND", days: 7, outcome: "win", myGain: 4.5, theirGain: 2, delta: 3 },
     shame: { handle: "alice_1", questTitle: "Run 5k" },
     duo_checkin: { handle: "alice_1", kind: "going_now" },
+    quest_deadline_24h: { count: 2, localDate: "2026-10-19" },
   };
   for (const kind of NOTICE_KINDS) {
     assert.equal(NoticeSchema.parse({ ...base, kind, payload: payloads[kind] }).kind, kind);

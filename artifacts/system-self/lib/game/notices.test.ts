@@ -59,6 +59,7 @@ test("NOTICE_ORDER covers every server notice kind exactly once", () => {
     "rival_challenge_result",
     "rival_passed",
     "raid_result",
+    "quest_deadline_24h",
     "challenge_received",
     "challenge_result",
     "shame",
@@ -401,4 +402,19 @@ test("a duo check-in renders as a SYSTEM modal naming the partner", () => {
   assert.deepEqual(titles, ["yuri_1 is going now.", "yuri_1 checked in.", "yuri_1 is done."]);
   // an unknown future kind is skipped, not rendered
   assert.equal(parseNotices([n("bogus")]).skipped, 1);
+});
+
+test("the 18:00 deadline notice renders as a SYSTEM alert with the count", () => {
+  const parsed = parseNotices([
+    { id: id(90), kind: "quest_deadline_24h", payload: { count: 2, localDate: "2026-10-19" }, createdAt: at() },
+  ]).notices;
+  const group = nextNoticeGroup(parsed, new Set())!;
+  assert.equal(group.kind, "quest_deadline_24h");
+  assert.deepEqual(noticeView(group), {
+    modal: "system",
+    tone: "alert",
+    label: "QUESTS EXPIRING",
+    title: "2 quests expire tonight.",
+    body: "Complete them before midnight. Logged.",
+  });
 });

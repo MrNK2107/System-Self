@@ -4,6 +4,7 @@ import { api, onSessionExpired } from "@/lib/api/client";
 import { clearLocalData, handleSignIn } from "@/lib/api/query";
 import { secureTokenStore, type PublicUser } from "@/lib/api/session";
 import { createAuthActions, type SignUpInput } from "@/lib/auth/actions";
+import { unregisterDevice } from "@/lib/notifications";
 import { settingsActions } from "@/lib/settings/instance";
 
 export type AuthStatus = "loading" | "signed_out" | "signed_in";
@@ -27,7 +28,13 @@ export interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const actions = createAuthActions({ api, tokens: secureTokenStore, handleSignIn, clearLocalData });
+const actions = createAuthActions({
+  api,
+  tokens: secureTokenStore,
+  handleSignIn,
+  clearLocalData,
+  unregisterDevice: () => unregisterDevice(api),
+});
 
 /** The device timezone as the runtime reports it (canonicalised by the server). */
 export function deviceTimezone(): string {

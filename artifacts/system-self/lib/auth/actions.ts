@@ -24,6 +24,8 @@ export interface AuthActionDeps {
   handleSignIn: (userId: string) => Promise<void>;
   /** Wipes the query cache and outbox. Runs on explicit sign-out before the session is cleared. */
   clearLocalData: (userId?: string) => Promise<void>;
+  /** Deletes this device's push token (and our scheduled reminders). Runs first on sign-out, while the session is still valid. */
+  unregisterDevice?: () => Promise<void>;
 }
 
 const MeSchema = z.object({ user: PublicUserSchema });
@@ -89,6 +91,11 @@ export function createAuthActions(deps: AuthActionDeps) {
 
     /** Best-effort server logout, then local wipe, then the session. Never throws on a network failure. */
     async signOut(): Promise<void> {
+      try {
+        await deps.unregisterDevice?.();
+      } catch {
+        // Best effort: an unreachable server must not block signing out.
+      }
       let refreshToken: string | null = null;
       let userId: string | undefined;
       try {

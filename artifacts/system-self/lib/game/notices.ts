@@ -28,6 +28,7 @@ export const NOTICE_ORDER: readonly NoticeKind[] = [
   "rival_challenge_result",
   "rival_passed",
   "raid_result",
+  "quest_deadline_24h",
   "challenge_received",
   "challenge_result",
   "shame",
@@ -259,6 +260,10 @@ export function noticeView(group: NoticeGroup): NoticeView {
         title: `WEEK ${p.week}: POSITION ${p.position} OF ${p.count}`,
         body: p.line,
       };
+    }
+    case "quest_deadline_24h": {
+      const n = first.payload.count;
+      return { modal: "system", tone: "alert", label: "QUESTS EXPIRING", title: `${n} quests expire tonight.`, body: "Complete them before midnight. Logged." };
     }
     case "challenge_received": {
       const p = first.payload;

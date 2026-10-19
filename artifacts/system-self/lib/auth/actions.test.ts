@@ -23,7 +23,11 @@ const session: Session = { user, accessToken: "at", accessTokenExpiresAt: "2030-
 
 type Call = { method: string; url: string; body: unknown; auth: string | null };
 
-function setup(handler: (call: Call) => { status: number; body?: unknown }, initial: Session | null = null) {
+function setup(
+  handler: (call: Call) => { status: number; body?: unknown },
+  initial: Session | null = null,
+  extra: { unregisterDevice?: () => Promise<void> } = {},
+) {
   let stored: Session | null = initial;
   const tokens: TokenStore = { get: async () => stored, set: async (s) => void (stored = s) };
   const calls: Call[] = [];
@@ -45,6 +49,7 @@ function setup(handler: (call: Call) => { status: number; body?: unknown }, init
     tokens,
     handleSignIn: async (id) => void events.push(`handleSignIn:${id}:${stored === null ? "no-session" : "session"}`),
     clearLocalData: async (userId) => void events.push(`clear:${stored === null ? "no-session" : "session"}:${userId ?? "none"}`),
+    ...extra,
   });
   return { actions, api, calls, events, stored: () => stored };
 }
@@ -96,6 +101,34 @@ test("signOut calls logout, clears local data while the session still exists, th
 test("signOut still wipes everything when the logout request fails", async () => {
   const t = setup(() => ({ status: 503 }), session);
   await t.actions.signOut();
+  assert.deepEqual(t.events, ["clear:session:u1"]);
+  assert.equal(t.stored(), null);
+});
+
+test("signOut removes this device's push token first, while the session still exists", async () => {
+  const order: string[] = [];
+  const t = setup(
+    (c) => {
+      order.push(`http:${c.url}`);
+      return { status: 204 };
+    },
+    session,
+    { unregisterDevice: async () => void order.push("unregister") },
+  );
+  await t.actions.signOut();
+  assert.deepEqual(order, ["unregister", "http:http://x/api/auth/logout"]);
+  assert.deepEqual(t.events, ["clear:session:u1"]);
+  assert.equal(t.stored(), null);
+});
+
+test("signOut still completes when removing the push token fails", async () => {
+  const t = setup(() => ({ status: 204 }), session, {
+    unregisterDevice: async () => {
+      throw new Error("offline");
+    },
+  });
+  await t.actions.signOut();
+  assert.equal(t.calls[0]!.url, "http://x/api/auth/logout");
   assert.deepEqual(t.events, ["clear:session:u1"]);
   assert.equal(t.stored(), null);
 });

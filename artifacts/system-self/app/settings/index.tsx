@@ -227,6 +227,8 @@ export default function SettingsScreen() {
       <SettingsCard>
         <SettingsRow icon="sliders" label="Custom stats" onPress={() => router.push("/custom")} />
         <Separator />
+        <SettingsRow icon="bell" label="Notifications" onPress={() => router.push("/settings/notifications")} />
+        <Separator />
         <SettingsRow icon="sun" label="Life context" value={profile?.season ? "Season active" : undefined} onPress={() => router.push("/settings/life")} />
       </SettingsCard>
 

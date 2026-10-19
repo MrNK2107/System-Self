@@ -13,9 +13,11 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { NotificationPrompt } from "@/components/NotificationPrompt";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AppProvider } from "@/context/AppContext";
 import { GymProvider } from "@/features/gym/context/GymContext";
+import { useNotificationSync } from "@/hooks/useNotifications";
 import { QueryProvider } from "@/lib/api/query";
 
 SplashScreen.preventAutoHideAsync();
@@ -36,25 +38,29 @@ function useSignedOutGuard() {
 
 function RootLayoutNav() {
   useSignedOutGuard();
+  useNotificationSync();
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="auth" options={{ gestureEnabled: false }} />
-      <Stack.Screen name="legal/[doc]" />
-      <Stack.Screen name="settings" />
-      <Stack.Screen name="social" />
-      <Stack.Screen name="paywall" />
-      <Stack.Screen name="clan" />
-      <Stack.Screen name="challenges" />
-      <Stack.Screen name="duo/index" />
-      <Stack.Screen name="finance" />
-      <Stack.Screen name="custom" />
-      <Stack.Screen name="recap" />
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="floor/[routineId]" />
-      <Stack.Screen name="dungeon/briefing" />
-      <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
-    </Stack>
+    <>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="auth" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="legal/[doc]" />
+        <Stack.Screen name="settings" />
+        <Stack.Screen name="social" />
+        <Stack.Screen name="paywall" />
+        <Stack.Screen name="clan" />
+        <Stack.Screen name="challenges" />
+        <Stack.Screen name="duo/index" />
+        <Stack.Screen name="finance" />
+        <Stack.Screen name="custom" />
+        <Stack.Screen name="recap" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="floor/[routineId]" />
+        <Stack.Screen name="dungeon/briefing" />
+        <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
+      </Stack>
+      <NotificationPrompt />
+    </>
   );
 }
 

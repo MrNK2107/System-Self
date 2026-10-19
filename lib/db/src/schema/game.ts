@@ -215,7 +215,10 @@ export const notices = pgTable(
     createdAt: ts("created_at").defaultNow().notNull(),
     seenAt: ts("seen_at"),
   },
-  (t) => [index("notices_user_seen_created_idx").on(t.userId, t.seenAt, t.createdAt)],
+  (t) => [
+    index("notices_user_seen_created_idx").on(t.userId, t.seenAt, t.createdAt),
+    index("notices_created_idx").on(t.createdAt),
+  ],
 );
 
 export const dailySnapshots = pgTable(

@@ -4,13 +4,17 @@ import { idempotencyKeys, userDayState, type Db } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { claimDueUsers, ensureRolledOver } from "../services/rollover";
 import { runSocialJobs } from "./social";
+import { runNotificationJobs } from "./notifications";
+import { createExpoTransport, type PushTransport } from "../services/push";
+import { env } from "../lib/env";
 
 export const WORKER_BATCH_SIZE = 200;
+const defaultPushTransport = () => createExpoTransport({ accessToken: env.EXPO_ACCESS_TOKEN });
 export const IDEMPOTENCY_KEY_TTL_MS = 7 * 86_400_000;
 
 /**
  * One worker pass: claims up to `batchSize` due users and rolls each over, runs the social jobs (rival
- * re-matching), then prunes idempotency keys older than 7 days. If `signal` aborts mid-batch, the current user finishes and the remaining claimed
+ * re-matching), the notification jobs (quest-deadline notice, push dispatch), then prunes idempotency keys older than 7 days. If `signal` aborts mid-batch, the current user finishes and the remaining claimed
  * users are released (made due again) for the next worker.
  */
 export async function runWorkerTick(
@@ -18,6 +22,7 @@ export async function runWorkerTick(
   now: Date,
   signal?: AbortSignal,
   batchSize = WORKER_BATCH_SIZE,
+  push: PushTransport = defaultPushTransport(),
 ): Promise<{ processed: number; claimed: number }> {
   const ids = await claimDueUsers(db, batchSize, now);
   let processed = 0;
@@ -44,6 +49,13 @@ export async function runWorkerTick(
       logger.error({ err }, "Social jobs failed");
     }
   }
+  if (!signal?.aborted) {
+    try {
+      await runNotificationJobs(db, now, push);
+    } catch (err) {
+      logger.error({ err }, "Notification jobs failed");
+    }
+  }
   await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(now.getTime() - IDEMPOTENCY_KEY_TTL_MS)));
   return { processed, claimed: ids.length };
 }
@@ -54,7 +66,7 @@ export async function runWorkerTick(
  */
 export async function runLoop(
   db: Db,
-  opts: { tickMs: number; signal: AbortSignal; batchSize?: number; clock?: () => Date },
+  opts: { tickMs: number; signal: AbortSignal; batchSize?: number; clock?: () => Date; push?: PushTransport },
 ): Promise<void> {
   const batchSize = opts.batchSize ?? WORKER_BATCH_SIZE;
   const clock = opts.clock ?? (() => new Date());
@@ -62,7 +74,7 @@ export async function runLoop(
     const started = Date.now();
     let fullBatch = false;
     try {
-      const { processed, claimed } = await runWorkerTick(db, clock(), opts.signal, batchSize);
+      const { processed, claimed } = await runWorkerTick(db, clock(), opts.signal, batchSize, opts.push);
       fullBatch = claimed >= batchSize;
       logger.info({ processed, ms: Date.now() - started }, "Worker tick");
     } catch (err) {
