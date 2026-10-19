@@ -1,48 +1,34 @@
-import { and, count, countDistinct, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, count, countDistinct, eq, gte, isNotNull, lte, sql } from "drizzle-orm";
 import { analyticsEvents, comebacks, logs, quests, type Db } from "@workspace/db";
-import { COMEBACK_MIN_GAP_DAYS, addDays, daysBetween, localDate } from "@workspace/engine";
+import { COMEBACK_MIN_GAP_DAYS, addDays, localDate } from "@workspace/engine";
 import type { AdherenceMetricsResponse } from "@workspace/contracts";
 
 /** BODY log types that are a training session. */
-export const SESSION_LOG_TYPES = ["gym_session", "home_session", "floor_session"];
+export const SESSION_LOG_TYPES = ["gym_session", "home_session", "floor_session"] as const;
 /** A follow-up BODY log within this many days of a return session makes it a second visit. */
 export const SECOND_VISIT_DAYS = 7;
 
 const ratio = (n: number, d: number) => (d === 0 ? 0 : n / d);
 
-export interface BodyLogRow {
-  userId: string;
-  localDate: string;
-  logType: string;
-}
-
 /**
- * Users with a "return session" in the window, and how many of them trained again.
- * A return session is a BODY session (gym, home or floor) that follows the user's previous BODY session by at
- * least COMEBACK_MIN_GAP_DAYS empty local days. It has a second visit when another BODY log (any type) lands
- * on a later local date within SECOND_VISIT_DAYS days. A user's first session ever is not a return.
+ * Metric definitions (counts and ratios only, never a score; every ratio is 0 when its denominator is 0).
+ * Window: the last `days` days up to `now`; date columns use the UTC date of `now`.
+ * - floorUptake = floor_completed / floor_offered analytics events in the window.
+ * - secondVisitRate: a return session is a BODY gym/home/floor session whose previous such session was at least
+ *   COMEBACK_MIN_GAP_DAYS empty local days earlier (a first-ever session is not a return). It has a second visit
+ *   when any BODY log lands 1-7 days after it. Users with a second visit / users with a return. Right-censored:
+ *   only returns at least 7 days old count, so a follow-up window is never cut short.
+ * - comebackRate = comebacks with completedAt / comebacks, both started in the window and at least 7 days old.
+ * - deferralsPerActiveUser = refusals with a reason by active users / active users, where an active user logged
+ *   anything in the window.
  */
-export function secondVisitStats(rows: BodyLogRow[], windowStart: string): { returned: number; second: number } {
-  const byUser = new Map<string, BodyLogRow[]>();
-  for (const r of rows) byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), r]);
-  let returned = 0;
-  let second = 0;
-  for (const userRows of byUser.values()) {
-    const sessions = userRows.filter((r) => SESSION_LOG_TYPES.includes(r.logType)).map((r) => r.localDate).sort();
-    const days = [...new Set(sessions)];
-    const returns = days.filter((d, i) => i > 0 && d >= windowStart && daysBetween(days[i - 1]!, d) - 1 >= COMEBACK_MIN_GAP_DAYS);
-    if (returns.length === 0) continue;
-    returned += 1;
-    const bodyDays = userRows.map((r) => r.localDate);
-    if (returns.some((d) => bodyDays.some((b) => b > d && b <= addDays(d, SECOND_VISIT_DAYS)))) second += 1;
-  }
-  return { returned, second };
-}
-
-/** The adherence metrics over the last `days` days up to `now`. Counts and ratios only; never a score. */
 export async function adherenceMetrics(db: Db, now: Date, days: number): Promise<AdherenceMetricsResponse> {
   const since = new Date(now.getTime() - days * 86_400_000);
+  const today = localDate(now, "UTC");
   const windowStart = localDate(since, "UTC");
+  const cutoff = addDays(today, -SECOND_VISIT_DAYS);
+  const minGap = COMEBACK_MIN_GAP_DAYS + 1; // 5 empty days between = dates 6 apart
+  const types = sql.join(SESSION_LOG_TYPES.map((t) => sql`${t}`), sql`, `);
 
   const eventCount = async (name: string) => {
     const [r] = await db
@@ -54,17 +40,37 @@ export async function adherenceMetrics(db: Db, now: Date, days: number): Promise
   const floorOffered = await eventCount("floor_offered");
   const floorCompleted = await eventCount("floor_completed");
 
-  const bodyRows = await db
-    .select({ userId: logs.userId, localDate: logs.localDate, logType: logs.logType })
-    .from(logs)
-    .where(eq(logs.domain, "BODY"));
-  const sv = secondVisitStats(bodyRows, windowStart);
+  // Only the window's session days are scanned; the previous session and the follow-up are index lookups.
+  const sv = await db.execute<{ returned: number; second: number }>(sql`
+    select count(distinct r.user_id)::int as returned,
+           (count(distinct r.user_id) filter (where r.followed))::int as second
+    from (
+      select s.user_id,
+             exists (
+               select 1 from logs l
+               where l.user_id = s.user_id and l.domain = 'BODY'
+                 and l.local_date > s.local_date and l.local_date <= s.local_date + ${SECOND_VISIT_DAYS}::int
+             ) as followed
+      from (
+        select distinct user_id, local_date from logs
+        where domain = 'BODY' and log_type in (${types})
+          and local_date >= ${windowStart}::date and local_date <= ${cutoff}::date
+      ) s
+      cross join lateral (
+        select max(p.local_date) as pd from logs p
+        where p.user_id = s.user_id and p.domain = 'BODY' and p.log_type in (${types}) and p.local_date < s.local_date
+      ) prev
+      where prev.pd is not null and s.local_date - prev.pd >= ${minGap}::int
+    ) r
+  `);
+  const svRow = sv.rows[0] ?? { returned: 0, second: 0 };
 
   const [cb] = await db
     .select({ total: count(), done: sql<number>`count(${comebacks.completedAt})::int` })
     .from(comebacks)
-    .where(gte(comebacks.startedOn, windowStart));
+    .where(and(gte(comebacks.startedOn, windowStart), lte(comebacks.startedOn, cutoff)));
 
+  const activeUsers = sql`select user_id from logs where local_date >= ${windowStart}::date`;
   const [active] = await db.select({ n: countDistinct(logs.userId) }).from(logs).where(gte(logs.localDate, windowStart));
   const [deferrals] = await db
     .select({ n: count() })
@@ -75,6 +81,7 @@ export async function adherenceMetrics(db: Db, now: Date, days: number): Promise
         isNotNull(quests.refusalReason),
         sql`btrim(${quests.refusalReason}) <> ''`,
         gte(quests.resolvedLocalDate, windowStart),
+        sql`${quests.userId} in (${activeUsers})`,
       ),
     );
 
@@ -82,7 +89,7 @@ export async function adherenceMetrics(db: Db, now: Date, days: number): Promise
     floorOffered,
     floorCompleted,
     floorUptake: ratio(floorCompleted, floorOffered),
-    secondVisitRate: ratio(sv.second, sv.returned),
+    secondVisitRate: ratio(svRow.second, svRow.returned),
     comebackRate: ratio(cb?.done ?? 0, cb?.total ?? 0),
     deferralsPerActiveUser: ratio(deferrals?.n ?? 0, active?.n ?? 0),
   };

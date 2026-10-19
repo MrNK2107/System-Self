@@ -40,7 +40,7 @@ test("past-self returns DAY 1 baseline from onboarding", { skip }, async () => {
   assert.equal(first.body.baselineDate, localDate(new Date(), TZ));
   assert.deepEqual(first.body.baseline, onboarded);
   assert.deepEqual(first.body.current, onboarded);
-  assert.deepEqual(first.body.gym, { sessionsTotal: 0, prsImproved: 0 });
+  assert.deepEqual(first.body.gym, { sessionsTotal: 0, exercisesWithPr: 0 });
   assert.equal(JSON.stringify(first.body).includes("hidden"), false);
 
   // Logging moves current, never the baseline.
@@ -80,7 +80,7 @@ test("past-self counts completed sessions and exercises with a PR", { skip }, as
   ]);
   await db!.insert(personalRecords).values({ userId: id, exerciseId: "bench", value: 100, reps: 5, weight: 90, achievedAt: t });
   const res = await request(a).get("/api/progress/past-self").set(auth(token));
-  assert.deepEqual(res.body.gym, { sessionsTotal: 1, prsImproved: 1 });
+  assert.deepEqual(res.body.gym, { sessionsTotal: 1, exercisesWithPr: 1 });
 });
 
 test("past-self requires auth and onboarding", { skip }, async () => {
@@ -213,4 +213,59 @@ test("metrics: secondVisitRate, comebackRate and deferralsPerActiveUser", { skip
   assert.equal(res.body.comebackRate, 0.5);
   // 2 deferrals / 3 users who logged in the window (u1, u2, u3).
   assert.equal(res.body.deferralsPerActiveUser, 2 / 3);
+});
+
+test("secondVisitRate edges: 5 empty days is a return, 4 is not; first session, pre-window and censored returns excluded; day 8 is too late", { skip }, async () => {
+  const a = metricsApp();
+  const names = ["a", "b", "c", "d", "e", "f"];
+  const us: Record<string, string> = {};
+  for (const n of names) us[n] = (await setup(a, { email: `${n}@example.com`, username: `edge_${n}` })).id;
+  const admin = await makeAdmin(a);
+  const day = (n: number) => addDays(localDate(NOW, TZ), -n);
+  let k = 0;
+  const log = (who: string, n: number, logType = "gym_session") => ({
+    userId: us[who]!,
+    clientId: `e${k++}`,
+    domain: "BODY",
+    logType,
+    occurredAt: new Date(NOW.getTime() - n * DAY),
+    localDate: day(n),
+  });
+  await db!.insert(logs).values([
+    // a: exactly 5 empty days (30 -> 24) is a return; a BODY log 2 days later is a second visit.
+    log("a", 30), log("a", 24), log("a", 22, "workout"),
+    // b: only 4 empty days (30 -> 25): not a return.
+    log("b", 30), log("b", 25),
+    // c: a first-ever session is not a return.
+    log("c", 20),
+    // d: the return (day 40) is before the 30-day window.
+    log("d", 50), log("d", 40),
+    // e: a return (day 20) whose next BODY log is on day 12, 8 days later: not a second visit.
+    log("e", 30), log("e", 20), log("e", 12, "workout"),
+    // f: a return on day 3 is too recent to judge (needs 7 days of follow-up): censored out.
+    log("f", 30), log("f", 3),
+  ]);
+  const res = await metrics(a, admin.token);
+  assert.equal(res.body.secondVisitRate, 0.5); // returns: a, e. Second visits: a.
+});
+
+test("comebackRate counts only comebacks old enough to judge, and deferrals only count active users", { skip }, async () => {
+  const a = metricsApp();
+  const u1 = await setup(a, { email: "c1@example.com", username: "cb_one" });
+  const u2 = await setup(a, { email: "c2@example.com", username: "cb_two" });
+  const admin = await makeAdmin(a);
+  const day = (n: number) => addDays(localDate(NOW, TZ), -n);
+  await db!.insert(comebacks).values([
+    { userId: u1.id, startedOn: day(20), gapDays: 6, completedAt: NOW },
+    { userId: u1.id, startedOn: day(10), gapDays: 6, completedAt: null },
+    { userId: u1.id, startedOn: day(3), gapDays: 6, completedAt: null }, // too recent to judge
+  ]);
+  await db!.insert(logs).values({ userId: u1.id, clientId: "x1", domain: "MIND", logType: "journal", occurredAt: NOW, localDate: day(0) });
+  const quest = (userId: string, title: string) => ({
+    userId, type: "daily", title, description: "d", domain: "BODY", status: "refused", expiresAt: NOW, refusalReason: "why", resolvedLocalDate: day(1),
+  });
+  await db!.insert(quests).values([quest(u1.id, "q1"), quest(u2.id, "q2")]); // u2 never logged: not active
+  const res = await metrics(a, admin.token);
+  assert.equal(res.body.comebackRate, 0.5);
+  assert.equal(res.body.deferralsPerActiveUser, 1); // 1 refusal by an active user / 1 active user
 });

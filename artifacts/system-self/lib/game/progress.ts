@@ -39,5 +39,5 @@ export function pastSelfRows(data: Pick<PastSelfResponse, "baseline" | "current"
 export const pastSelfLine = (r: PastSelfRow) => `${r.baseline} → ${r.current} (${r.delta})`;
 
 export function gymLine(gym: PastSelfResponse["gym"]): string {
-  return `${gym.sessionsTotal} ${gym.sessionsTotal === 1 ? "session" : "sessions"} · ${gym.prsImproved} ${gym.prsImproved === 1 ? "PR" : "PRs"}`;
+  return `${gym.sessionsTotal} ${gym.sessionsTotal === 1 ? "session" : "sessions"} · ${gym.exercisesWithPr} ${gym.exercisesWithPr === 1 ? "PR" : "PRs"}`;
 }

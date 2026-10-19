@@ -732,8 +732,8 @@ export const PastSelfResponseSchema = z.object({
   gym: z.object({
     /** Completed workout sessions, all time. */
     sessionsTotal: z.number().int(),
-    /** Exercises with a personal record on file. */
-    prsImproved: z.number().int(),
+    /** Exercises with a personal record on file (one best per exercise, so not a count of improvements). */
+    exercisesWithPr: z.number().int(),
   }),
 });
 export type PastSelfResponse = z.infer<typeof PastSelfResponseSchema>;
@@ -742,7 +742,11 @@ export const AdherenceMetricsQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(365).default(30),
 });
 
-/** GET /api/admin/metrics/adherence?days=30. Ratios are 0 when their denominator is 0. */
+/**
+ * GET /api/admin/metrics/adherence?days=30. Ratios are 0 when their denominator is 0. secondVisitRate and
+ * comebackRate are right-censored (only returns/comebacks at least 7 days old count). deferralsPerActiveUser counts
+ * only refusals by users who logged anything in the window. Definitions: services/adherence-metrics.ts.
+ */
 export const AdherenceMetricsResponseSchema = z.object({
   floorOffered: z.number().int(),
   floorCompleted: z.number().int(),

@@ -76,7 +76,7 @@ async function main() {
   assert.equal(day1.baselineDate, localDate(new Date(), "UTC"));
   assert.deepEqual(day1.baseline, onboarded);
   assert.deepEqual(day1.current, onboarded);
-  assert.deepEqual(day1.gym, { sessionsTotal: 0, prsImproved: 0 });
+  assert.deepEqual(day1.gym, { sessionsTotal: 0, exercisesWithPr: 0 });
   assert.equal(pastSelfTitle(day1.label), "YOU // DAY 1");
   step("GET /api/progress/past-self reads DAY 1, baseline = onboarding scores", { baselineDate: day1.baselineDate });
 

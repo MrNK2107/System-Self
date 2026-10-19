@@ -18,7 +18,7 @@ export function progressRoutes(db: Db): IRouter {
   /**
    * "Past You": the earliest daily snapshot (written at onboarding; the first one on file for older accounts)
    * next to today's domain scores. Read-only, and the hidden score is never part of it.
-   * gym.sessionsTotal = completed workout sessions; gym.prsImproved = exercises with a personal record on file
+   * gym.sessionsTotal = completed workout sessions; gym.exercisesWithPr = exercises with a personal record on file
    * (the table keeps one best per exercise, so it counts exercises, not individual improvements).
    */
   router.get("/progress/past-self", async (req, res) => {
@@ -53,7 +53,7 @@ export function progressRoutes(db: Db): IRouter {
       label: baselineDate === onboardedOn ? "DAY 1" : `SINCE ${baselineDate}`,
       baseline: first ? toScores(first.scores) : current,
       current,
-      gym: { sessionsTotal: sessions?.n ?? 0, prsImproved: prs?.n ?? 0 },
+      gym: { sessionsTotal: sessions?.n ?? 0, exercisesWithPr: prs?.n ?? 0 },
     };
     res.json(body);
   });
