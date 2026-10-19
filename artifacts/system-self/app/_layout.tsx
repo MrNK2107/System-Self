@@ -8,6 +8,7 @@ import {
 import { Stack, router, useRootNavigationState, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { LogBox } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -22,6 +23,10 @@ import { useNotificationSync } from "@/hooks/useNotifications";
 import { QueryProvider } from "@/lib/api/query";
 
 SplashScreen.preventAutoHideAsync();
+
+// Expo Go on Android (SDK 53+) logs this as an error when expo-notifications loads, although local reminders still
+// work there and remote push only matters in store builds. Hide that one known dev-only toast; nothing else.
+if (__DEV__) LogBox.ignoreLogs(["expo-notifications: Android Push notifications"]);
 
 // Whenever the session ends (sign-out, expired refresh token, deleted account) leave signed-in screens.
 function useSignedOutGuard() {

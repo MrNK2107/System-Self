@@ -104,7 +104,7 @@ export default function LifeScreen() {
                     {opt.label.toUpperCase()}
                   </Text>
                   <Text style={[s.optionDesc, { color: colors.mutedForeground }]}>
-                    {lifeContextDef(opt.key).promptLine}
+                    {lifeContextDef(opt.key).blurb}
                   </Text>
                 </View>
                 <View style={[s.radioOuter, { borderColor: active ? "#3A7BD5" : colors.border }]}>

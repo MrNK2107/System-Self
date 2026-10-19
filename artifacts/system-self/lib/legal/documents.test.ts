@@ -23,7 +23,7 @@ test("the open-source licence list covers every direct production dependency, an
     if (name.startsWith("@workspace/")) continue;
     assert.ok(listed.has(name), `${name} is missing from open-source-licences.md`);
   }
-  const full = readFileSync(resolve(legalDir, "THIRD_PARTY_NOTICES-app.txt"), "utf8");
+  const full = readFileSync(resolve(legalDir, "THIRD_PARTY_NOTICES-app.txt"), "utf8").replace(/\r\n?/g, "\n");
   const compact = [...LEGAL_DOCS.licenses.matchAll(/^- (\S+) (\S+): /gm)].map((m) => `${m[1]}@${m[2]}`);
   const inFull = [...full.matchAll(/^License: /gm)].length;
   assert.equal(inFull, compact.length, "both files list the same number of packages");

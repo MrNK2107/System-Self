@@ -49,3 +49,11 @@ test("earliestSeasonStart is tomorrow, or the day the cooldown after the last se
   assert.equal(earliestSeasonStart("2026-06-08", [{ endsOn: "2026-01-01" }, { endsOn: "2026-06-10" }]), "2026-06-18");
   assert.equal(earliestSeasonStart("2026-06-08", [{ endsOn: "2026-05-01" }]), "2026-06-09");
 });
+
+test("every life context has user-facing copy that is not the model prompt", () => {
+  for (const c of LIFE_CONTEXTS) {
+    assert.ok(c.blurb.length > 0, c.key);
+    assert.notEqual(c.blurb, c.promptLine, c.key);
+    assert.doesNotMatch(c.blurb, /\bthe user\b/i, c.key);
+  }
+});

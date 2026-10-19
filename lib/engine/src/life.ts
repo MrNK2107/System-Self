@@ -9,19 +9,22 @@ export type LifeContextKey = (typeof LIFE_CONTEXT_KEYS)[number];
 export interface LifeContextDef {
   key: LifeContextKey;
   label: string;
+  /** Shown to the user in onboarding and settings. */
+  blurb: string;
+  /** Sent to the quest model only; never shown in the app. */
   promptLine: string;
   /** Season kinds a user in this context may schedule (`away` is allowed for every context). */
   seasons: SeasonKind[];
 }
 
 export const LIFE_CONTEXTS: LifeContextDef[] = [
-  { key: "student", label: "Student", promptLine: "Fit quests into gaps between classes. Prefer 20–45 minute blocks.", seasons: ["exam", "away"] },
-  { key: "professional", label: "Professional", promptLine: "Fit quests around working hours: before 9, lunch, or after 18.", seasons: ["crunch", "away"] },
-  { key: "shift_worker", label: "Shift worker", promptLine: "The user works rotating shifts. Never assume a 9–5 day. Prefer flexible-time quests.", seasons: ["away"] },
-  { key: "athlete", label: "Athlete", promptLine: "Respect the user's training blocks. Do not add extra hard training on top of planned sessions.", seasons: ["competition", "away"] },
-  { key: "founder", label: "Founder", promptLine: "Days are irregular. Prefer short, high-leverage quests; always offer a minimum version.", seasons: ["launch", "away"] },
-  { key: "parent", label: "Parent", promptLine: "Windows are short. BODY quests must be doable at home in under 20 minutes.", seasons: ["away"] },
-  { key: "traveling", label: "Traveling", promptLine: "No gym access assumed. Bodyweight or hotel-room sessions only.", seasons: ["away"] },
+  { key: "student", label: "Student", blurb: "Quests fit the gaps between classes, in 20–45 minute blocks.", promptLine: "Fit quests into gaps between classes. Prefer 20–45 minute blocks.", seasons: ["exam", "away"] },
+  { key: "professional", label: "Professional", blurb: "Quests fit around work: before 9, at lunch, or after 18:00.", promptLine: "Fit quests around working hours: before 9, lunch, or after 18.", seasons: ["crunch", "away"] },
+  { key: "shift_worker", label: "Shift worker", blurb: "Your hours rotate. Quests never assume a 9–5 day.", promptLine: "The user works rotating shifts. Never assume a 9–5 day. Prefer flexible-time quests.", seasons: ["away"] },
+  { key: "athlete", label: "Athlete", blurb: "Your training plan comes first. No extra hard sessions stacked on top.", promptLine: "Respect the user's training blocks. Do not add extra hard training on top of planned sessions.", seasons: ["competition", "away"] },
+  { key: "founder", label: "Founder", blurb: "Irregular days. Short, high-leverage quests, always with a minimum version.", promptLine: "Days are irregular. Prefer short, high-leverage quests; always offer a minimum version.", seasons: ["launch", "away"] },
+  { key: "parent", label: "Parent", blurb: "Short windows. BODY quests you can do at home in under 20 minutes.", promptLine: "Windows are short. BODY quests must be doable at home in under 20 minutes.", seasons: ["away"] },
+  { key: "traveling", label: "Traveling", blurb: "No gym assumed. Bodyweight or hotel-room sessions only.", promptLine: "No gym access assumed. Bodyweight or hotel-room sessions only.", seasons: ["away"] },
 ];
 
 export function lifeContext(key: string): LifeContextDef {

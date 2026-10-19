@@ -122,7 +122,7 @@ export default function LifeSettingsScreen() {
                   <Chip key={o.key} label={o.label} active={profile.lifeContext === o.key} onPress={() => void changeContext(o.key)} />
                 ))}
               </View>
-              <Text style={[s.hint, { color: colors.mutedForeground }]}>{lifeContextDef(profile.lifeContext).promptLine}</Text>
+              <Text style={[s.hint, { color: colors.mutedForeground }]}>{lifeContextDef(profile.lifeContext).blurb}</Text>
             </View>
           </SettingsCard>
 
