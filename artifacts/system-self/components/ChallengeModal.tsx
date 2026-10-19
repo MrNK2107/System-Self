@@ -27,7 +27,8 @@ interface Props {
   visible: boolean;
   rival: ChallengeTarget | null;
   onClose: () => void;
-  onDeclare: (domain: Domain) => void;
+  /** Sends the challenge; resolves null once the server confirmed it, else the reason it did not land. */
+  onDeclare: (domain: Domain) => Promise<string | null>;
 }
 
 export function ChallengeModal({ visible, rival, onClose, onDeclare }: Props) {
@@ -35,6 +36,8 @@ export function ChallengeModal({ visible, rival, onClose, onDeclare }: Props) {
   const { domainScores } = useApp();
   const [selectedDomain, setSelectedDomain] = useState<Domain>("DISCIPLINE");
   const [declared, setDeclared] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const contentAnim = useRef(new Animated.Value(0)).current;
@@ -43,6 +46,8 @@ export function ChallengeModal({ visible, rival, onClose, onDeclare }: Props) {
   useEffect(() => {
     if (visible) {
       setDeclared(false);
+      setSending(false);
+      setError(null);
       setSelectedDomain("DISCIPLINE");
       overlayAnim.setValue(0);
       contentAnim.setValue(0);
@@ -67,14 +72,21 @@ export function ChallengeModal({ visible, rival, onClose, onDeclare }: Props) {
   const endDate = new Date(Date.now() + (RIVAL_CHALLENGE_DAYS - 1) * 24 * 60 * 60 * 1000);
   const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-  const handleDeclare = () => {
+  // The "declared" confirmation plays only after the server accepted the challenge; otherwise the error shows.
+  const handleDeclare = async () => {
+    if (sending) return;
+    setSending(true);
+    setError(null);
+    const failure = await onDeclare(selectedDomain);
+    setSending(false);
+    if (failure !== null) {
+      setError(failure);
+      return;
+    }
     setDeclared(true);
     declaredAnim.setValue(0);
     Animated.timing(declaredAnim, { toValue: 1, duration: 400, useNativeDriver: false }).start();
-    setTimeout(() => {
-      onDeclare(selectedDomain);
-      onClose();
-    }, 1200);
+    setTimeout(onClose, 1200);
   };
 
   return (
@@ -226,12 +238,16 @@ export function ChallengeModal({ visible, rival, onClose, onDeclare }: Props) {
                     backgroundColor: domainColor + "18",
                     opacity: pressed ? 0.6 : 1,
                   }]}
-                  onPress={handleDeclare}
+                  onPress={() => void handleDeclare()}
+                  disabled={sending}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: sending, busy: sending }}
                 >
                   <Text style={[styles.declareBtnText, { color: domainColor }]}>
-                    DECLARE CHALLENGE
+                    {sending ? "TRANSMITTING" : "DECLARE CHALLENGE"}
                   </Text>
                 </Pressable>
+                {error ? <Text style={styles.errorText} accessibilityRole="alert">{error}</Text> : null}
                 <Pressable onPress={onClose} style={styles.cancelBtn}>
                   <Text style={[styles.cancelText, { color: colors.mutedForeground }]}>CANCEL</Text>
                 </Pressable>
@@ -321,6 +337,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16, alignItems: "center",
   },
   declareBtnText: { fontSize: 11, fontWeight: "800" as const, letterSpacing: 3 },
+  errorText: { fontSize: 11, lineHeight: 16, color: "#E05555", textAlign: "center" },
   cancelBtn: { alignItems: "center", paddingVertical: 10 },
   cancelText: { fontSize: 10, letterSpacing: 2, fontWeight: "600" as const },
   confirmedBlock: { alignItems: "center", gap: 10, paddingVertical: 20 },

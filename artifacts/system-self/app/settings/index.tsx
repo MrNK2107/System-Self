@@ -6,7 +6,7 @@ import React, { useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
-import { shareCodename } from "@/components/CodenameCard";
+import { CodenameCard, shareCodename } from "@/components/CodenameCard";
 import { Separator, SettingsCard, SettingsRow } from "@/components/SettingsParts";
 import { IDENTITY_OPTIONS } from "@/constants/identity";
 import { useAuth } from "@/context/AuthContext";
@@ -204,13 +204,20 @@ export default function SettingsScreen() {
         {profile ? (
           <>
             <Separator />
-            <SettingsRow
-              icon="hash"
-              label="Your codename"
-              value={profile.publicCodename}
-              trailing="share-2"
-              onPress={() => void shareCodename(profile.publicCodename)}
-            />
+            {profile.identitySetting === "anonymous" ? (
+              // Anonymous operators can't be searched: the codename is shown to copy, with no share action.
+              <View style={s.codenameCopy}>
+                <CodenameCard codename={profile.publicCodename} identity="anonymous" />
+              </View>
+            ) : (
+              <SettingsRow
+                icon="hash"
+                label="Your codename"
+                value={profile.publicCodename}
+                trailing="share-2"
+                onPress={() => void shareCodename(profile.publicCodename)}
+              />
+            )}
           </>
         ) : null}
       </SettingsCard>
@@ -248,6 +255,7 @@ export default function SettingsScreen() {
 
 const s = StyleSheet.create({
   panel: { paddingBottom: 16, gap: 12 },
+  codenameCopy: { paddingVertical: 10 },
   confirm: { gap: 12 },
   panelLabel: { fontSize: 9, letterSpacing: 2.5, fontWeight: "700" as const },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

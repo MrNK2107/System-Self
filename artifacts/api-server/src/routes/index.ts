@@ -41,7 +41,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
   router.use(systemRoutes(db));
   router.use(historyRoutes(db, ai));
   if (db) {
-    router.use(adminRoutes(db));
+    router.use(adminRoutes(db, deps.now));
     router.use(adminMetricsRoutes(db, deps.now));
     router.use(onboardingRoutes(db));
     router.use(profileRoutes(db, deps.now));

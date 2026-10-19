@@ -24,7 +24,10 @@ import { app, assertContract, assertStoredNoticesMatchContract, auth, db, setup,
 import { env } from "../lib/env";
 import { ensureRolledOver } from "../services/rollover";
 import { buildUserContext } from "../services/ai-context";
-import { RIVAL_JOB_LOCK, runSocialJobs } from "../jobs/social";
+import { RIVAL_JOB_LOCK, refreshExpiredRivals, runSocialJobs } from "../jobs/social";
+import { ensureAssignments, usersWithExpiredSlots } from "../services/rivals";
+import { tauntTemplate } from "./rivals";
+import { withUserLock } from "../services/user-lock";
 
 after(async () => {
   await closeTestDb();
@@ -289,7 +292,7 @@ test("rival passing the user creates one rival_passed notice, not repeated next 
   await ensureRolledOver(db!, u.id, after2h(addDays(D0, 1)));
   const one = await passed();
   assert.equal(one.length, 1);
-  assert.deepEqual(one[0]!.payload, { codename: body.rivals[0]!.codename, domain: "MIND" });
+  assert.deepEqual(one[0]!.payload, { codename: body.rivals[0]!.codename, domain: "MIND", isGhost: true });
 
   // the morning briefing of that day carries one line about it
   const ctx = await buildUserContext(db!, u.id, after2h(addDays(D0, 1)));
@@ -424,8 +427,12 @@ test("taunt: one per rival per local day, stored as a rival_taunt message; read 
   const taunt = assertContract(RivalTauntSchema, res.body);
   assert.equal(taunt.codename, r1!.codename);
   assert.equal(taunt.read, false);
+  assert.equal(taunt.isGhost, true);
   assert.ok(taunt.message.length > 0);
   assert.ok(!taunt.message.includes("!"));
+  // a ghost is a simulation: its transmission never speaks as a person ("I", "me", "my", a signature)
+  assert.ok(!/\b(I|me|my|mine|I'm)\b/.test(taunt.message), taunt.message);
+  assert.ok(!taunt.message.includes("—"), taunt.message);
   const msgs = await db!.select().from(systemMessages).where(and(eq(systemMessages.userId, u.id), eq(systemMessages.messageType, "rival_taunt")));
   assert.equal(msgs.length, 1);
 
@@ -449,7 +456,7 @@ test("taunt: one per rival per local day, stored as a rival_taunt message; read 
 test("taunt uses the model when available and its text when clean", { skip }, async () => {
   clock = new Date();
   const prompts: string[] = [];
-  const withAi = app({ now: () => clock, ai: { call: async (_m, o) => (prompts.push(o.prompt), "You stall. I do not.") } });
+  const withAi = app({ now: () => clock, ai: { call: async (_m, o) => (prompts.push(o.prompt), "RIVAL // ASH-1 does not stall. You do.") } });
   const u = await mk("eve_1");
   const body = await getRivals(u.token);
   const saved = env.GEMINI_API_KEY;
@@ -457,8 +464,26 @@ test("taunt uses the model when available and its text when clean", { skip }, as
   try {
     const res = await request(withAi).post(`/api/rivals/${body.rivals[0]!.assignmentId}/taunt`).set(auth(u.token)).send({});
     assert.equal(res.status, 201);
-    assert.equal(res.body.message, "You stall. I do not.");
+    assert.equal(res.body.message, "RIVAL // ASH-1 does not stall. You do.");
     assert.ok(prompts[0]!.includes(body.rivals[0]!.codename));
+  } finally {
+    env.GEMINI_API_KEY = saved;
+  }
+});
+
+test("a first-person model transmission from a ghost falls back to the third-person template", { skip }, async () => {
+  clock = new Date();
+  const withAi = app({ now: () => clock, ai: { call: async () => "You stall. I do not." } });
+  const u = await mk("eve_1");
+  const body = await getRivals(u.token);
+  const saved = env.GEMINI_API_KEY;
+  env.GEMINI_API_KEY = "test-key";
+  try {
+    const res = await request(withAi).post(`/api/rivals/${body.rivals[0]!.assignmentId}/taunt`).set(auth(u.token)).send({});
+    assert.equal(res.status, 201);
+    assert.notEqual(res.body.message, "You stall. I do not.");
+    assert.ok(res.body.message.includes(body.rivals[0]!.codename.split(" // ")[1]!), res.body.message);
+    assert.equal(res.body.isGhost, true);
   } finally {
     env.GEMINI_API_KEY = saved;
   }
@@ -490,4 +515,66 @@ test("the social job refreshes expired assignments, and skips while another inst
   assert.equal(rows[0]!.id, first.rivals[0]!.assignmentId);
   assert.notEqual(rows[1]!.id, first.rivals[1]!.assignmentId);
   assert.ok(rows[1]!.expiresAt.getTime() > clock.getTime());
+});
+
+test("job: users are refreshed in expires_at order, and the pass stops when its time budget is spent", { skip }, async () => {
+  clock = new Date();
+  const users3 = [await mk("job_1"), await mk("job_2"), await mk("job_3")];
+  const firsts = [];
+  for (const u of users3) firsts.push(await getRivals(u.token));
+  // job_3 expired longest ago, then job_1, then job_2
+  const expiredAgo = [2, 1, 3];
+  for (let i = 0; i < 3; i++) {
+    await db!
+      .update(rivalAssignments)
+      .set({ expiresAt: new Date(clock.getTime() - expiredAgo[i]! * 60_000) })
+      .where(eq(rivalAssignments.id, firsts[i]!.rivals[0]!.assignmentId));
+  }
+  const order = await usersWithExpiredSlots(db!, clock, 10);
+  assert.deepEqual(order, [users3[2]!.id, users3[0]!.id, users3[1]!.id]);
+
+  // a budget of 0 ms is spent after the first user: one refresh, the rest wait for the next tick
+  let t = 0;
+  const done = await refreshExpiredRivals(db!, clock, 10, { budgetMs: 0, nowMs: () => t++ });
+  assert.equal(done, 1);
+  const left = await usersWithExpiredSlots(db!, clock, 10);
+  assert.deepEqual(left, [users3[0]!.id, users3[1]!.id]);
+  // within a generous budget everything else is picked up
+  assert.equal(await refreshExpiredRivals(db!, clock, 10, { budgetMs: 60_000 }), 2);
+});
+
+// --- carried fixes ------------------------------------------------------------------------------------
+
+test("matching picks the closest candidates by snapshot hidden score, not by user id order", { skip }, async () => {
+  clock = new Date();
+  const me = await mk("cap_me");
+  await setRankAndScores(me.id, "D", 33);
+  await addRecentLog(me.id, clock);
+  const cands = [];
+  for (let i = 0; i < 4; i++) cands.push(await mk(`cap_${i}`));
+  // far candidates get the LOWEST ids, the close ones the highest: an id-ordered cut-off would keep the far ones
+  cands.sort((x, y) => (x.id < y.id ? -1 : 1));
+  const values = [48, 49, 34, 35];
+  for (let i = 0; i < 4; i++) {
+    await setRankAndScores(cands[i]!.id, "D", values[i]!);
+    await addRecentLog(cands[i]!.id, clock);
+    await db!.update(dailySnapshots).set({ hidden: values[i]! }).where(eq(dailySnapshots.userId, cands[i]!.id));
+  }
+  await db!.update(dailySnapshots).set({ hidden: 33 }).where(eq(dailySnapshots.userId, me.id));
+  await withUserLock(db!, me.id, (tx) => ensureAssignments(tx, me.id, clock, { candidateLimit: 2 }));
+  const rows = await db!.select().from(rivalAssignments).where(eq(rivalAssignments.userId, me.id));
+  const matched = rows.flatMap((r) => (r.rivalUserId ? [r.rivalUserId] : [])).sort();
+  assert.deepEqual(matched, [cands[2]!.id, cands[3]!.id].sort());
+});
+
+test("ghost transmission templates are third person and never claim to be a person", () => {
+  for (let day = 0; day < 10; day++) {
+    for (const trajectory of ["up", "stable", "down"]) {
+      const g = tauntTemplate("RIVAL // ASH-2", trajectory, day, true);
+      assert.ok(g.includes("ASH-2"), g);
+      assert.ok(!/\b(I|me|my|mine|I'm)\b/.test(g), g);
+      assert.ok(!g.includes("—"), g);
+    }
+  }
+  assert.ok(tauntTemplate("RIVAL // ASH-2", "up", 0, false).includes("— ASH-2"));
 });

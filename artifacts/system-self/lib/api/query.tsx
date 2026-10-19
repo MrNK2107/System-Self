@@ -15,7 +15,7 @@ export const QUERY_CACHE_KEY = "system_self.rq.v1";
  * Version of the persisted query cache. Bump it whenever a response contract changes shape: a cache written
  * by another version is discarded on restore instead of being handed to the screens.
  */
-export const CACHE_VERSION = "p5-2";
+export const CACHE_VERSION = "p5-3";
 
 export const queryClient = new QueryClient({
   defaultOptions: {

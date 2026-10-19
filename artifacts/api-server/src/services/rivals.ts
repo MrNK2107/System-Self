@@ -4,9 +4,10 @@
  * simulations, cold start). Ghost drift, rival pressure and rival-challenge resolution run in the user's
  * rollover (rivalRollover). The hidden score is only used here to match; it never leaves the server.
  */
-import { and, asc, count, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   blocks,
+  dailySnapshots,
   domainScores,
   ghostRivals,
   logs,
@@ -138,7 +139,7 @@ async function voidChallenge(tx: Pick<Tx, "update">, id: string, now: Date): Pro
  * ghost. A slot with an open challenge is kept until the challenge resolves (unless its rival is blocked: the
  * challenge is voided). Called by GET /api/rivals and the social job. Must run inside withUserLock.
  */
-export async function ensureAssignments(tx: Tx, userId: string, now: Date): Promise<void> {
+export async function ensureAssignments(tx: Tx, userId: string, now: Date, opts: { candidateLimit?: number } = {}): Promise<void> {
   const [me] = await tx
     .select({ tz: users.timezone, rank: profiles.rank })
     .from(users)
@@ -175,7 +176,7 @@ export async function ensureAssignments(tx: Tx, userId: string, now: Date): Prom
   }
 
   const myScores = (await scoresOf(tx, [userId])).get(userId)!;
-  const picks = rank === "E" ? [] : await matchCandidates(tx, userId, rank, today, myScores, kept, blocked, now);
+  const picks = rank === "E" ? [] : await matchCandidates(tx, userId, rank, today, myScores, kept, blocked, now, opts.candidateLimit ?? CANDIDATE_LIMIT);
   const taken = new Set(kept.map((a) => a.codename));
   const real = await scoresOf(tx, picks);
 
@@ -228,9 +229,15 @@ async function matchCandidates(
   kept: readonly RivalAssignment[],
   blocked: ReadonlySet<string>,
   now: Date,
+  candidateLimit: number,
 ): Promise<string[]> {
   const exclude = new Set([userId, ...blocked, ...kept.flatMap((a) => (a.rivalUserId ? [a.rivalUserId] : []))]);
   const since = new Date(now.getTime() - ACTIVE_WINDOW_MS);
+  const mine = (await hiddenAndTrajectoryBatch(tx, [{ userId, today, scoreMap: myScores }])).get(userId)!.hidden;
+  // Pre-sort in SQL by the distance between each candidate's latest daily snapshot hidden score and mine, so the
+  // cap keeps the closest candidates (not the lowest ids). A candidate without a snapshot sorts last. The exact
+  // live score is still computed below for the survivors, and the final order uses that.
+  const snapshotGap = sql`abs(coalesce((select ds.hidden from ${dailySnapshots} ds where ds.user_id = ${users.id} order by ds.local_date desc limit 1), 1e6) - ${mine})`;
   const rows = await tx
     .select({ id: users.id, tz: users.timezone })
     .from(users)
@@ -239,19 +246,18 @@ async function matchCandidates(
       and(
         eq(profiles.rank, rank),
         ne(users.id, userId),
+        exclude.size > 0 ? notInArray(users.id, [...exclude]) : undefined,
         sql`exists (select 1 from ${logs} l where l.user_id = ${users.id} and l.occurred_at >= ${since})`,
       ),
     )
-    .orderBy(asc(users.id))
-    .limit(CANDIDATE_LIMIT);
-  const ids = rows.map((r) => r.id).filter((id) => !exclude.has(id));
+    .orderBy(asc(snapshotGap), asc(users.id))
+    .limit(candidateLimit);
+  const ids = rows.map((r) => r.id);
   if (ids.length === 0) return [];
   const scores = await scoresOf(tx, ids);
   const hidden = await hiddenAndTrajectoryBatch(tx, [
-    { userId, today, scoreMap: myScores },
     ...rows.filter((r) => ids.includes(r.id)).map((r) => ({ userId: r.id, today: localDate(now, r.tz), scoreMap: scores.get(r.id)! })),
   ]);
-  const mine = hidden.get(userId)!.hidden;
   const ranked = ids
     .map((id) => ({ id, gap: Math.abs(hidden.get(id)!.hidden - mine) }))
     .filter((c) => c.gap <= WIDE_MATCH_WINDOW)
@@ -296,7 +302,7 @@ export async function rivalRollover(tx: Tx, userId: string, date: string, now: D
         .update(rivalPressure)
         .set({ ahead })
         .where(and(eq(rivalPressure.userId, userId), eq(rivalPressure.assignmentId, a.id), eq(rivalPressure.domain, domain)));
-      if (ahead) out.push(await insertNotice(tx, userId, "rival_passed", { codename: a.codename, domain }, now));
+      if (ahead) out.push(await insertNotice(tx, userId, "rival_passed", { codename: a.codename, domain, isGhost: a.ghostId !== null }, now));
     }
   }
 
@@ -406,7 +412,7 @@ export function toChallengeDto(c: RivalChallengeRow, live?: { user: Scores; riva
 }
 
 export function toTauntDto(t: typeof rivalTaunts.$inferSelect): RivalTaunt {
-  return { id: t.id, codename: t.codename, message: t.message, createdAt: t.createdAt.toISOString(), read: t.readAt !== null };
+  return { id: t.id, codename: t.codename, isGhost: t.isGhost, message: t.message, createdAt: t.createdAt.toISOString(), read: t.readAt !== null };
 }
 
 /** GET /api/rivals: slots, the user's own shadow, challenges (open + recent), record and transmissions. */
@@ -486,10 +492,11 @@ export async function rivalPassedLines(db: Reader, userId: string, tz: string, t
     });
 }
 
-/** Users with an expired slot that can be refilled now (no open challenge holding it). */
-export async function usersWithExpiredSlots(db: Pick<Db, "selectDistinct">, now: Date, limit: number): Promise<string[]> {
+/** Users with an expired slot that can be refilled now (no open challenge holding it), longest expired first. */
+export async function usersWithExpiredSlots(db: Pick<Db, "select">, now: Date, limit: number): Promise<string[]> {
+  const oldest = sql<Date>`min(${rivalAssignments.expiresAt})`;
   const rows = await db
-    .selectDistinct({ userId: rivalAssignments.userId })
+    .select({ userId: rivalAssignments.userId })
     .from(rivalAssignments)
     .where(
       and(
@@ -497,6 +504,8 @@ export async function usersWithExpiredSlots(db: Pick<Db, "selectDistinct">, now:
         sql`not exists (select 1 from ${rivalChallenges} c where c.assignment_id = ${rivalAssignments.id} and c.outcome is null)`,
       ),
     )
+    .groupBy(rivalAssignments.userId)
+    .orderBy(asc(oldest), asc(rivalAssignments.userId))
     .limit(limit);
   return rows.map((r) => r.userId);
 }

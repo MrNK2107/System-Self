@@ -26,6 +26,11 @@ export function RivalTauntCard({ taunt }: Props) {
           {!taunt.read && <View style={styles.unreadDot} />}
           <Feather name="message-circle" size={11} color="#E05555" />
           <Text style={[styles.rivalName, { color: "#E05555" }]}>{shortName}</Text>
+          {taunt.isGhost ? (
+            <Text style={[styles.simTag, { color: colors.mutedForeground, borderColor: colors.border }]} accessibilityLabel="Simulated rival">
+              SIM
+            </Text>
+          ) : null}
           <Text style={[styles.tauntLabel, { color: colors.mutedForeground }]}>TRANSMISSION</Text>
         </View>
         <Text style={[styles.timeAgo, { color: colors.mutedForeground }]}>{timeAgo}</Text>
@@ -52,6 +57,7 @@ const styles = StyleSheet.create({
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 7 },
   unreadDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: "#E05555" },
   rivalName: { fontSize: 10, fontWeight: "800" as const, letterSpacing: 1.5 },
+  simTag: { fontSize: 7, fontWeight: "800" as const, letterSpacing: 1.5, borderWidth: 1, borderRadius: 2, paddingHorizontal: 4, paddingVertical: 1 },
   tauntLabel: { fontSize: 8, letterSpacing: 2, fontWeight: "600" as const },
   timeAgo: { fontSize: 9, letterSpacing: 0.5 },
   message: { fontSize: 12, lineHeight: 18, fontStyle: "italic" },

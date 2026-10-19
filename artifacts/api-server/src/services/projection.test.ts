@@ -61,13 +61,16 @@ test("a rival without an assignment codename falls back to the public codename, 
   assert.equal(p.isCodename, true);
 });
 
-test("clan tag is hidden for anonymous users except to clanmates and self", () => {
+test("clan tag is hidden for anonymous users except to clanmates and self, and never reaches a rival", () => {
   for (const relation of RELATIONS) {
     const anon = projectUser(subject("anonymous", "ORDR"), relation);
     assert.equal(anon.clanTag, relation === "clanmate" || relation === "self" ? "ORDR" : undefined, `anonymous/${relation}`);
     assert.equal("clanTag" in anon, relation === "clanmate" || relation === "self");
     for (const identity of ["semi-public", "public"] as const) {
-      assert.equal(projectUser(subject(identity, "ORDR"), relation).clanTag, "ORDR", `${identity}/${relation}`);
+      // PRD 14: a rival is shown by assignment codename only, never with a clan affiliation.
+      const expected = relation === "rival" ? undefined : "ORDR";
+      assert.equal(projectUser(subject(identity, "ORDR"), relation).clanTag, expected, `${identity}/${relation}`);
+      assert.equal("clanTag" in projectUser(subject(identity, "ORDR"), relation), relation !== "rival");
     }
   }
   assert.equal("clanTag" in projectUser(subject("public"), "public"), false);

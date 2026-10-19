@@ -53,7 +53,7 @@ export function mergeNotices(...lists: readonly Notice[][]): Notice[] {
 
 export interface NoticeGroup {
   kind: NoticeKind;
-  /** One notice, or every waiting quest_failed notice (they share one modal). */
+  /** One notice, or every waiting quest_failed / rival_passed notice (each batch shares one modal). */
   notices: Notice[];
 }
 
@@ -65,7 +65,7 @@ export function nextNoticeGroup(notices: readonly Notice[], acknowledged: Readon
   for (const kind of NOTICE_ORDER) {
     const ofKind = waiting.filter((n) => n.kind === kind);
     if (ofKind.length === 0) continue;
-    return { kind, notices: kind === "quest_failed" ? ofKind : [ofKind[0]!] };
+    return { kind, notices: kind === "quest_failed" || kind === "rival_passed" ? ofKind : [ofKind[0]!] };
   }
   return null;
 }
@@ -180,14 +180,23 @@ export function noticeView(group: NoticeGroup): NoticeView {
         title: "The gym is open to you now.",
         body: first.payload.line,
       };
-    case "rival_passed":
+    case "rival_passed": {
+      // A ghost is a simulation: it carries the SIM tag wherever it is named.
+      const lines = group.notices.flatMap((n) =>
+        n.kind === "rival_passed"
+          ? [`${n.payload.codename}${n.payload.isGhost ? " [SIM]" : ""} passed your ${n.payload.domain} score.`]
+          : [],
+      );
+      const tail = "The order changed overnight. It is logged.";
+      if (lines.length === 1) return { modal: "system", tone: "alert", label: "RIVAL PRESSURE", title: lines[0]!, body: tail };
       return {
         modal: "system",
         tone: "alert",
         label: "RIVAL PRESSURE",
-        title: `${first.payload.codename} passed your ${first.payload.domain} score.`,
-        body: "The order changed overnight. It is logged.",
+        title: `${lines.length} RIVALS PASSED YOU`,
+        body: [...lines, tail].join("\n"),
       };
+    }
     case "rival_challenge_result": {
       const { challengeId: _id, ...result } = first.payload;
       return { modal: "challenge_result", result: { ...result, domain: result.domain as Domain } };

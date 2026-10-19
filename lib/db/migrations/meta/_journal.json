@@ -134,6 +134,13 @@
       "when": 1792378479834,
       "tag": "0018_cool_whirlwind",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792380128649,
+      "tag": "0019_easy_red_wolf",
+      "breakpoints": true
     }
   ]
 }

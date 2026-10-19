@@ -47,9 +47,24 @@ async function tauntedToday(tx: Pick<Tx, "select">, userId: string, assignmentId
   return !!row;
 }
 
-/** The old client's rival transmissions, used when the model is unavailable. Picked by day, no randomness. */
-export function tauntTemplate(codename: string, trajectory: string, dayNumber: number): string {
+/**
+ * The old client's rival transmissions, used when the model is unavailable. Picked by day, no randomness.
+ * A ghost is a simulation, not a person: its lines are third person in the SYSTEM voice and carry no signature.
+ */
+export function tauntTemplate(codename: string, trajectory: string, dayNumber: number, isGhost = false): string {
   const name = codename.split(" // ")[1] ?? codename;
+  if (isGhost) {
+    const ghostLines = [
+      `RIVAL // ${name} logged again. You did not.`,
+      `RIVAL // ${name} held the line yesterday. The gap grows.`,
+      `RIVAL // ${name} is watching your scores plateau.`,
+      `RIVAL // ${name} was where you are. It did not stay there.`,
+      trajectory === "up"
+        ? `RIVAL // ${name} is accelerating. The gap will show in your dashboard.`
+        : `Even at stable, RIVAL // ${name} is ahead of you.`,
+    ];
+    return ghostLines[Math.abs(dayNumber) % ghostLines.length]!;
+  }
   const lines = [
     `Your logs are inconsistent. Mine are not. — ${name}`,
     `You missed yesterday. I did not. The gap grows. — ${name}`,
@@ -60,9 +75,11 @@ export function tauntTemplate(codename: string, trajectory: string, dayNumber: n
   return lines[Math.abs(dayNumber) % lines.length]!;
 }
 
+const FIRST_PERSON = /\b(I|me|my|mine|myself|I'm|I've|I'll)\b/i;
+
 type TauntPhase =
   | { kind: "done"; result: HandlerResult }
-  | { kind: "generate"; ctx: PromptContext; codename: string; extraContext: string; template: string };
+  | { kind: "generate"; ctx: PromptContext; codename: string; isGhost: boolean; extraContext: string; template: string };
 
 export function rivalsRoutes(db: Db, ai: AiDeps, clock: () => Date = () => new Date()): IRouter {
   const router = Router();
@@ -171,18 +188,24 @@ export function rivalsRoutes(db: Db, ai: AiDeps, clock: () => Date = () => new D
       if (await tauntedToday(tx, me, assignment.id, ctx.today)) return { kind: "done", result: tauntLimit() };
       if (await overMessageLimit(tx, me, ctx.today)) return { kind: "done", result: MESSAGE_LIMIT_RESULT };
       const profile = (await rivalProfiles(tx, [assignment], now)).get(assignment.id);
+      const isGhost = assignment.ghostId !== null;
       const trajectory = profile?.trajectory ?? "stable";
       return {
         kind: "generate",
         ctx,
         codename: assignment.codename,
-        extraContext: `Speak as the rival ${assignment.codename} (rank ${profile?.rank ?? ctx.rank}, trajectory ${trajectory}).`,
-        template: tauntTemplate(assignment.codename, trajectory, ctx.dayNumber),
+        isGhost,
+        extraContext: isGhost
+          ? `The rival ${assignment.codename} is a simulation, not a person (rank ${profile?.rank ?? ctx.rank}, trajectory ${trajectory}). Write in the SYSTEM voice, third person, about the rival by its codename. Never use "I" or "me", never sign off, never claim to be a real person.`
+          : `Speak as the rival ${assignment.codename} (rank ${profile?.rank ?? ctx.rank}, trajectory ${trajectory}).`,
+        template: tauntTemplate(assignment.codename, trajectory, ctx.dayNumber, isGhost),
       };
     });
     if (step1.kind === "done") return void res.status(step1.result.status).json(step1.result.body);
 
     const generated = await generateMessage("rival_taunt", step1.ctx, ai, { extraContext: step1.extraContext }, step1.template);
+    // A ghost never speaks as a person: model text in the first person falls back to the third-person template.
+    if (step1.isGhost && FIRST_PERSON.test(generated.message)) generated.message = step1.template;
 
     await withIdempotency(db, req, res, TAUNT_ROUTE, async (tx) => {
       const now = clock();
@@ -193,7 +216,7 @@ export function rivalsRoutes(db: Db, ai: AiDeps, clock: () => Date = () => new D
       if (await overMessageLimit(tx, me, today)) return MESSAGE_LIMIT_RESULT;
       const [row] = await tx
         .insert(rivalTaunts)
-        .values({ userId: me, assignmentId: assignment.id, codename: assignment.codename, message: generated.message, localDate: today, createdAt: now })
+        .values({ userId: me, assignmentId: assignment.id, codename: assignment.codename, isGhost: assignment.ghostId !== null, message: generated.message, localDate: today, createdAt: now })
         .returning();
       await storeMessage(tx, me, "rival_taunt", { ...step1.ctx, today }, generated, step1.extraContext);
       return { status: 201, body: toTauntDto(row!) };

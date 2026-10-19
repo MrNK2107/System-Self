@@ -17,11 +17,12 @@ export default function SocialSearchScreen() {
   const q = useSearchQuery(text);
   const ready = normalizeSearchQuery(text) !== null;
   const results = ready ? (q.data ?? []) : [];
-  const myCodename = useGameStateQuery().data?.profile.publicCodename;
+  const me = useGameStateQuery().data?.profile;
+  const myCodename = me?.publicCodename;
 
   return (
     <AuthShell tag="SEARCH" title="Find players" subtitle="Public players by username, semi-public players by codename. Anonymous players cannot be found." back>
-      {myCodename ? <CodenameCard codename={myCodename} /> : null}
+      {myCodename ? <CodenameCard codename={myCodename} identity={me?.identitySetting} /> : null}
       <AuthField
         label="USERNAME OR CODENAME"
         value={text}

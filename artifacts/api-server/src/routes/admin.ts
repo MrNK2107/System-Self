@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { asc, eq, gt } from "drizzle-orm";
 import { z } from "zod";
 import { users, type Db } from "@workspace/db";
+import { EntitlementGrantRequestSchema, type EntitlementDto } from "@workspace/contracts";
+import { grantEntitlement } from "../services/entitlements";
 import { requireAdmin } from "../middlewares/auth";
 import { toPublicUser } from "../lib/auth/public-user";
 
@@ -13,7 +15,7 @@ const roleBodySchema = z.object({ role: z.enum(["user", "admin"]) });
 const idParamSchema = z.string().uuid();
 
 // Callers must mount this behind requireAuth.
-export function adminRoutes(db: Db): IRouter {
+export function adminRoutes(db: Db, clock: () => Date = () => new Date()): IRouter {
   const router = Router();
   router.use("/admin", requireAdmin);
 
@@ -51,6 +53,26 @@ export function adminRoutes(db: Db): IRouter {
     }
     req.log.info({ event: "admin_role_change", actorId: req.user!.id, targetId: id, role }, "admin_action");
     res.json({ user: toPublicUser(updated) });
+  });
+
+  /** P5 stub of the paywall: an admin sets a user's tier (P7 replaces the source with RevenueCat). */
+  router.post("/admin/users/:id/entitlement", async (req, res) => {
+    const id = idParamSchema.parse(req.params.id);
+    const { tier, expiresAt } = EntitlementGrantRequestSchema.parse(req.body ?? {});
+    const [target] = await db.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
+    if (!target) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    const row = await grantEntitlement(db, id, tier, expiresAt ? new Date(expiresAt) : null, clock());
+    req.log.info({ event: "admin_entitlement", actorId: req.user!.id, targetId: id, tier }, "admin_action");
+    const dto: EntitlementDto = {
+      tier: row.tier as EntitlementDto["tier"],
+      source: row.source as EntitlementDto["source"],
+      expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+    res.json(dto);
   });
 
   return router;

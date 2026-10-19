@@ -3,7 +3,7 @@ import { Feather } from "@expo/vector-icons";
 import React from "react";
 import { Share, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { codenameShareMessage } from "@/lib/social/social";
+import { codenameShareMessage, codenameShareOptions } from "@/lib/social/social";
 
 /** Opens the system share sheet (no clipboard module in this build). Cancelling is not an error. */
 export async function shareCodename(codename: string): Promise<void> {
@@ -14,8 +14,9 @@ export async function shareCodename(codename: string): Promise<void> {
   }
 }
 
-export function CodenameCard({ codename }: { codename: string }) {
+export function CodenameCard({ codename, identity }: { codename: string; identity?: "anonymous" | "semi-public" | "public" }) {
   const colors = useColors();
+  const { canShare, note } = codenameShareOptions(identity);
   return (
     <View style={[s.card, { borderColor: colors.border, backgroundColor: colors.card }]}>
       <View style={s.text}>
@@ -23,7 +24,9 @@ export function CodenameCard({ codename }: { codename: string }) {
         <Text style={[s.value, { color: colors.foreground }]} selectable>
           {codename}
         </Text>
+        {note ? <Text style={[s.note, { color: colors.mutedForeground }]}>{note}</Text> : null}
       </View>
+      {canShare ? (
       <TouchableOpacity
         onPress={() => void shareCodename(codename)}
         accessibilityRole="button"
@@ -34,6 +37,7 @@ export function CodenameCard({ codename }: { codename: string }) {
         <Feather name="share-2" size={12} color={colors.primary} />
         <Text style={[s.btnText, { color: colors.primary }]}>SHARE</Text>
       </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -43,6 +47,7 @@ const s = StyleSheet.create({
   text: { flex: 1, gap: 3 },
   label: { fontSize: 8, letterSpacing: 2.5, fontWeight: "700" },
   value: { fontSize: 13, fontWeight: "700", letterSpacing: 0.5 },
+  note: { fontSize: 10, lineHeight: 15 },
   btn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 3, paddingHorizontal: 10, paddingVertical: 6 },
   btnText: { fontSize: 9, fontWeight: "800", letterSpacing: 2 },
 });

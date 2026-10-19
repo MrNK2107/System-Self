@@ -17,6 +17,7 @@ import { RANKED_DOMAINS, daysBetween } from "@workspace/engine";
 import { ApiError, type ApiClient } from "../api/client";
 import type { Outbox } from "../api/outbox";
 import { afterOutbox, type MutationResult } from "../game/actions";
+import { isProRequired } from "../api/pro";
 
 export type Trajectory = "up" | "stable" | "down";
 export type Scores = Record<RankedDomain, number>;
@@ -139,6 +140,7 @@ export function challengeProgress(c: RivalChallenge, today: string): ChallengePr
 /** SYSTEM-voice line for a failed rival request. */
 export function describeRivalError(err: unknown): string {
   if (!(err instanceof ApiError)) return "The request failed. Retry.";
+  if (isProRequired(err)) return "PRO required.";
   if (err.kind === "network") return "No connection. Check your signal and retry.";
   if (err.kind !== "http") return "The system is unavailable. Retry shortly.";
   switch (err.code) {
@@ -152,6 +154,19 @@ export function describeRivalError(err: unknown): string {
       return "That rival is gone. Pull to refresh.";
     default:
       return (err.status ?? 0) >= 500 ? "The system is unavailable. Retry shortly." : "The request was rejected.";
+  }
+}
+
+/**
+ * Runs a challenge declaration and returns what the sheet must show: null once the server confirmed it, else the
+ * SYSTEM-voice reason it did not land. The sheet plays its "declared" confirmation only on null.
+ */
+export async function declareOutcomeMessage(send: () => Promise<MutationResult<unknown>>): Promise<string | null> {
+  try {
+    const r = await send();
+    return r.ok ? null : "Queued entries are still syncing. Retry once they land.";
+  } catch (e) {
+    return describeRivalError(e);
   }
 }
 

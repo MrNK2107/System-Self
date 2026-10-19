@@ -107,6 +107,7 @@ async function main() {
   assert.ok(taunt.ok);
   assert.ok(taunt.value.message.length > 0);
   assert.equal(taunt.value.codename, target.codename);
+  assert.equal(taunt.value.isGhost, target.isGhost);
   await rejectedWith(() => tauntRival(me.api, synced, target.assignmentId, newClientId("t")), 429, "taunt_limit");
   step("one transmission per rival per day; the second -> 429", { message: taunt.value.message });
 

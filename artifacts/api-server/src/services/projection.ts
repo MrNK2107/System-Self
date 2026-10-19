@@ -38,7 +38,7 @@ export interface ProjectOptions {
  *  - handle: username for self/clanmate/duo; for follower/public only when the subject is `public`;
  *    for a rival only when the subject is `public` and the viewer has rivalReveal, else the rival codename.
  *  - scores (the five ranked domains): self, clanmate, rival. A follower sees rank, trajectory, shadowActive only (PRD 16).
- *  - clanTag: hidden for `anonymous` subjects except to clanmates (and to self).
+ *  - clanTag: never shown to a rival (PRD 14); hidden for `anonymous` subjects except to clanmates (and to self).
  * Never includes a user id or the hidden score.
  */
 export function projectUser(subject: ProjectionSubject, relation: Relation, opts: ProjectOptions = {}): PublicProfile {
@@ -59,7 +59,7 @@ export function projectUser(subject: ProjectionSubject, relation: Relation, opts
     shadowActive: subject.shadowActive,
   };
   if (relation === "self" || relation === "clanmate" || relation === "rival") profile.scores = { ...subject.scores };
-  if (subject.clanTag && (subject.identitySetting !== "anonymous" || relation === "clanmate" || relation === "self")) {
+  if (subject.clanTag && relation !== "rival" && (subject.identitySetting !== "anonymous" || relation === "clanmate" || relation === "self")) {
     profile.clanTag = subject.clanTag;
   }
   return profile;

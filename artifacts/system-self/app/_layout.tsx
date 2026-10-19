@@ -43,6 +43,7 @@ function RootLayoutNav() {
       <Stack.Screen name="legal/[doc]" />
       <Stack.Screen name="settings" />
       <Stack.Screen name="social" />
+      <Stack.Screen name="paywall" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="floor/[routineId]" />
       <Stack.Screen name="dungeon/briefing" />

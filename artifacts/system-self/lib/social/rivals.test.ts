@@ -8,6 +8,7 @@ import {
   challengeProgress,
   composite,
   declareRivalChallenge,
+  declareOutcomeMessage,
   describeRivalError,
   fetchRivals,
   leaderStatus,
@@ -90,7 +91,7 @@ test("fetchRivals reads GET /api/rivals with the contract", async () => {
 });
 
 test("rival mutations go after the outbox with an idempotency key", async () => {
-  const { api, calls } = fakeApi((c) => (c.path.endsWith("/challenge") ? challenge() : c.path.endsWith("/taunt") ? { id: ID(5), codename: "RIVAL // ASH-3", message: "m", createdAt: "2026-01-01T00:00:00.000Z", read: false } : null));
+  const { api, calls } = fakeApi((c) => (c.path.endsWith("/challenge") ? challenge() : c.path.endsWith("/taunt") ? { id: ID(5), codename: "RIVAL // ASH-3", isGhost: false, message: "m", createdAt: "2026-01-01T00:00:00.000Z", read: false } : null));
   const declared = await declareRivalChallenge(api, synced, ID(1), "MIND", "c-1");
   assert.ok(declared.ok);
   assert.deepEqual(calls[0], {
@@ -170,4 +171,29 @@ test("rival error copy", () => {
 test("shortCodename strips the prefix", () => {
   assert.equal(shortCodename("RIVAL // ASH-3"), "ASH-3");
   assert.equal(shortCodename("plain"), "plain");
+});
+
+test("declareOutcomeMessage: null only when the server confirmed the challenge, else a SYSTEM-voice error", async () => {
+  assert.equal(await declareOutcomeMessage(async () => ({ ok: true, value: challenge() })), null);
+  assert.equal(
+    await declareOutcomeMessage(async () => ({ ok: false, reason: "sync_pending" })),
+    "Queued entries are still syncing. Retry once they land.",
+  );
+  const rejected = new ApiError({ kind: "http", status: 409, code: "challenge_open", message: "x" });
+  assert.equal(
+    await declareOutcomeMessage(async () => {
+      throw rejected;
+    }),
+    "A challenge against this rival is already running.",
+  );
+  assert.equal(
+    await declareOutcomeMessage(async () => {
+      throw new ApiError({ kind: "network", message: "x" });
+    }),
+    "No connection. Check your signal and retry.",
+  );
+});
+
+test("a 402 pro_required reads as a PRO lock, not a generic rejection", () => {
+  assert.equal(describeRivalError(new ApiError({ kind: "http", status: 402, code: "pro_required", message: "x" })), "PRO required.");
 });

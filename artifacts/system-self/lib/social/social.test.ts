@@ -6,7 +6,9 @@ import {
   REPORT_REASON_MAX,
   SOCIAL_POLL_MS,
   blockPlayer,
+  ANONYMOUS_SEARCH_NOTE,
   codenameShareMessage,
+  codenameShareOptions,
   describeSocialError,
   fetchFollowersCount,
   fetchFollowing,
@@ -177,4 +179,12 @@ test("errors read in the SYSTEM voice", () => {
 
 test("codename share message names the codename", () => {
   assert.equal(codenameShareMessage("USER // ASH-3"), "Find me on SYSTEM // SELF. Search my codename: USER // ASH-3");
+});
+
+test("anonymous operators cannot share their codename: copy only, with the reason", () => {
+  assert.equal(ANONYMOUS_SEARCH_NOTE, "Anonymous operators can't be searched.");
+  assert.deepEqual(codenameShareOptions("anonymous"), { canShare: false, note: "Anonymous operators can't be searched." });
+  assert.deepEqual(codenameShareOptions("semi-public"), { canShare: true, note: null });
+  assert.deepEqual(codenameShareOptions("public"), { canShare: true, note: null });
+  assert.deepEqual(codenameShareOptions(undefined), { canShare: true, note: null });
 });

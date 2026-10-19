@@ -31,6 +31,7 @@ import {
   buildLeaderboard,
   challengeProgress,
   composite as compositeOf,
+  declareOutcomeMessage,
   describeRivalError,
   leaderStatus,
   shortCodename,
@@ -549,14 +550,11 @@ export default function RivalsScreen() {
   const report = (r: { ok: boolean }) => {
     if (!r.ok) setError("Queued entries are still syncing. Retry once they land.");
   };
-  const handleDeclare = async (domain: Domain) => {
-    if (!challengeTarget) return;
+  // The sheet shows the outcome itself: null once the server confirmed the challenge, else the reason.
+  const handleDeclare = (domain: Domain): Promise<string | null> => {
+    if (!challengeTarget) return Promise.resolve("That rival is gone. Pull to refresh.");
     setError(null);
-    try {
-      report(await actions.challenge(challengeTarget.assignmentId, domain as RankedDomain));
-    } catch (e) {
-      setError(describeRivalError(e));
-    }
+    return declareOutcomeMessage(() => actions.challenge(challengeTarget.assignmentId, domain as RankedDomain));
   };
   const handleTaunt = async (rival: Rival) => {
     if (taunting) return;
@@ -779,7 +777,7 @@ export default function RivalsScreen() {
         visible={challengeTarget !== null}
         rival={target}
         onClose={() => setChallengeTarget(null)}
-        onDeclare={(d) => void handleDeclare(d)}
+        onDeclare={handleDeclare}
       />
     </View>
   );

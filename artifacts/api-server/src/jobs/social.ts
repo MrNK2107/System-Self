@@ -2,6 +2,7 @@
 // job namespace) while it runs, so with several worker instances one instance runs each job at a time.
 import { sql } from "drizzle-orm";
 import type { Db } from "@workspace/db";
+import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { ensureAssignments, usersWithExpiredSlots } from "../services/rivals";
 import { withUserLock } from "../services/user-lock";
@@ -21,16 +22,32 @@ export async function withJobLock<T>(db: Db, lock: { namespace: number; key: str
   });
 }
 
-/** Re-matches rival slots whose 30-day term ran out (slots held by an open challenge wait for it). */
-export async function refreshExpiredRivals(db: Db, now: Date, limit = RIVAL_REFRESH_BATCH): Promise<number> {
+/**
+ * Re-matches rival slots whose 30-day term ran out (slots held by an open challenge wait for it), longest
+ * expired first. Stops once `budgetMs` of wall time is spent (after at least one user, so a pass always makes
+ * progress); the rest is picked up by the next tick.
+ */
+export async function refreshExpiredRivals(
+  db: Db,
+  now: Date,
+  limit = RIVAL_REFRESH_BATCH,
+  opts: { budgetMs?: number; nowMs?: () => number } = {},
+): Promise<number> {
+  const budgetMs = opts.budgetMs ?? env.SOCIAL_JOB_BUDGET_MS;
+  const nowMs = opts.nowMs ?? Date.now;
+  const started = nowMs();
   const ids = await usersWithExpiredSlots(db, now, limit);
   let done = 0;
-  for (const userId of ids) {
+  for (const [i, userId] of ids.entries()) {
     try {
       await withUserLock(db, userId, (tx) => ensureAssignments(tx, userId, now));
       done++;
     } catch (err) {
       logger.error({ err, userId }, "Rival refresh failed");
+    }
+    if (nowMs() - started >= budgetMs && i < ids.length - 1) {
+      logger.info({ done, pending: ids.length - i - 1 }, "Rival refresh stopped at its time budget");
+      break;
     }
   }
   return done;

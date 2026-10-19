@@ -1,3 +1,4 @@
 export * from "./game";
 export * from "./social";
 export * from "./rivals";
+export * from "./entitlements";

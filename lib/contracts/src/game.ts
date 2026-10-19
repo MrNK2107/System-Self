@@ -123,7 +123,8 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
   returner_mark: z.object({ count: z.number().int(), line: z.string() }),
   gym_unlocked: z.object({ line: z.string() }),
   /** A rival's domain score passed the user's at a rollover (once until the order flips back). */
-  rival_passed: z.object({ codename: z.string(), domain: RankedDomainSchema }),
+  // isGhost is absent on notices written before ghosts were tagged.
+  rival_passed: z.object({ codename: z.string(), domain: RankedDomainSchema, isGhost: z.boolean().optional() }),
   /** A rival challenge resolved (no score effect). Marking it seen acknowledges the challenge. */
   rival_challenge_result: z.object({
     challengeId: z.string(),

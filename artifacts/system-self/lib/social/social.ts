@@ -14,6 +14,7 @@ import {
 } from "@workspace/contracts";
 import { RANKED_DOMAINS, type RankedDomain } from "@workspace/engine";
 import { ApiError, type ApiClient } from "../api/client";
+import { isProRequired } from "../api/pro";
 import type { Outbox } from "../api/outbox";
 import { afterOutbox, type MutationResult } from "../game/actions";
 
@@ -60,6 +61,13 @@ export function profileSummary(p: PublicProfile): ProfileSummary {
   };
 }
 
+export const ANONYMOUS_SEARCH_NOTE = "Anonymous operators can't be searched.";
+
+/** Anonymous players cannot be found by search, so sharing a codename is pointless: they get copy only, with the reason. */
+export function codenameShareOptions(identity: "anonymous" | "semi-public" | "public" | undefined): { canShare: boolean; note: string | null } {
+  return identity === "anonymous" ? { canShare: false, note: ANONYMOUS_SEARCH_NOTE } : { canShare: true, note: null };
+}
+
 /** What the share sheet sends for the user's own codename (semi-public and anonymous players are found only by it). */
 export function codenameShareMessage(codename: string): string {
   return `Find me on SYSTEM // SELF. Search my codename: ${codename}`;
@@ -68,6 +76,7 @@ export function codenameShareMessage(codename: string): string {
 /** SYSTEM-voice line for a failed social request. */
 export function describeSocialError(err: unknown): string {
   if (!(err instanceof ApiError)) return "The request failed. Retry.";
+  if (isProRequired(err)) return "PRO required.";
   if (err.kind === "network") return "No connection. Check your signal and retry.";
   if (err.kind !== "http") return "The system is unavailable. Retry shortly.";
   switch (err.code) {

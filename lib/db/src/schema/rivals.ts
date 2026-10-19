@@ -117,6 +117,8 @@ export const rivalTaunts = pgTable(
     assignmentId: uuid("assignment_id").references(() => rivalAssignments.id, { onDelete: "set null" }),
     codename: text("codename").notNull(),
     message: text("message").notNull(),
+    /** The transmission came from a ghost (a simulation), kept here because the assignment can be re-matched away. */
+    isGhost: boolean("is_ghost").default(false).notNull(),
     localDate: date("local_date", { mode: "string" }).notNull(),
     createdAt: ts("created_at").defaultNow().notNull(),
     readAt: ts("read_at"),

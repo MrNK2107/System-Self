@@ -93,7 +93,7 @@ test("comeback, returner mark and gym unlock render as SYSTEM modals after chain
 });
 
 test("rival notices: pressure is a SYSTEM alert, a challenge result opens the outcome modal", () => {
-  const passed = { id: id(70), kind: "rival_passed", payload: { codename: "RIVAL // ASH-3", domain: "MIND" }, createdAt: at() };
+  const passed = { id: id(70), kind: "rival_passed", payload: { codename: "RIVAL // ASH-3", domain: "MIND", isGhost: false }, createdAt: at() };
   const payload = {
     challengeId: id(80),
     codename: "RIVAL // OAK-1",
@@ -219,5 +219,43 @@ test("noticeView maps payloads to the existing modals' props", () => {
       { title: "Quest 9", type: "daily", penalty: 0.8 },
       { title: "Weekly", type: "weekly", penalty: 2 },
     ],
+  });
+});
+
+const passedN = (n: number, codename: string, domain: string, isGhost?: boolean) => ({
+  id: id(n),
+  kind: "rival_passed",
+  payload: { codename, domain, ...(isGhost === undefined ? {} : { isGhost }) },
+  createdAt: at(),
+});
+
+test("rival_passed notices are grouped into one batch like quest_failed", () => {
+  const { notices } = parseNotices([passedN(1, "RIVAL // ASH-3", "MIND", false), passedN(2, "RIVAL // OAK-1", "BODY", true), passedN(3, "RIVAL // ELM-2", "WEALTH")]);
+  const g = nextNoticeGroup(notices, new Set());
+  assert.equal(g?.kind, "rival_passed");
+  assert.deepEqual(g?.notices.map((n) => n.id), [id(1), id(2), id(3)]);
+  assert.equal(nextNoticeGroup(notices, new Set([id(1), id(2), id(3)])), null);
+  assert.deepEqual(noticeView(g!), {
+    modal: "system",
+    tone: "alert",
+    label: "RIVAL PRESSURE",
+    title: "3 RIVALS PASSED YOU",
+    body: [
+      "RIVAL // ASH-3 passed your MIND score.",
+      "RIVAL // OAK-1 [SIM] passed your BODY score.",
+      "RIVAL // ELM-2 passed your WEALTH score.",
+      "The order changed overnight. It is logged.",
+    ].join("\n"),
+  });
+});
+
+test("a single ghost rival_passed notice carries the SIM tag", () => {
+  const { notices } = parseNotices([passedN(1, "RIVAL // OAK-1", "BODY", true)]);
+  assert.deepEqual(noticeView(nextNoticeGroup(notices, new Set())!), {
+    modal: "system",
+    tone: "alert",
+    label: "RIVAL PRESSURE",
+    title: "RIVAL // OAK-1 [SIM] passed your BODY score.",
+    body: "The order changed overnight. It is logged.",
   });
 });

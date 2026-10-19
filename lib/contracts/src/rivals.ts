@@ -40,6 +40,8 @@ export type RivalChallenge = z.infer<typeof RivalChallengeSchema>;
 export const RivalTauntSchema = z.object({
   id: z.string().uuid(),
   codename: z.string(),
+  /** The transmission came from a ghost (a simulation): the UI shows the SIM tag. */
+  isGhost: z.boolean(),
   message: z.string(),
   createdAt: z.string(),
   read: z.boolean(),
