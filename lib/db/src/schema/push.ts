@@ -40,7 +40,7 @@ export const notificationLog = pgTable(
     kind: text("kind").notNull(),
     sentAt: ts("sent_at").defaultNow().notNull(),
   },
-  (t) => [index("notification_log_user_date_idx").on(t.userId, t.localDate)],
+  (t) => [index("notification_log_user_date_idx").on(t.userId, t.localDate), index("notification_log_sent_at_idx").on(t.sentAt)],
 );
 
 /** The dispatch decision for a push-kind notice (sent | dropped | skipped): each notice is decided once, by the worker. */
@@ -54,7 +54,7 @@ export const noticePushes = pgTable(
     decision: text("decision").notNull(),
     decidedAt: ts("decided_at").defaultNow().notNull(),
   },
-  (t) => [index("notice_pushes_user_idx").on(t.userId)],
+  (t) => [index("notice_pushes_user_idx").on(t.userId), index("notice_pushes_decided_at_idx").on(t.decidedAt)],
 );
 
 export type PushToken = typeof pushTokens.$inferSelect;

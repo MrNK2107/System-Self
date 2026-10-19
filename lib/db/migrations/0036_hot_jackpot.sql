@@ -1,0 +1,2 @@
+CREATE INDEX "notice_pushes_decided_at_idx" ON "notice_pushes" USING btree ("decided_at");--> statement-breakpoint
+CREATE INDEX "notification_log_sent_at_idx" ON "notification_log" USING btree ("sent_at");

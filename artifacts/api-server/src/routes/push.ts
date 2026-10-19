@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, eq } from "drizzle-orm";
 import { localDate, localTimeToInstant } from "@workspace/engine";
 import { notificationLog, notificationPrefs, profiles, pushTokens, users, type Db } from "@workspace/db";
+import { withUserLock, type Tx } from "../services/user-lock";
 import { RESERVED_LOG_KIND } from "../jobs/notifications";
 import { NotificationPrefsUpdateSchema, PushTokenRegisterRequestSchema, PushTokenSchema } from "@workspace/contracts";
 
@@ -29,8 +30,8 @@ export function pushRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
     res.status(204).end();
   });
 
-  const prefsOf = async (userId: string) => {
-    const [row] = await db.select().from(notificationPrefs).where(eq(notificationPrefs.userId, userId)).limit(1);
+  const prefsOf = async (userId: string, q: Pick<Db, "select"> = db) => {
+    const [row] = await q.select().from(notificationPrefs).where(eq(notificationPrefs.userId, userId)).limit(1);
     return row ? { morning: row.morning, nightly: row.nightly, events: row.events } : DEFAULT_PREFS;
   };
 
@@ -41,11 +42,14 @@ export function pushRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
   router.put("/notifications/prefs", async (req, res) => {
     const update = NotificationPrefsUpdateSchema.parse(req.body);
     const userId = req.user!.id;
-    const before = await prefsOf(userId);
-    const insert = db.insert(notificationPrefs).values({ userId, ...update });
-    if (Object.keys(update).length === 0) await insert.onConflictDoNothing();
-    else await insert.onConflictDoUpdate({ target: notificationPrefs.userId, set: update });
-    await reserveFiredReminders(userId, before, update);
+    // One transaction under the user lock, so the prefs change and the reservation cannot interleave with a dispatch.
+    await withUserLock(db, userId, async (tx) => {
+      const before = await prefsOf(userId, tx);
+      const insert = tx.insert(notificationPrefs).values({ userId, ...update });
+      if (Object.keys(update).length === 0) await insert.onConflictDoNothing();
+      else await insert.onConflictDoUpdate({ target: notificationPrefs.userId, set: update });
+      await reserveFiredReminders(tx, userId, before, update);
+    });
     res.json(await prefsOf(userId));
   });
 
@@ -53,11 +57,11 @@ export function pushRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
    * A reminder switched off after its local time today already fired on the device, so its slot stays spent: write a
    * reserved log row (once) so the cap of 3 holds when the event slots grow.
    */
-  async function reserveFiredReminders(userId: string, before: typeof DEFAULT_PREFS, update: Partial<typeof DEFAULT_PREFS>) {
+  async function reserveFiredReminders(tx: Tx, userId: string, before: typeof DEFAULT_PREFS, update: Partial<typeof DEFAULT_PREFS>) {
     const turnedOff = (["morning", "nightly"] as const).filter((k) => update[k] === false && before[k]);
     if (turnedOff.length === 0) return;
     const now = clock();
-    const [row] = await db
+    const [row] = await tx
       .select({ tz: users.timezone, morning: profiles.morningTime, nightly: profiles.nightlyTime })
       .from(users)
       .innerJoin(profiles, eq(profiles.userId, users.id))
@@ -70,12 +74,12 @@ export function pushRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
       if (h === undefined || m === undefined || Number.isNaN(h) || Number.isNaN(m)) continue;
       if (localTimeToInstant(date, h, m, row.tz).getTime() > now.getTime()) continue;
       const kind = RESERVED_LOG_KIND[k];
-      const [existing] = await db
+      const [existing] = await tx
         .select({ id: notificationLog.id })
         .from(notificationLog)
         .where(and(eq(notificationLog.userId, userId), eq(notificationLog.localDate, date), eq(notificationLog.kind, kind)))
         .limit(1);
-      if (!existing) await db.insert(notificationLog).values({ userId, localDate: date, kind, sentAt: now });
+      if (!existing) await tx.insert(notificationLog).values({ userId, localDate: date, kind, sentAt: now });
     }
   }
 

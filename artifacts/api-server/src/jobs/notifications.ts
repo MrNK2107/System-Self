@@ -196,6 +196,41 @@ export async function dispatchPushes(
   return { users: ids.length, sent };
 }
 
+/** Push decisions and the push log only matter for the day cap; kept this long for support. */
+export const PUSH_LOG_TTL_MS = 30 * 86_400_000;
+export const PRUNE_BATCH = 1000;
+export const PRUNE_MAX_BATCHES = 5;
+
+/**
+ * Deletes `notification_log` and `notice_pushes` rows older than 30 days in bounded batches (indexed by their
+ * timestamps), at most `maxBatches` per table per call; the rest waits for the next tick. Returns the rows deleted.
+ */
+export async function prunePushLogs(
+  db: Db,
+  now: Date,
+  opts: { batch?: number; maxBatches?: number } = {},
+): Promise<number> {
+  const batch = opts.batch ?? PRUNE_BATCH;
+  const maxBatches = opts.maxBatches ?? PRUNE_MAX_BATCHES;
+  const cutoff = new Date(now.getTime() - PUSH_LOG_TTL_MS);
+  let total = 0;
+  for (let i = 0; i < maxBatches; i++) {
+    const res = await db.execute(
+      sql`delete from notification_log where id in (select id from notification_log where sent_at < ${cutoff} limit ${batch})`,
+    );
+    total += res.rowCount ?? 0;
+    if ((res.rowCount ?? 0) < batch) break;
+  }
+  for (let i = 0; i < maxBatches; i++) {
+    const res = await db.execute(
+      sql`delete from notice_pushes where notice_id in (select notice_id from notice_pushes where decided_at < ${cutoff} limit ${batch})`,
+    );
+    total += res.rowCount ?? 0;
+    if ((res.rowCount ?? 0) < batch) break;
+  }
+  return total;
+}
+
 /** One pass of the notification jobs. */
 export async function runNotificationJobs(db: Db, now: Date, transport: PushTransport) {
   const deadline = await withJobLock(db, DEADLINE_JOB_LOCK, () => createQuestDeadlineNotices(db, now));

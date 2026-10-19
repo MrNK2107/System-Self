@@ -1,17 +1,15 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { inArray, lt } from "drizzle-orm";
-import { idempotencyKeys, noticePushes, notificationLog, userDayState, type Db } from "@workspace/db";
+import { idempotencyKeys, userDayState, type Db } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { claimDueUsers, ensureRolledOver } from "../services/rollover";
 import { runSocialJobs } from "./social";
-import { runNotificationJobs } from "./notifications";
+import { prunePushLogs, runNotificationJobs } from "./notifications";
 import { createExpoTransport, type PushTransport } from "../services/push";
 import { env } from "../lib/env";
 
 export const WORKER_BATCH_SIZE = 200;
 const defaultPushTransport = () => createExpoTransport({ accessToken: env.EXPO_ACCESS_TOKEN });
-/** Push decisions and the push log only matter for the day cap; kept this long for support. */
-export const PUSH_LOG_TTL_MS = 30 * 86_400_000;
 export const IDEMPOTENCY_KEY_TTL_MS = 7 * 86_400_000;
 
 /**
@@ -25,6 +23,7 @@ export async function runWorkerTick(
   signal?: AbortSignal,
   batchSize = WORKER_BATCH_SIZE,
   push: PushTransport = defaultPushTransport(),
+  prune: (db: Db, now: Date) => Promise<unknown> = prunePushLogs,
 ): Promise<{ processed: number; claimed: number }> {
   const ids = await claimDueUsers(db, batchSize, now);
   let processed = 0;
@@ -58,9 +57,11 @@ export async function runWorkerTick(
       logger.error({ err }, "Notification jobs failed");
     }
   }
-  const logCutoff = new Date(now.getTime() - PUSH_LOG_TTL_MS);
-  await db.delete(noticePushes).where(lt(noticePushes.decidedAt, logCutoff));
-  await db.delete(notificationLog).where(lt(notificationLog.sentAt, logCutoff));
+  try {
+    await prune(db, now);
+  } catch (err) {
+    logger.error({ err }, "Push log prune failed");
+  }
   await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(now.getTime() - IDEMPOTENCY_KEY_TTL_MS)));
   return { processed, claimed: ids.length };
 }
