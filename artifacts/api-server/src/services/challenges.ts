@@ -1,6 +1,7 @@
 /**
  * PRO named challenges (PRD 14): one ranked domain, 3/7/14/30 days, metric = domain-score gain over the window.
- * Start values are captured at acceptance; end values are each user's daily snapshot of the end date (their own local
+ * The window starts the local day AFTER acceptance (startDate = the acceptor's accept date + 1; endDate = startDate +
+ * days - 1); each start is the owner's snapshot of the accept day. End values are each user's daily snapshot of the end date (their own local
  * date), read live only when a snapshot is missing. The winner gets +3.0 DISCIPLINE and the loser -1.5 through
  * applyChanges with reason `challenge`; a draw changes nothing; an account that is gone voids the challenge.
  * The result is NOT activity (`activity: false`): it is a consequence applied to both players, not something either
@@ -22,6 +23,7 @@ import {
 } from "@workspace/contracts";
 import { addDays, localDate, type RankedDomain } from "@workspace/engine";
 import { logger } from "../lib/logger";
+import { addDispatch } from "./clans";
 import { loadProjectionSubjects, projectUser } from "./projection";
 import { ensureRolledOver } from "./rollover";
 import { applyChanges, insertNotice } from "./scoring";
@@ -258,6 +260,37 @@ async function handleFor(tx: Reader, viewerId: string, otherId: string, now: Dat
 }
 
 /**
+ * Posts a challenge line to each participant's clan (once when both share one). No scores or gains: only handles,
+ * domain and days. A handle is the username for a member of that clan, else the public projection (codename unless the
+ * player is public).
+ */
+export async function postChallengeDispatch(
+  tx: Tx,
+  c: { challengerId: string; opponentId: string },
+  line: (handleOf: (userId: string) => string) => string,
+  now: Date,
+): Promise<void> {
+  const ids = [c.challengerId, c.opponentId];
+  const members = await tx.select({ userId: clanMembers.userId, clanId: clanMembers.clanId }).from(clanMembers).where(inArray(clanMembers.userId, ids));
+  const clanIds = [...new Set(members.map((m) => m.clanId))].sort();
+  if (clanIds.length === 0) return;
+  const subjects = await loadProjectionSubjects(tx, ids, now);
+  for (const clanId of clanIds) {
+    const handleOf = (userId: string) => {
+      const subject = subjects.get(userId);
+      if (!subject) return "OPERATOR";
+      const inside = members.some((m) => m.userId === userId && m.clanId === clanId);
+      return projectUser(subject, inside ? "clanmate" : "public").handle;
+    };
+    await addDispatch(tx, clanId, "challenge", line(handleOf), now);
+  }
+}
+
+/** The dispatch line for a newly accepted challenge (challenger first). */
+export const challengeStartedLine = (handleA: string, handleB: string, domain: string, days: number) =>
+  `CHALLENGE — ${handleA} vs ${handleB} — ${domain}, ${days} days.`;
+
+/**
  * Settles one active challenge. With no `holder` it takes both user locks itself (lowest id first); with a `holder`
  * (a rollover that already owns that user's lock, having rolled through `holder.rolledThrough`) it follows the rule in
  * the file header and may defer. Idempotent: the row is re-read under the locks and only an `active` one resolves.
@@ -317,6 +350,12 @@ export async function resolveChallenge(
     .returning({ id: namedChallenges.id });
   if (!done) return none("inactive");
 
+  await postChallengeDispatch(
+    tx,
+    { challengerId, opponentId },
+    (handleOf) => (winnerId === null ? `CHALLENGE RESULT — draw in ${domain}.` : `CHALLENGE RESULT — ${handleOf(winnerId)} took ${domain}.`),
+    now,
+  );
   const out: Notice[] = [];
   const zones = await tx.select({ id: users.id, tz: users.timezone }).from(users).where(inArray(users.id, [challengerId, opponentId]));
   const sides = [

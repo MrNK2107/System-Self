@@ -21,6 +21,7 @@ import {
 import { addDays, endOfLocalDay } from "@workspace/engine";
 import { ChallengeListResponseSchema, ChallengeSchema, QuestSchema } from "@workspace/contracts";
 import { app, assertContract, assertStoredNoticesMatchContract, auth, db, setup, skip, TZ } from "./game-test-helpers";
+import { clanDispatches } from "@workspace/db";
 import { grantEntitlement } from "../services/entitlements";
 import { ensureRolledOver } from "../services/rollover";
 import { lockOrder, resolveChallengeById, resolveNamedChallenges } from "../services/challenges";
@@ -101,7 +102,7 @@ async function pair() {
   await follow(x, y);
   return { x, y };
 }
-/** Creates and accepts a 3-day MIND challenge x -> y on D0 (window D0..D0+2). */
+/** Creates and accepts a 3-day MIND challenge x -> y on D0 (the window opens the next day: D0+1..D0+3). */
 async function active(x: P, y: P) {
   clock = at(D0);
   const res = await create(x, y.name);
@@ -111,7 +112,8 @@ async function active(x: P, y: P) {
   return res.body.id as string;
 }
 const rollTo = (p: P, date: string) => ensureRolledOver(db!, p.id, after2h(date));
-const END = addDays(D0, 2);
+const START = addDays(D0, 1);
+const END = addDays(D0, 3);
 
 // --- creation and eligibility -------------------------------------------------------------------
 
@@ -249,16 +251,21 @@ test("accept captures start values and the window; the live comparison carries d
   const { x, y } = await pair();
   await setScore(x.id, "MIND", 40);
   await setScore(y.id, "MIND", 55);
+  // Starts are each player's own snapshot of the accept day (the day before the window opens).
+  for (const [u, v] of [[x, 40], [y, 55]] as const) {
+    const [snap] = await db!.select().from(dailySnapshots).where(eq(dailySnapshots.userId, u.id));
+    await db!.update(dailySnapshots).set({ scores: { ...(snap!.scores as object), MIND: v } }).where(eq(dailySnapshots.userId, u.id));
+  }
   const id = await active(x, y);
   const r = await row(id);
   assert.equal(r.status, "active");
-  assert.equal(r.startDate, D0);
-  assert.equal(r.endDate, END);
+  assert.equal(r.startDate, START, "the window opens the local day after acceptance");
+  assert.equal(r.endDate, END, "endDate = startDate + days - 1");
   assert.deepEqual([r.challengerStart, r.opponentStart], [40, 55]);
   await setScore(x.id, "MIND", 44);
   await setScore(y.id, "MIND", 56);
   const mine = (await list(x))[0]!;
-  assert.deepEqual([mine.status, mine.myGain, mine.theirGain, mine.startDate, mine.endDate], ["active", 4, 1, D0, END]);
+  assert.deepEqual([mine.status, mine.myGain, mine.theirGain, mine.startDate, mine.endDate], ["active", 4, 1, START, END]);
   const theirs = (await list(y))[0]!;
   assert.deepEqual([theirs.myGain, theirs.theirGain], [1, 4]);
   assert.ok(!/hidden|userId/i.test(JSON.stringify([mine, theirs])));
@@ -361,7 +368,7 @@ test("concurrent double resolution applies the result exactly once", { skip }, a
   clock = at(addDays(D0, 3));
   const r2 = await create(x, y.name);
   assert.equal((await respond(y, r2.body.id, "accept")).status, 200);
-  const e2 = addDays(D0, 5);
+  const e2 = addDays(D0, 6);
   await bump(x.id, "MIND", 6);
   await Promise.all([rollTo(x, addDays(D0, 4)), rollTo(y, addDays(D0, 4))]);
   await Promise.all([rollTo(x, e2), rollTo(y, e2), resolveNamedChallenges(db!, after2h(e2))]);
@@ -495,7 +502,7 @@ test("a shame quest that was completed, or whose owner left the clan, notifies n
 
 // --- fix round 1 ----------------------------------------------------------------------------------------
 
-test("start values come from each player's own snapshot of the day before the window, even if the challenger had an unrolled day", { skip }, async () => {
+test("start values come from each player's own snapshot of the day before the window (the accept day), even if the challenger had an unrolled day", { skip }, async () => {
   const { x, y } = await pair();
   // x has unrolled days before the window: onboarded 3 days earlier, never rolled, with a daily quest that expired on D0-1.
   await db!.update(profiles).set({ onboardedAt: at(addDays(D0, -3), "09:00") }).where(eq(profiles.userId, x.id));
@@ -516,7 +523,7 @@ test("start values come from each player's own snapshot of the day before the wi
   await rollTo(y, END);
   r = await row(res.body.id);
   assert.equal(r.status, "resolved");
-  const [snap] = await db!.select().from(dailySnapshots).where(and(eq(dailySnapshots.userId, x.id), eq(dailySnapshots.localDate, addDays(D0, -1))));
+  const [snap] = await db!.select().from(dailySnapshots).where(and(eq(dailySnapshots.userId, x.id), eq(dailySnapshots.localDate, D0)));
   const expected = Math.round((snap!.scores as Record<string, number>).DISCIPLINE! * 100) / 100;
   assert.equal(r.challengerStart, expected);
   assert.ok(expected < before, "the missed quest's penalty is in the snapshot, not in a live capture");
@@ -569,3 +576,96 @@ test("the job rotates: an attempted challenge goes to the back, so a stuck one c
   assert.deepEqual([...seen].sort(), [...ids].sort(), "both challenges were attempted within two limit-1 passes");
   assert.ok((await row(ids[0]!)).lastAttemptAt);
 });
+
+// --- window after acceptance, start fallbacks, clan dispatches (task 7 carried items) --------------------------
+
+const HS = addDays(D0, 10); // window start of the history cases
+const HE = addDays(HS, 2);
+
+/** An active row with unknown starts, both players rolled through the end date: the start comes from startFromHistory. */
+async function historyCase(snaps: Array<[string, number]>, live: number, endSnapshot = true) {
+  const { x, y } = await pair();
+  for (const u of [x, y]) {
+    await db!.delete(dailySnapshots).where(eq(dailySnapshots.userId, u.id));
+    await db!.update(userDayState).set({ lastRolledDate: HE }).where(eq(userDayState.userId, u.id));
+  }
+  const snap = (userId: string, date: string, v: number) =>
+    db!.insert(dailySnapshots).values({ userId, localDate: date, scores: { MIND: v }, hidden: 0, rank: "E" });
+  for (const [date, v] of snaps) await snap(x.id, date, v);
+  if (endSnapshot) await snap(x.id, HE, 50);
+  await snap(y.id, addDays(HS, -1), 7);
+  await snap(y.id, HE, 9);
+  await setScore(x.id, "MIND", live);
+  const [c] = await db!
+    .insert(namedChallenges)
+    .values({ challengerId: x.id, opponentId: y.id, domain: "MIND", days: 3, status: "active", respondBy: at(D0), startDate: HS, endDate: HE })
+    .returning();
+  assert.equal(await resolveChallengeById(db!, c!.id, after2h(HE)), "resolved");
+  return row(c!.id);
+}
+
+test("start fallback: the latest snapshot before the window when the day before has none", { skip }, async () => {
+  const r = await historyCase([[addDays(HS, -6), 5], [addDays(HS, -3), 10]], 99);
+  assert.equal(r.challengerStart, 10);
+  assert.equal(r.challengerEnd, 50);
+});
+
+test("start fallback: the earliest snapshot when none is earlier than the window", { skip }, async () => {
+  const r = await historyCase([[addDays(HS, 1), 20]], 99);
+  assert.equal(r.challengerStart, 20);
+});
+
+test("start fallback: the live score when the user has no snapshot at all", { skip }, async () => {
+  const r = await historyCase([], 77, false);
+  assert.equal(r.challengerStart, 77);
+  assert.equal(r.challengerEnd, 77);
+});
+
+const dispatchTexts = async (clanId: string) =>
+  (await db!.select().from(clanDispatches).where(and(eq(clanDispatches.clanId, clanId), eq(clanDispatches.kind, "challenge"))).orderBy(clanDispatches.createdAt)).map((d) => d.text);
+
+test("accept and result post a clan dispatch to each participant's clan, with handles by that clan's view and no numbers", { skip }, async () => {
+  const x = await mk("xena_1"); // semi-public (codename outside)
+  const y = await mk("yuri_1", { identity: "public" });
+  const z = await mk("zed_1");
+  const clanX = await clanOf(x);
+  const clanY = await clanOf(y, z);
+  await follow(x, y);
+  clock = at(D0);
+  const res = await create(x, y.name);
+  assert.equal((await respond(y, res.body.id, "accept")).status, 200);
+  // x's clan sees x by username and y by projection (public: username); y's clan sees x by codename (semi-public outsider).
+  assert.deepEqual(await dispatchTexts(clanX), ["CHALLENGE — xena_1 vs yuri_1 — MIND, 3 days."]);
+  assert.deepEqual(await dispatchTexts(clanY), [`CHALLENGE — ${x.codename} vs yuri_1 — MIND, 3 days.`]);
+
+  await bump(x.id, "MIND", 6);
+  await rollTo(x, END);
+  await rollTo(y, END);
+  assert.equal((await row(res.body.id)).winnerId, x.id);
+  assert.deepEqual(await dispatchTexts(clanX), ["CHALLENGE — xena_1 vs yuri_1 — MIND, 3 days.", "CHALLENGE RESULT — xena_1 took MIND."]);
+  assert.deepEqual((await dispatchTexts(clanY)).slice(1), [`CHALLENGE RESULT — ${x.codename} took MIND.`]);
+  for (const t of [...(await dispatchTexts(clanX)), ...(await dispatchTexts(clanY))]) assert.ok(!/d+(.d+)?s*(pts|points)|[+-]d/.test(t.replace(/d+ days/, "")), t);
+});
+
+test("one dispatch when both share a clan; a draw reads 'draw in DOMAIN'; no clan, no dispatch", { skip }, async () => {
+  const { x, y } = await pair();
+  const clanId = await clanOf(x, y);
+  clock = at(D0);
+  const res = await create(x, y.name);
+  assert.equal((await respond(y, res.body.id, "accept")).status, 200);
+  await rollTo(x, END);
+  await rollTo(y, END);
+  assert.deepEqual(await dispatchTexts(clanId), ["CHALLENGE — xena_1 vs yuri_1 — MIND, 3 days.", "CHALLENGE RESULT — draw in MIND."]);
+
+  const lone = await pair2();
+  clock = at(D0);
+  const r2 = await create(lone.x, lone.y.name);
+  assert.equal((await respond(lone.y, r2.body.id, "accept")).status, 200);
+  assert.equal((await db!.select().from(clanDispatches).where(eq(clanDispatches.kind, "challenge"))).length, 2);
+});
+async function pair2() {
+  const x = await mk("xavier_1");
+  const y = await mk("yara_1", { identity: "public" });
+  await follow(x, y);
+  return { x, y };
+}

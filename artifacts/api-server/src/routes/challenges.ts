@@ -21,6 +21,8 @@ import {
   mayChallenge,
   openBetween,
   openCount,
+  postChallengeDispatch,
+  challengeStartedLine,
   resolveOpponent,
   respondByFor,
   round2,
@@ -129,7 +131,8 @@ export function challengesRoutes(db: Db, clock: () => Date = () => new Date()): 
       }
       const domain = c.domain as RankedDomain;
       const [mine] = await tx.select({ tz: users.timezone }).from(users).where(eq(users.id, me)).limit(1);
-      const startDate = localDate(now, mine?.tz ?? "UTC");
+      // The window opens the local day after acceptance, so nobody is measured on a day already half played.
+      const startDate = addDays(localDate(now, mine?.tz ?? "UTC"), 1);
       const [row] = await tx
         .update(namedChallenges)
         .set({
@@ -143,6 +146,13 @@ export function challengesRoutes(db: Db, clock: () => Date = () => new Date()): 
         .where(and(eq(namedChallenges.id, c.id), eq(namedChallenges.status, "pending")))
         .returning();
       if (!row) return notPending();
+      const challengerId = c.challengerId;
+      await postChallengeDispatch(
+        tx,
+        { challengerId, opponentId: me },
+        (handleOf) => challengeStartedLine(handleOf(challengerId), handleOf(me), domain, c.days),
+        now,
+      );
       return { status: 200, body: (await toChallengeDtos(tx, me, [row], now))[0]! };
     });
   };
