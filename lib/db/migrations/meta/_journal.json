@@ -218,6 +218,13 @@
       "when": 1792399913257,
       "tag": "0030_freezing_zuras",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792401121626,
+      "tag": "0031_bored_electro",
+      "breakpoints": true
     }
   ]
 }

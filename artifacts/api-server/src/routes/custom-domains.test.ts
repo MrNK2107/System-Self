@@ -245,6 +245,8 @@ test("custom log rules: validation, 48h retroactive limit, future, archived, own
   assert.equal(future.body.code, "future_occurred_at");
 
   assert.equal((await logTo(other, d.id)).status, 404, "another user's domain");
+  const foreignOld = await logTo(other, d.id, { occurredAt: new Date(clock.getTime() - 49 * 3600_000).toISOString() });
+  assert.equal(foreignOld.status, 404, "ownership is checked before the retroactive window");
   assert.equal((await logTo(u, "00000000-0000-4000-8000-000000000000")).status, 404);
   assert.equal((await logTo(u, "nope")).status, 404);
 
@@ -253,6 +255,15 @@ test("custom log rules: validation, 48h retroactive limit, future, archived, own
   assert.equal(arch.status, 409);
   assert.equal(arch.body.code, "archived");
   assert.equal((await db!.select().from(customLogs)).length, 1, "only the one accepted log was stored");
+});
+
+test("large values keep their precision (double precision columns)", { skip }, async () => {
+  const u = await mk();
+  const d = (await create(u, { name: "Big", baseline: 16777217, target: 123456789 })).body.domain;
+  assert.equal(d.baseline, 16777217);
+  assert.equal(d.target, 123456789);
+  assert.equal((await logTo(u, d.id, { value: 100000001 })).status, 201);
+  assert.equal((await detail(u, d.id)).body.logs[0].value, 100000001);
 });
 
 test("a retroactive custom log scores on its own date and never moves the streak backwards", { skip }, async () => {

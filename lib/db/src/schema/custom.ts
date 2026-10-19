@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, index, integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, doublePrecision, index, integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { users } from "./users";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
@@ -19,8 +19,8 @@ export const customDomains = pgTable(
     name: text("name").notNull(),
     unit: text("unit").notNull().default(""),
     logLabel: text("log_label").notNull().default("Log"),
-    baseline: real("baseline").notNull(),
-    target: real("target").notNull(),
+    baseline: doublePrecision("baseline").notNull(),
+    target: doublePrecision("target").notNull(),
     isPublic: boolean("is_public").notNull().default(false),
     score: real("score").notNull().default(50),
     streak: integer("streak").notNull().default(0),
@@ -51,7 +51,7 @@ export const customLogs = pgTable(
       .notNull()
       .references(() => customDomains.id, { onDelete: "cascade" }),
     clientId: text("client_id").notNull(),
-    value: real("value").notNull(),
+    value: doublePrecision("value").notNull(),
     note: text("note"),
     occurredAt: ts("occurred_at").notNull(),
     localDate: date("local_date", { mode: "string" }).notNull(),

@@ -1,5 +1,5 @@
 // Clan peer ratings (SOCIAL): rate up to 5 clanmates a week, 1-5. Ratings are anonymous; at week close a clanmate
-// with 3 or more ratings has their SOCIAL score moved by (average - 3). Only what the viewer gave is ever shown.
+// with 4 or more ratings has their SOCIAL score moved by (average - 3). Only what the viewer gave is ever shown.
 import React, { useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { ClanMember } from "@workspace/contracts";
@@ -109,7 +109,7 @@ export default function ClanRateScreen() {
             <AuthNotice message={describeRatingError(ratingsQ.error)} onRetry={() => void ratingsQ.refetch()} />
           ) : null}
           <Text style={[s.rule, { color: colors.mutedForeground }]}>
-            A clanmate with 3 or more ratings at week close moves by their average minus 3. Open to operators who have been in the clan for 7 days.
+            A clanmate with 4 or more ratings at week close moves by their average minus 3. Open to operators who have been in the clan for 7 days.
           </Text>
           {members.length === 0 ? (
             <AuthNotice tone="info" message="No clanmates to rate yet." />

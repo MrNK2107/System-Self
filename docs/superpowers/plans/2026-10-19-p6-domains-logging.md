@@ -28,7 +28,7 @@
   - `expense`, `income`, `saving`, `investment` → +0.5 each (logging consistency; no bonus); the real WEALTH movement comes from the weekly evaluation.
   - everything else → base.
 - Weekly finance evaluation (on the user's ISO-week last rollover, only if ≥ 1 WEALTH log that week): savings rate = (income − expenses) / income (0 if no income). vs `profiles.savingsTarget` (default 0.20): ≥ target → +2.0; ≥ target/2 → 0; else −1.0. Budgets: each category over budget → −0.5 (max −2.0); at least one budget set and none over → +1.0. Reason `finance_week`.
-- Peer ratings (SOCIAL, clans only, anonymous): a member may rate up to 5 clanmates per ISO week, 1–5. On week close a ratee with ≥ 3 ratings gets SOCIAL `(avg − 3) × 1.0` (reason `peer_rating`). Raters are never revealed.
+- Peer ratings (SOCIAL, clans only, anonymous): a member may rate up to 5 clanmates per ISO week, 1–5. On week close a ratee with ≥ 4 ratings gets SOCIAL `(avg − 3) × 1.0` (reason `peer_rating`). Raters are never revealed.
 - CUSTOM domains: free 3, PRO 20; name ≤ 24 chars; `unit` ≤ 12; each custom log `+2.5` with streak bonus on a separate 0–100 custom score; never part of the hidden score, rank, decay or shadow.
 - Currency: `profiles.currency` ISO 4217, default `INR`; amounts stored as numbers in that currency; display uses `Intl.NumberFormat`.
 - Retroactive: `occurredAt` up to 48 h back for everyone; up to 30 days for PRO (`isPro`); older → 422 `retroactive_limit`. Retroactive logs count for streaks only on their own local date if that date has not been rolled over yet; otherwise they score but don't change streaks.
@@ -59,7 +59,7 @@
 ### Task 3: SOCIAL domain and peer ratings
 **Files:** schema + migration `peer_ratings` (`raterId`, `rateeId`, `weekKey`, `rating int`, pk all three); `routes/social-ratings.ts`; rollover week-close hook; App `app/clan/rate.tsx` (list clanmates, 1–5, "Ratings are anonymous. Rate the output, not the person."), SOCIAL appears in every domain list (already from P3) and in onboarding (P3).
 **Interfaces:** `POST /api/clans/ratings` `{ rateeUserId, rating }`; `GET /api/clans/ratings/mine` → `{ weekKey, given: { rateeHandle, rating }[], remaining }`.
-- [ ] Tests: limits (Review Focus 3), week-close delta `(avg−3)` with ≥ 3 ratings only, ratee never sees rater ids → implement → commit `feat: SOCIAL peer ratings`.
+- [ ] Tests: limits (Review Focus 3), week-close delta `(avg−3)` with ≥ 4 ratings only, ratee never sees rater ids → implement → commit `feat: SOCIAL peer ratings`.
 
 ### Task 4: CUSTOM domains
 **Files:** schema + migration `custom_domains` (`id`, `userId`, `name`, `unit`, `logLabel`, `baseline real`, `target real`, `isPublic boolean`, `score real default 50`, `streak`, `lastLogDate`, `archivedAt`), `custom_logs` (`id`, `userId`, `customDomainId`, `clientId`, `value real`, `note`, `occurredAt`, `localDate`; unique `(userId, clientId)`); `routes/custom-domains.ts`; App section in the log modal ("CUSTOM") + `app/custom/[id].tsx` (progress to target).

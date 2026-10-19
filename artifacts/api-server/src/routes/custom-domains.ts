@@ -144,10 +144,10 @@ export function customDomainsRoutes(db: Db, clock: () => Date = () => new Date()
       async (tx) => {
         const now = clock();
         const occurredAt = body.occurredAt ? new Date(body.occurredAt) : now;
-        const badTime = occurredAtError(now, occurredAt);
-        if (badTime) return badTime;
         const domain = await ownDomain(tx, userId, id);
         if (!domain) return NOT_FOUND;
+        const badTime = occurredAtError(now, occurredAt);
+        if (badTime) return badTime;
         const [user] = await tx.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
         const today = localDate(now, user!.tz);
 
