@@ -18,6 +18,7 @@ export const NOTICE_ORDER: readonly NoticeKind[] = [
   "streak_break",
   "chain_complete",
   "goal_achieved",
+  "peer_rating_result",
   "shadow_activated",
   "shadow_resolved",
   "quest_failed",
@@ -175,6 +176,18 @@ export function noticeView(group: NoticeGroup): NoticeView {
         label: "GOAL ACHIEVED",
         title: p.title,
         body: `${formatMoney(p.targetAmount, p.currency)} saved. The target is met. Set the next one.`,
+      };
+    }
+    case "peer_rating_result": {
+      const p = first.payload;
+      const sign = p.delta > 0 ? `+${p.delta.toFixed(1)}` : p.delta < 0 ? p.delta.toFixed(1) : null;
+      const effect = sign === null ? "SOCIAL unchanged." : p.delta < 0 ? `SOCIAL ${sign}. Raise it.` : `SOCIAL ${sign}.`;
+      return {
+        modal: "system",
+        tone: p.delta < 0 ? "alert" : "info",
+        label: "PEER RATINGS",
+        title: `${p.average.toFixed(1)} AVERAGE · ${p.count} RATINGS`,
+        body: `Your clan rated the output. ${effect}`,
       };
     }
     case "shadow_activated":

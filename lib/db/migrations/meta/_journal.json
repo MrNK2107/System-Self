@@ -204,6 +204,13 @@
       "when": 1792396513940,
       "tag": "0028_far_hawkeye",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792398951704,
+      "tag": "0029_odd_secret_warriors",
+      "breakpoints": true
     }
   ]
 }

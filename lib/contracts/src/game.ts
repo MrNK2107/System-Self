@@ -94,6 +94,7 @@ export const NOTICE_KINDS = [
   "rank_change",
   "chain_complete",
   "goal_achieved",
+  "peer_rating_result",
   "quest_failed",
   "streak_break",
   "shadow_activated",
@@ -127,6 +128,8 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
   chain_complete: z.object({ name: z.string(), templateKey: z.string() }),
   /** A financial goal's saved amount reached its target (no score change). Amounts are in the profile currency. */
   goal_achieved: z.object({ goalId: z.string(), title: z.string(), targetAmount: z.number(), currency: z.string() }),
+  /** A week of clan peer ratings closed with at least 3 ratings. Aggregates only: raters are never revealed. */
+  peer_rating_result: z.object({ weekKey: z.string(), count: z.number().int(), average: z.number(), delta: z.number() }),
   quest_failed: z.object({ questId: z.string(), title: z.string(), type: QuestTypeSchema, penalty: z.number() }),
   streak_break: z.object({
     domains: z.array(z.object({ domain: RankedDomainSchema, lostStreak: z.number().int() })),
@@ -206,6 +209,7 @@ export const NoticeSchema = z.discriminatedUnion("kind", [
   noticeOf("rank_change"),
   noticeOf("chain_complete"),
   noticeOf("goal_achieved"),
+  noticeOf("peer_rating_result"),
   noticeOf("quest_failed"),
   noticeOf("streak_break"),
   noticeOf("shadow_activated"),

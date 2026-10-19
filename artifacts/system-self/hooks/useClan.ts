@@ -7,8 +7,9 @@ import { useScreenFocused } from "@/hooks/useSocial";
 import { api } from "@/lib/api/client";
 import { getOutbox } from "@/lib/api/outbox";
 import { newClientId, type MutationResult } from "@/lib/game/actions";
-import { clanLeaderboardKey, clanRootKeys, clanSearchKey, myClanKey, raidKey } from "@/lib/clan/keys";
+import { clanLeaderboardKey, clanRootKeys, clanSearchKey, myClanKey, raidKey, ratingsKey } from "@/lib/clan/keys";
 import { fetchRaid } from "@/lib/clan/raid";
+import { fetchRatings, submitRating } from "@/lib/clan/ratings";
 import {
   createClan,
   fetchClanLeaderboard,
@@ -44,6 +45,12 @@ export function useRaidQuery(enabled: boolean) {
     enabled: !!userId && enabled,
     refetchInterval: socialRefetchInterval(focused),
   });
+}
+
+/** What the viewer has rated this week and how many ratings remain. Only enabled with a clan. */
+export function usePeerRatingsQuery(enabled: boolean) {
+  const userId = useGameUserId();
+  return useQuery({ queryKey: ratingsKey(userId), queryFn: () => fetchRatings(api), enabled: !!userId && enabled });
 }
 
 export function useClanLeaderboardQuery() {
@@ -89,5 +96,6 @@ export function useClanActions() {
     leave: () => run("clan-leave", (id) => leaveClan(api, outbox, id)),
     remove: (memberUserId: string) => run("clan-remove", (id) => removeClanMember(api, outbox, memberUserId, id)),
     transfer: (memberUserId: string) => run("clan-leader", (id) => transferClanLeader(api, outbox, memberUserId, id)),
+    rate: (rateeUserId: string, rating: number) => run("clan-rate", (id) => submitRating(api, outbox, rateeUserId, rating, id)),
   };
 }

@@ -28,3 +28,4 @@ export * from "./clans";
 export * from "./challenges";
 export * from "./duos";
 export * from "./finance";
+export * from "./peer-ratings";

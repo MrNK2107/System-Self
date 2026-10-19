@@ -172,6 +172,18 @@ function MyClan({ data, onError }: { data: MyClanResponse; onError: (m: string |
         <Feather name="chevron-right" size={14} color={colors.mutedForeground} />
       </TouchableOpacity>
 
+      <TouchableOpacity
+        onPress={() => router.push("/clan/rate")}
+        accessibilityRole="button"
+        style={[s.card, s.linkRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>PEER RATINGS</Text>
+          <Text style={[s.linkText, { color: colors.foreground }]}>Rate your clanmates. Anonymous.</Text>
+        </View>
+        <Feather name="chevron-right" size={14} color={colors.mutedForeground} />
+      </TouchableOpacity>
+
       <Section label="DISPATCHES">
         {data.dispatches.length === 0 ? (
           <Text style={[s.muted, { color: colors.mutedForeground }]}>No dispatches yet.</Text>

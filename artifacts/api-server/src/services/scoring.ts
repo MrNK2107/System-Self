@@ -38,7 +38,8 @@ export type ScoreReason =
   | "streak_break"
   | "decay"
   | "challenge"
-  | "finance_week";
+  | "finance_week"
+  | "peer_rating";
 
 export type ScoreChange = ChangeSpec & { reason: ScoreReason; refId?: string };
 

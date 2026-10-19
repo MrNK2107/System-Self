@@ -152,3 +152,27 @@ export const MyClanResponseSchema = z.object({
   raid: RaidSummarySchema.nullable(),
 });
 export type MyClanResponse = z.infer<typeof MyClanResponseSchema>;
+
+/** Clan peer ratings (SOCIAL, anonymous): rate up to 5 clanmates a week (engine PEER_RATINGS_PER_WEEK), 1-5. */
+export const PEER_RATING_MIN = 1;
+export const PEER_RATING_MAX = 5;
+
+/** POST /api/clans/ratings. Re-rating the same clanmate in the week replaces the value. */
+export const PeerRatingRequestSchema = z.object({
+  rateeUserId: z.string().uuid(),
+  rating: z.number().int().min(PEER_RATING_MIN).max(PEER_RATING_MAX),
+  clientId,
+});
+export type PeerRatingRequest = z.infer<typeof PeerRatingRequestSchema>;
+
+/**
+ * GET /api/clans/ratings/mine and the POST response: what the viewer has given in their current local ISO week.
+ * `rateeHandle` is the clanmate's username, or FORMER OPERATOR for someone no longer in the viewer's clan. Nobody
+ * can read who rated them.
+ */
+export const PeerRatingsMineSchema = z.object({
+  weekKey: z.string(),
+  given: z.array(z.object({ rateeHandle: z.string(), rating: z.number().int().min(PEER_RATING_MIN).max(PEER_RATING_MAX) })),
+  remaining: z.number().int().min(0).max(5),
+});
+export type PeerRatingsMine = z.infer<typeof PeerRatingsMineSchema>;

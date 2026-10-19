@@ -40,6 +40,7 @@ import type { Notice, NoticePayload } from "@workspace/contracts";
 import { logger } from "../lib/logger";
 import { resolveDueForUser } from "./challenges";
 import { evaluateFinanceWeek, postRecurringIncome } from "./finance";
+import { evaluatePeerRatingsWeek } from "./peer-ratings";
 import { abandonChain } from "./quests";
 import { expireAssignments, rivalRollover } from "./rivals";
 import { applyChanges, insertNotice, toShadowState, type ScoreChange } from "./scoring";
@@ -120,7 +121,7 @@ function decayChanges(perDomain: number): ScoreChange[] {
 
 /**
  * Applies the daily rollover for one local date (recurring income, quest expiry, streak breaks, decay, the weekly
- * finance evaluation, snapshot, rank transition, shadow, rivals) and marks it rolled. A no-op returning [] if `date`
+ * finance evaluation, the weekly peer-rating close, snapshot, rank transition, shadow, rivals) and marks it rolled. A no-op returning [] if `date`
  * was already rolled.
  * Must run inside withUserLock.
  */
@@ -199,6 +200,9 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
 
   // 3b. Weekly WEALTH evaluation on the last local date of the ISO week (once per week).
   out.push(...(await evaluateFinanceWeek(tx, userId, date, now)));
+
+  // 3c. Weekly peer-rating close (SOCIAL) on the same date, once per week.
+  out.push(...(await evaluatePeerRatingsWeek(tx, userId, date, now)));
 
   // 4. Snapshot.
   const scores = await currentScores(tx, userId);
