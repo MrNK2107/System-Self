@@ -164,3 +164,17 @@ test("AI context: deferral count and quoted reasons share the 7-day window and n
   assert.equal(ctx.deferralsThisWeek, 2);
   assert.deepEqual([...ctx.recentRefusals].sort(), ["late shift", "too tired"]);
 });
+
+test("slot PATCH and refuse read the injected clock", { skip }, async () => {
+  // Three days ago: a quest still active then has long expired by the real clock.
+  const pinned = new Date(Date.now() - 3 * 86_400_000);
+  const a = app({ now: () => pinned });
+  const { token, id } = await setup(a);
+  const mk = async (title: string) =>
+    (await createQuests(db!, id, [{ type: "daily", title, description: "d", domain: "MIND", expiresAt: new Date(pinned.getTime() + 3600_000) }]))[0]!;
+  const slotted = await patchSlot(a, token, (await mk("Slot")).id, { slotStart: "17:30", slotEnd: "18:30" });
+  assert.equal(slotted.status, 200, JSON.stringify(slotted.body));
+  const refused = await request(a).post(`/api/quests/${(await mk("Refuse")).id}/refuse`).set(auth(token)).send({ reason: "busy" });
+  assert.equal(refused.status, 200, JSON.stringify(refused.body));
+  assert.equal(refused.body.quest.resolvedAt, pinned.toISOString());
+});

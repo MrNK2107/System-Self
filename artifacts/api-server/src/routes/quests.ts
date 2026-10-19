@@ -269,7 +269,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
       }
     }
     await withIdempotency(db, req, res, `PATCH /quests/${questId}/slot`, async (tx) => {
-      const now = new Date();
+      const now = clock();
       await rollOverBeforeToday(tx, userId, now);
       const [quest] = await tx
         .select()
@@ -313,7 +313,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
       return;
     }
     await withIdempotency(db, req, res, `POST /quests/${questId}/refuse`, async (tx) => {
-      const now = new Date();
+      const now = clock();
       await rollOverBeforeToday(tx, userId, now); // roll every date before today before this write lands
       const [quest] = await tx
         .select()

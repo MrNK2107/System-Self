@@ -42,7 +42,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
     router.use(adminRoutes(db));
     router.use(adminMetricsRoutes(db, deps.now));
     router.use(onboardingRoutes(db));
-    router.use(profileRoutes(db));
+    router.use(profileRoutes(db, deps.now));
     router.use(stateRoutes(db));
     router.use(logsRoutes(db, deps.now));
     router.use(questsRoutes(db, ai, deps.now));

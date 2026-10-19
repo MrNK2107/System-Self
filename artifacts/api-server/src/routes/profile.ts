@@ -5,7 +5,7 @@ import { HomePathRequestSchema, ProfileUpdateSchema } from "@workspace/contracts
 import { withIdempotency } from "../services/idempotency";
 import { buildGameState } from "../services/state";
 
-export function profileRoutes(db: Db): IRouter {
+export function profileRoutes(db: Db, clock: () => Date = () => new Date()): IRouter {
   const router = Router();
 
   router.patch("/profile", async (req, res) => {
@@ -19,7 +19,7 @@ export function profileRoutes(db: Db): IRouter {
         .where(eq(profiles.userId, userId))
         .returning({ userId: profiles.userId });
       if (updated.length === 0) return { status: 409, body: { error: "Onboarding required", code: "not_onboarded" } };
-      const state = await buildGameState(tx, userId, new Date());
+      const state = await buildGameState(tx, userId, clock());
       return { status: 200, body: state!.profile };
     });
   });
@@ -35,7 +35,7 @@ export function profileRoutes(db: Db): IRouter {
         .update(profiles)
         .set({ homePathActive: body.active, ...(body.active && !current.active ? { homeSessions: 0 } : {}) })
         .where(eq(profiles.userId, userId));
-      const state = await buildGameState(tx, userId, new Date());
+      const state = await buildGameState(tx, userId, clock());
       return { status: 200, body: state!.profile };
     }, { preferClientId: true });
   });
