@@ -173,7 +173,7 @@ export default function Dashboard() {
   const [confrontVisible, setConfrontVisible] = useState(false);
   const [refusing, setRefusing] = useState<Quest | null>(null);
   const [refuseBusy, setRefuseBusy] = useState(false);
-  const [floorOffer, setFloorOffer] = useState<RefuseOutcome | null>(null);
+  const [floorOffer, setFloorOffer] = useState<(RefuseOutcome & { questId: string }) | null>(null);
   const [refuseError, setRefuseError] = useState<string | null>(null);
   // The banner re-checks the clock once a minute so a slot that lapses while the app is open shows up. Times and
   // dates are read in the account timezone (as the server judges slots), else the device's.
@@ -200,8 +200,9 @@ export default function Dashboard() {
     setRefuseBusy(true);
     setRefuseError(null);
     try {
-      const r = await refuseQuest(refusing.id, reason);
-      if (r.ok) setFloorOffer(r.value.floor ? r.value : null);
+      const questId = refusing.id;
+      const r = await refuseQuest(questId, reason);
+      if (r.ok) setFloorOffer(r.value.floor ? { ...r.value, questId } : null);
       else setRefuseError(refuseFailureLine(r));
       setRefusing(null);
     } finally {
@@ -353,9 +354,9 @@ export default function Dashboard() {
             routine={floorOffer.floor}
             shadowLine={floorOffer.shadowTook ? shadowTallyLine(floorOffer.shadowTook.questTitle) : null}
             onStart={() => {
-              const id = floorOffer.floor!.id;
+              const { floor, questId } = floorOffer;
               setFloorOffer(null);
-              router.push({ pathname: "/floor/[routineId]", params: { routineId: id } });
+              router.push({ pathname: "/floor/[routineId]", params: { routineId: floor!.id, refusedQuestId: questId } });
             }}
             onDismiss={() => setFloorOffer(null)}
           />

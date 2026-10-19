@@ -101,7 +101,11 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
         afterApply: () => countHomeSession(tx, userId, { id: log!.id, logType: body.logType, forbidden, localDate: logDate }, now),
       });
       await rollOverDue(tx, userId, now);
-      if (body.logType === "floor_session") await track(tx, userId, "floor_completed", { logId: log!.id });
+      // Only a floor session started from a refusal's floor offer completes that offer (floorUptake).
+      const refusedQuestId = body.data?.refusedQuestId;
+      if (body.logType === "floor_session" && typeof refusedQuestId === "string" && refusedQuestId.length > 0) {
+        await track(tx, userId, "floor_completed", { logId: log!.id, questId: refusedQuestId });
+      }
       return { status: 201, body: { log: toLogDto(log!), results, notices } };
     }, { preferClientId: true });
   });

@@ -101,7 +101,7 @@ async function main() {
 
   // 3. The floor session: an ordinary BODY log through the outbox.
   const before = await bodyScore();
-  await enqueueLog(outbox, floorLogInput(r1.value.floor), newClientId("floor"));
+  await enqueueLog(outbox, floorLogInput(r1.value.floor, bodyQuest.id), newClientId("floor")); // from the refusal offer
   assert.deepEqual(await outbox.flush(), { sent: 1, remaining: 0 });
   const after = await bodyScore();
   assert.equal(Math.round((after - before) * 100) / 100, 2.5);

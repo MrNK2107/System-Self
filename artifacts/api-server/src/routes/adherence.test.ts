@@ -151,10 +151,11 @@ test("floor_session log scores the normal BODY delta (2.5 at streak 0) and track
   const a = app();
   const { token, id } = await setup(a);
   const before = (await score(id, "BODY")).score;
+  const refusedQuestId = "11111111-1111-4111-8111-111111111111";
   const res = await request(a)
     .post("/api/logs")
     .set(auth(token))
-    .send({ clientId: "f1", domain: "BODY", logType: "floor_session", data: { routineId: "push_floor", minutes: 13 } });
+    .send({ clientId: "f1", domain: "BODY", logType: "floor_session", data: { routineId: "push_floor", minutes: 13, refusedQuestId } });
   assert.equal(res.status, 201);
   assertContract(LogResponseSchema, res.body);
   assert.equal(res.body.results[0].actualDelta, 2.5);
@@ -162,8 +163,16 @@ test("floor_session log scores the normal BODY delta (2.5 at streak 0) and track
   assert.equal((await score(id, "BODY")).score, before + 2.5);
   const done = await db!.select().from(analyticsEvents).where(eq(analyticsEvents.name, "floor_completed"));
   assert.equal(done.length, 1);
+  assert.equal((done[0]!.props as { questId?: string }).questId, refusedQuestId);
   // A replay does not track twice.
   await request(a).post("/api/logs").set(auth(token)).send({ clientId: "f1", domain: "BODY", logType: "floor_session" });
+  assert.equal((await db!.select().from(analyticsEvents).where(eq(analyticsEvents.name, "floor_completed"))).length, 1);
+  // A floor session not started from a refusal scores the same but is not a completed floor offer.
+  const plain = await request(a)
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "f2", domain: "BODY", logType: "floor_session", data: { routineId: "push_floor", minutes: 13 } });
+  assert.equal(plain.status, 201);
   assert.equal((await db!.select().from(analyticsEvents).where(eq(analyticsEvents.name, "floor_completed"))).length, 1);
 });
 

@@ -52,9 +52,16 @@ export function floorLogGate(routine: FloorRoutineDto, elapsedSec: number): { un
   return { unlocked: remainingSec === 0, remainingSec };
 }
 
-/** The log for a finished floor session: an ordinary BODY log (it scores like any BODY log). */
-export function floorLogInput(routine: Pick<FloorRoutineDto, "id" | "minutes">): LogInput {
-  return { domain: "BODY", type: "floor_session", data: { routineId: routine.id, minutes: routine.minutes } };
+/**
+ * The log for a finished floor session: an ordinary BODY log (it scores like any BODY log). Started from a
+ * refusal's floor offer, it names the refused quest, which is what makes it count as a completed offer.
+ */
+export function floorLogInput(routine: Pick<FloorRoutineDto, "id" | "minutes">, refusedQuestId?: string): LogInput {
+  return {
+    domain: "BODY",
+    type: "floor_session",
+    data: { routineId: routine.id, minutes: routine.minutes, ...(refusedQuestId ? { refusedQuestId } : {}) },
+  };
 }
 
 export type Deferrals = z.infer<typeof DeferralsResponseSchema>;

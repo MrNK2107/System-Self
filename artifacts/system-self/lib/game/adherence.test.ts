@@ -136,3 +136,10 @@ test("floorLogGate unlocks at half of the routine's seconds and reports what rem
   assert.deepEqual(floorLogGate(r, need), { unlocked: true, remainingSec: 0 });
   assert.deepEqual(floorLogGate(r, total * 2), { unlocked: true, remainingSec: 0 });
 });
+
+test("a floor session started from a refusal carries the refused quest id; one without does not", () => {
+  const routine = FLOOR_ROUTINES[0]!;
+  assert.deepEqual(floorLogInput(routine, "q-9").data, { routineId: routine.id, minutes: routine.minutes, refusedQuestId: "q-9" });
+  assert.equal("refusedQuestId" in (floorLogInput(routine).data ?? {}), false);
+  assert.equal("refusedQuestId" in (floorLogInput(routine, "").data ?? {}), false);
+});

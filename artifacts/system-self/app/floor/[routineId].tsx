@@ -12,7 +12,8 @@ import { floorHeader, floorLogGate, floorLogInput, floorProgress } from "@/lib/g
 const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 
 export default function FloorScreen() {
-  const { routineId } = useLocalSearchParams<{ routineId: string }>();
+  // refusedQuestId: set when the routine was offered for a refused quest (then it completes that offer).
+  const { routineId, refusedQuestId } = useLocalSearchParams<{ routineId: string; refusedQuestId?: string }>();
   const router = useRouter();
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -60,7 +61,7 @@ export default function FloorScreen() {
     setLogError(null);
     let ok = false;
     try {
-      await addLog(floorLogInput(routine));
+      await addLog(floorLogInput(routine, typeof refusedQuestId === "string" ? refusedQuestId : undefined));
       ok = true;
       router.replace("/(tabs)/quests");
     } catch {

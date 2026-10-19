@@ -136,7 +136,7 @@ export default function QuestsScreen() {
   const quiet = useQuietHours(slotting !== null);
   const openBriefing = () => router.push("/dungeon/briefing");
   // The floor routine offered right after a BODY quest was refused (cleared when dismissed or started).
-  const [floorOffer, setFloorOffer] = useState<RefuseOutcome | null>(null);
+  const [floorOffer, setFloorOffer] = useState<(RefuseOutcome & { questId: string }) | null>(null);
   // The 409 refusal_limit marker belongs to one account and one ISO week.
   const userId = user?.id ?? null;
   const [limitMark, setLimitMark] = useState<{ userId: string | null; week: string } | null>(null);
@@ -186,7 +186,7 @@ export default function QuestsScreen() {
     try {
       const r = await refuseQuest(id, reason);
       if (r.ok) {
-        setFloorOffer(r.value.floor ? r.value : null);
+        setFloorOffer(r.value.floor ? { ...r.value, questId: id } : null);
       } else {
         // The limit shows as the rule under the list (and disables Refuse); every other failure is a notice line.
         if (r.reason === "error" && hasApiCode(r.error, "refusal_limit")) setLimitMark({ userId, week: isoWeekKey(new Date()) });
@@ -317,9 +317,9 @@ export default function QuestsScreen() {
             routine={floorOffer.floor}
             shadowLine={floorOffer.shadowTook ? shadowTallyLine(floorOffer.shadowTook.questTitle) : null}
             onStart={() => {
-              const id = floorOffer.floor!.id;
+              const { floor, questId } = floorOffer;
               setFloorOffer(null);
-              router.push({ pathname: "/floor/[routineId]", params: { routineId: id } });
+              router.push({ pathname: "/floor/[routineId]", params: { routineId: floor!.id, refusedQuestId: questId } });
             }}
             onDismiss={() => setFloorOffer(null)}
           />
