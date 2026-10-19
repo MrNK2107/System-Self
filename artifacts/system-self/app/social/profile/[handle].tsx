@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { RankBadge } from "@/components/RankBadge";
 import { ChallengeComposer } from "@/components/ChallengeComposer";
+import { DuoInvite } from "@/components/DuoInvite";
 import { ReportSheet } from "@/components/ReportSheet";
 import { SettingsCard } from "@/components/SettingsParts";
 import { useColors } from "@/hooks/useColors";
@@ -109,6 +110,8 @@ export default function SocialProfileScreen() {
             )}
 
             {view.following ? <ChallengeComposer opponent={view.profile.handle} /> : null}
+
+            <DuoInvite handle={view.profile.handle} />
 
             {confirmBlock ? (
               <View style={s.confirm}>

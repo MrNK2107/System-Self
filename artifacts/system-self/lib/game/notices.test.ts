@@ -54,6 +54,7 @@ test("NOTICE_ORDER covers every server notice kind exactly once", () => {
     "challenge_received",
     "challenge_result",
     "shame",
+    "duo_checkin",
   ]);
   // The kinds filter sent with every notice read is exactly this list.
   assert.equal(NOTICE_KINDS_PARAM, NOTICE_ORDER.join(","));
@@ -312,4 +313,16 @@ test("named challenge and shame notices render as SYSTEM modals; shame notices s
   const m = noticeView(many) as { title: string; body: string };
   assert.equal(m.title, "2 CLANMATES FAILED");
   assert.equal(m.body, "uma_1 failed to complete: Run 5k. Logged.\nmal_1 failed to complete: Read. Logged.");
+});
+
+test("a duo check-in renders as a SYSTEM modal naming the partner", () => {
+  const n = (k: string) => ({ id: id(90), kind: "duo_checkin", payload: { handle: "yuri_1", kind: k }, createdAt: at() });
+  const titles = ["going_now", "checked_in", "done"].map((k) => {
+    const v = noticeView(nextNoticeGroup(parseNotices([n(k)]).notices, new Set())!) as { modal: string; label: string; title: string };
+    assert.deepEqual([v.modal, v.label], ["system", "PARTY OF TWO"]);
+    return v.title;
+  });
+  assert.deepEqual(titles, ["yuri_1 is going now.", "yuri_1 checked in.", "yuri_1 is done."]);
+  // an unknown future kind is skipped, not rendered
+  assert.equal(parseNotices([n("bogus")]).skipped, 1);
 });

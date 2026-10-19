@@ -4,3 +4,4 @@ export * from "./rivals";
 export * from "./entitlements";
 export * from "./clans";
 export * from "./challenges";
+export * from "./duo";

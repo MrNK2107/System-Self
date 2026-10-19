@@ -4,6 +4,7 @@ import type { Challenge } from "@workspace/contracts";
 import { ApiError, type ApiClient, type RequestOptions } from "../api/client";
 import {
   CHALLENGE_DAYS,
+  CHALLENGE_RULE,
   acceptChallenge,
   challengeCreateBody,
   challengeHeadline,
@@ -127,6 +128,8 @@ test("gain labels, standing and status lines use the SYSTEM voice and only domai
   assert.equal(statusLine(ch(5, { status: "resolved", outcome: "loss" })), "LOST. -1.5 DISCIPLINE.");
   assert.equal(statusLine(ch(5, { status: "resolved", outcome: "draw" })), "DRAW. No score change.");
   assert.equal(statusLine(ch(6, { status: "void" })), "VOID. No score change.");
+  assert.equal(statusLine(ch(3, { status: "active", startDate: "2026-10-20", endDate: "2026-10-26" })), "Window 2026-10-20 to 2026-10-26.");
+  assert.match(CHALLENGE_RULE, /opens the day after acceptance/);
   assert.equal(statusLine(ch(1, { role: "challenger" })), "Waiting for an answer.");
   assert.equal(statusLine(ch(1, { role: "opponent" })), "Answer within 48 hours or it is ignored.");
 });

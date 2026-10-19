@@ -23,7 +23,7 @@ export { CHALLENGE_IGNORED_LINE, CHALLENGE_MAX_OPEN, CHALLENGE_RESPOND_HOURS };
 export const CHALLENGE_DAYS = NAMED_CHALLENGE_DAYS;
 
 /** The stake, shown before sending. */
-export const CHALLENGE_RULE = `Highest domain gain wins. Winner +${CHALLENGE_WIN_DELTA.toFixed(1)} DISCIPLINE, loser ${CHALLENGE_LOSS_DELTA.toFixed(1)}. A draw changes nothing.`;
+export const CHALLENGE_RULE = `The window opens the day after acceptance. Highest domain gain wins. Winner +${CHALLENGE_WIN_DELTA.toFixed(1)} DISCIPLINE, loser ${CHALLENGE_LOSS_DELTA.toFixed(1)}. A draw changes nothing.`;
 
 export interface ChallengeDraft {
   opponent: string;
@@ -61,7 +61,7 @@ export function statusLine(c: Challenge): string {
     case "pending":
       return c.role === "challenger" ? "Waiting for an answer." : `Answer within ${CHALLENGE_RESPOND_HOURS} hours or it is ignored.`;
     case "active":
-      return c.endDate ? `Ends ${c.endDate}.` : "Running.";
+      return c.startDate && c.endDate ? `Window ${c.startDate} to ${c.endDate}.` : "Running.";
     case "ignored":
       return c.line ?? "Ignored.";
     case "void":

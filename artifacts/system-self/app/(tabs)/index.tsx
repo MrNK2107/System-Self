@@ -32,6 +32,7 @@ import { ShadowConfrontationModal } from "@/components/ShadowConfrontationModal"
 import { RefuseSheet } from "@/components/RefuseSheet";
 import { FloorQuestCard } from "@/components/FloorQuestCard";
 import { ComebackCard } from "@/components/ComebackCard";
+import { DuoCard } from "@/components/DuoCard";
 import { shadowTallyLine } from "@/lib/game/adherence";
 import { missedSlotLine, missedSlotQuest, slotStateStale } from "@/lib/game/slots";
 import { refuseFailureLine } from "@/lib/game/guards";
@@ -353,6 +354,8 @@ export default function Dashboard() {
           </View>
         )}
         {comeback && <ComebackCard gapDays={comeback.gapDays} checklist={comeback.checklist} />}
+
+        <DuoCard />
 
         {floorOffer?.floor && (
           <FloorQuestCard

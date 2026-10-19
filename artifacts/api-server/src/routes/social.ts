@@ -6,6 +6,7 @@ import type { PublicProfile } from "@workspace/contracts";
 import { localDate } from "@workspace/engine";
 import { withIdempotency, type HandlerResult } from "../services/idempotency";
 import { loadProjectionSubjects, projectUser, type Relation } from "../services/projection";
+import { dissolveBetween } from "../services/duo";
 import { isBlockedEitherWay, resolveHandle } from "../services/social";
 
 const SEARCH_LIMIT = 20;
@@ -158,6 +159,8 @@ export function socialRoutes(db: Db, clock: () => Date = () => new Date()): IRou
       if (!target) return notFound();
       if (target.self) return { status: 400, body: { error: "You cannot block yourself", code: "self_target" } };
       await tx.insert(blocks).values({ blockerId: me, blockedId: target.userId }).onConflictDoNothing();
+      // Blocking ends a Party of Two between the two.
+      await dissolveBetween(tx, me, target.userId);
       // Blocking severs follows in both directions.
       await tx
         .delete(follows)

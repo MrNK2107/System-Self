@@ -99,6 +99,7 @@ export const NOTICE_KINDS = [
   "challenge_received",
   "challenge_result",
   "shame",
+  "duo_checkin",
 ] as const;
 export const NoticeKindSchema = z.enum(NOTICE_KINDS);
 export type NoticeKind = z.infer<typeof NoticeKindSchema>;
@@ -179,6 +180,8 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
    * complete: {questTitle}. Logged.`
    */
   shame: z.object({ handle: z.string(), questTitle: z.string() }),
+  /** The duo partner checked in (`going_now` is a nudge). `handle` is their username (a duo sees usernames). */
+  duo_checkin: z.object({ handle: z.string(), kind: z.enum(["going_now", "checked_in", "done"]) }),
 } as const satisfies Record<NoticeKind, z.ZodTypeAny>;
 
 const noticeOf = <K extends NoticeKind>(kind: K) =>
@@ -202,6 +205,7 @@ export const NoticeSchema = z.discriminatedUnion("kind", [
   noticeOf("challenge_received"),
   noticeOf("challenge_result"),
   noticeOf("shame"),
+  noticeOf("duo_checkin"),
 ]);
 export type Notice = z.infer<typeof NoticeSchema>;
 export type NoticePayload<K extends NoticeKind> = z.infer<(typeof NOTICE_PAYLOAD_SCHEMAS)[K]>;

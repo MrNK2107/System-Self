@@ -28,6 +28,7 @@ export const NOTICE_ORDER: readonly NoticeKind[] = [
   "challenge_received",
   "challenge_result",
   "shame",
+  "duo_checkin",
 ];
 
 /** Sent as `?kinds=` / `?noticeKinds=` with every notice read: the server returns and pages only kinds this build renders. */
@@ -80,6 +81,10 @@ export function nextNoticeGroup(notices: readonly Notice[], acknowledged: Readon
   }
   return null;
 }
+
+/** `{handle} is going now.` / `{handle} checked in.` / `{handle} is done.` */
+export const duoCheckinLine = (p: { handle: string; kind: "going_now" | "checked_in" | "done" }): string =>
+  p.kind === "going_now" ? `${p.handle} is going now.` : p.kind === "checked_in" ? `${p.handle} checked in.` : `${p.handle} is done.`;
 
 /** `{handle} failed to complete: {questTitle}. Logged.` */
 export const shameLine = (p: { handle: string; questTitle: string }): string => `${p.handle} failed to complete: ${p.questTitle}. Logged.`;
@@ -237,7 +242,7 @@ export function noticeView(group: NoticeGroup): NoticeView {
         tone: "alert",
         label: "CHALLENGE RECEIVED",
         title: `${p.handle} challenged you.`,
-        body: `${p.domain} // ${p.days} days. Highest domain gain wins: winner +${CHALLENGE_WIN_DELTA.toFixed(1)} DISCIPLINE, loser ${CHALLENGE_LOSS_DELTA.toFixed(1)}. Answer within ${CHALLENGE_RESPOND_HOURS} hours or it is ignored. Logged.`,
+        body: `${p.domain} // ${p.days} days, starting the day after you accept. Highest domain gain wins: winner +${CHALLENGE_WIN_DELTA.toFixed(1)} DISCIPLINE, loser ${CHALLENGE_LOSS_DELTA.toFixed(1)}. Answer within ${CHALLENGE_RESPOND_HOURS} hours or it is ignored. Logged.`,
       };
     }
     case "challenge_result": {
@@ -246,6 +251,10 @@ export function noticeView(group: NoticeGroup): NoticeView {
       if (p.outcome === "win") return { modal: "system", tone: "info", label: "CHALLENGE WON", title: `You beat ${p.handle}.`, body: `${gains} +${p.delta.toFixed(1)} DISCIPLINE. Logged.` };
       if (p.outcome === "loss") return { modal: "system", tone: "alert", label: "CHALLENGE LOST", title: `${p.handle} beat you.`, body: `${gains} ${p.delta.toFixed(1)} DISCIPLINE. Logged.` };
       return { modal: "system", tone: "info", label: "CHALLENGE DRAWN", title: `You and ${p.handle} finished level.`, body: `${gains} No score change. Logged.` };
+    }
+    case "duo_checkin": {
+      const p = first.payload;
+      return { modal: "system", tone: "info", label: "PARTY OF TWO", title: duoCheckinLine(p), body: "Your partner is on the record. Match it. Logged." };
     }
     case "shame": {
       const lines = group.notices.flatMap((n) => (n.kind === "shame" ? [shameLine(n.payload)] : []));
