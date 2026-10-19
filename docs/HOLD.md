@@ -10,7 +10,7 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 ## H-01 🟥 Production secrets and accounts
 **Need:** a Gemini API key for production, plus production Postgres hosting.
 **Why I can't:** these require your billing accounts.
-**Doing instead:** everything reads from env vars (`artifacts/api-server/.env.example`). Local dev uses Docker Postgres (`docker-compose.yml`). With no key, AI falls back to deterministic templated SYSTEM messages, so the app still works.
+**Doing instead:** everything reads from env vars (`artifacts/api-server/.env.example`). All AI paths (messages, quests, debriefs, taunts, raid dispatch rewrite, free-form parsing, voice transcription) are tested with an injected fake model; the first real-key run should exercise them once, voice especially (m4a is sent as audio/mp4). Local dev uses Docker Postgres (`docker-compose.yml`). With no key, AI falls back to deterministic templated SYSTEM messages, so the app still works.
 **Resolution:**
 
 ## H-02 🟥 Hosting provider
