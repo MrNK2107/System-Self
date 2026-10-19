@@ -6,7 +6,7 @@ import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { profiles, seasons } from "@workspace/db";
 import { SEASON_PROMPT_LINE, addDays, localDate } from "@workspace/engine";
 import { GameStateSchema, QuestGenerateResponseSchema, SeasonSchema, SeasonsResponseSchema } from "@workspace/contracts";
-import { buildQuestPrompt, buildUserContext } from "../services/ai-context";
+import { buildQuestPrompt, buildUserContext, pickQuests } from "../services/ai-context";
 import { TZ, app, assertContract, assertStoredNoticesMatchContract, auth, db, setup, skip } from "./game-test-helpers";
 
 after(async () => {
@@ -190,4 +190,51 @@ test("generation with an active season still tops up to 3 dailies, 1 weekly, 1 a
   for (const q of res.body.active.filter((q: { domain: string }) => q.domain === "BODY")) {
     assert.match(q.title + q.description, /home|bodyweight/i);
   }
+});
+
+test("template generation with a season active still fills 3 dailies, 1 weekly, 1 arc", () => {
+  for (const weakest of ["BODY", "MIND", "WEALTH", "SOCIAL", "DISCIPLINE"]) {
+    for (const homePath of [false, true]) {
+      const picked = pickQuests([], { daily: 3, weekly: 1, arc: 1 }, weakest, homePath, true);
+      const types = picked.map((q) => q.type).sort();
+      assert.deepEqual(types, ["arc", "daily", "daily", "daily", "weekly"], `${weakest} homePath=${homePath}`);
+    }
+  }
+});
+
+test("seasons routes require onboarding: GET, POST and DELETE are 409 not_onboarded", { skip }, async () => {
+  const a = clockApp();
+  const reg = await request(a)
+    .post("/api/auth/register")
+    .send({ email: "pre@example.com", password: "correct horse battery", username: "pre_1", birthYear: 1990, acceptTerms: true, timezone: TZ });
+  const token = reg.body.accessToken as string;
+  const get = await request(a).get("/api/seasons").set(auth(token));
+  assert.equal(get.status, 409);
+  assert.equal(get.body.code, "not_onboarded");
+  const created = await post(a, token, { kind: "away", startsOn: TOMORROW(), lengthDays: 3 });
+  assert.equal(created.status, 409);
+  assert.equal(created.body.code, "not_onboarded");
+  const del = await request(a).delete("/api/seasons/00000000-0000-4000-8000-000000000000").set(auth(token));
+  assert.equal(del.status, 409);
+  assert.equal(del.body.code, "not_onboarded");
+});
+
+test("changing life context deletes scheduled seasons the new context does not allow; started ones stay", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a); // student: exam, away
+  // A started exam season (from an earlier context) and a scheduled one.
+  await db!.insert(seasons).values({ userId: id, kind: "exam", startsOn: addDays(TODAY(), -20), endsOn: addDays(TODAY(), -15) });
+  const exam = await post(a, token, { kind: "exam", startsOn: TOMORROW(), lengthDays: 3 });
+  assert.equal(exam.status, 201);
+  const patched = await request(a).patch("/api/profile").set(auth(token)).send({ lifeContext: "athlete" });
+  assert.equal(patched.status, 200);
+  const rows = await db!.select().from(seasons).where(eq(seasons.userId, id));
+  assert.deepEqual(rows.map((r) => r.startsOn), [addDays(TODAY(), -20)], "only the scheduled exam season is gone");
+  assert.equal((await request(a).get("/api/seasons").set(auth(token))).body.scheduled, null);
+
+  // A kind the new context still allows survives a context change.
+  const away = await post(a, token, { kind: "away", startsOn: TOMORROW(), lengthDays: 3 });
+  assert.equal(away.status, 201);
+  await request(a).patch("/api/profile").set(auth(token)).send({ lifeContext: "founder" });
+  assert.equal((await request(a).get("/api/seasons").set(auth(token))).body.scheduled.id, away.body.id);
 });
