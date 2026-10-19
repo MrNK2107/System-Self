@@ -84,3 +84,16 @@ export function validateSeason(
   }
   return { ok: true, endsOn: addDays(startsOn, lengthDays - 1) };
 }
+
+/**
+ * The earliest start date validateSeason would accept: tomorrow, or the day the cooldown after the user's last
+ * season clears (its end + SEASON_COOLDOWN_DAYS + 1), whichever is later.
+ */
+export function earliestSeasonStart(today: string, existing: { endsOn: string }[]): string {
+  let earliest = addDays(today, 1);
+  for (const e of existing) {
+    const clear = addDays(e.endsOn, SEASON_COOLDOWN_DAYS + 1);
+    if (clear > earliest) earliest = clear;
+  }
+  return earliest;
+}

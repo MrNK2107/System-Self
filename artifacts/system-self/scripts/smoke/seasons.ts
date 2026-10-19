@@ -96,6 +96,7 @@ async function main() {
   assert.equal(got.active, null);
   assert.equal(got.scheduled?.id, created.value.id);
   assert.deepEqual(got.availableKinds, ["exam", "away"]);
+  assert.equal(got.earliestStart, addDays(created.value.endsOn, 8)); // cooldown after the scheduled season
   step("GET /api/seasons shows it scheduled", { availableKinds: got.availableKinds });
 
   await rejectedWith(

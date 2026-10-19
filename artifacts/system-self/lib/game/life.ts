@@ -1,6 +1,6 @@
 // Life context and season modes: pure helpers and requests. No React Native imports.
 import { SeasonSchema, SeasonsResponseSchema, type Season, type SeasonKind, type SeasonsResponse } from "@workspace/contracts";
-import { LIFE_CONTEXTS, SEASON_LINES, addDays } from "@workspace/engine";
+import { LIFE_CONTEXTS, SEASON_LINES, addDays, localDate } from "@workspace/engine";
 import { ApiError, type ApiClient } from "../api/client";
 import type { Outbox } from "../api/outbox";
 import { afterOutbox, type MutationResult } from "./actions";
@@ -20,10 +20,28 @@ export const SEASON_LABELS: Record<SeasonKind, string> = {
 
 export const seasonLine = (kind: SeasonKind): string => SEASON_LINES[kind];
 
-/** Selectable start dates: tomorrow onward (seasons are planned ahead, never started in the moment). */
-export function startDateChoices(today: string, count = 14): { date: string; label: string }[] {
+/** Today's local date in `tz` (the account timezone); falls back to `fallbackTz`, then UTC, when `tz` is empty or unknown. */
+export function todayInZone(tz: string | null | undefined, now: Date = new Date(), fallbackTz = "UTC"): string {
+  for (const zone of [tz, fallbackTz, "UTC"]) {
+    if (!zone) continue;
+    try {
+      return localDate(now, zone);
+    } catch {
+      // unknown zone: try the next one
+    }
+  }
+  return localDate(now, "UTC");
+}
+
+/**
+ * Selectable start dates: tomorrow onward (seasons are planned ahead, never started in the moment), and not
+ * before `earliest` (the server's earliest allowed start, which accounts for the cooldown after the last season).
+ */
+export function startDateChoices(today: string, count = 14, earliest?: string): { date: string; label: string }[] {
+  const tomorrow = addDays(today, 1);
+  const first = earliest && earliest > tomorrow ? earliest : tomorrow;
   return Array.from({ length: count }, (_, i) => {
-    const date = addDays(today, i + 1);
+    const date = addDays(first, i);
     return { date, label: date.slice(5) };
   });
 }

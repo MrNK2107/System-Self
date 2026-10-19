@@ -6,7 +6,8 @@ import { api } from "@/lib/api/client";
 import { getOutbox, type FailedOutboxItem, type OutboxItem } from "@/lib/api/outbox";
 import { fetchChains, fetchComeback, fetchGameState, fetchLogs, fetchQuests, validGameState } from "@/lib/game/actions";
 import { fetchDeferrals, fetchShadowTakeovers } from "@/lib/game/adherence";
-import { chainsKey, comebackKey, deferralsKey, gameStateKey, logsKey, questsKey, shadowTakeoversKey } from "@/lib/game/keys";
+import { fetchPastSelf } from "@/lib/game/progress";
+import { chainsKey, comebackKey, deferralsKey, gameStateKey, logsKey, pastSelfKey, questsKey, shadowTakeoversKey } from "@/lib/game/keys";
 
 /** The signed-in user's id, or null. Game queries run only while this is set. */
 export function useGameUserId(): string | null {
@@ -59,6 +60,12 @@ export function useDeferralsQuery(days = 30) {
 export function useShadowTakeoversQuery() {
   const userId = useGameUserId();
   return useQuery({ queryKey: shadowTakeoversKey(userId), queryFn: () => fetchShadowTakeovers(api), enabled: !!userId });
+}
+
+/** Past You: the earliest snapshot next to today's scores. Refetched after any game mutation. */
+export function usePastSelfQuery() {
+  const userId = useGameUserId();
+  return useQuery({ queryKey: pastSelfKey(userId), queryFn: () => fetchPastSelf(api), enabled: !!userId });
 }
 
 /** Today's comeback checklist; evaluating it can complete the comeback (a returner mark, never points). */

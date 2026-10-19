@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { LIFE_CONTEXTS, SEASON_LINES, SEASON_PROMPT_LINE, lifeContext, validateSeason } from "./life";
+import { LIFE_CONTEXTS, SEASON_LINES, SEASON_PROMPT_LINE, earliestSeasonStart, lifeContext, validateSeason } from "./life";
 
 const TODAY = "2026-06-08";
 const ctx = (lifeContext: Parameters<typeof validateSeason>[1]["lifeContext"], existing: { startsOn: string; endsOn: string }[] = []) => ({
@@ -41,4 +41,11 @@ test("validateSeason rejects start today, length 15, overlap, cooldown < 7 days,
   const prev = [{ startsOn: "2026-06-01", endsOn: "2026-06-07" }];
   bad(validateSeason({ kind: "exam", startsOn: "2026-06-14", lengthDays: 3 }, ctx("student", prev)), "season_conflict");
   assert.deepEqual(validateSeason({ kind: "exam", startsOn: "2026-06-15", lengthDays: 3 }, ctx("student", prev)), { ok: true, endsOn: "2026-06-17" });
+});
+
+test("earliestSeasonStart is tomorrow, or the day the cooldown after the last season clears", () => {
+  assert.equal(earliestSeasonStart("2026-06-08", []), "2026-06-09");
+  assert.equal(earliestSeasonStart("2026-06-08", [{ endsOn: "2026-06-07" }]), "2026-06-15");
+  assert.equal(earliestSeasonStart("2026-06-08", [{ endsOn: "2026-01-01" }, { endsOn: "2026-06-10" }]), "2026-06-18");
+  assert.equal(earliestSeasonStart("2026-06-08", [{ endsOn: "2026-05-01" }]), "2026-06-09");
 });

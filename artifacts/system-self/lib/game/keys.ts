@@ -16,6 +16,8 @@ export const shadowTakeoversKey = (userId: string | null) => ["shadow-takeovers"
 export const comebackKey = (userId: string | null) => ["comeback", userId] as const;
 /** Active and scheduled seasons (GET /api/seasons). */
 export const seasonsKey = (userId: string | null) => ["seasons", userId] as const;
+/** Past You: baseline vs now (GET /api/progress/past-self). */
+export const pastSelfKey = (userId: string | null) => ["past-self", userId] as const;
 /** Further unseen notices (GET /api/notices), fetched only when the state says there are more. */
 export const noticesKey = (userId: string | null) => ["notices", userId] as const;
 
@@ -46,6 +48,7 @@ export async function invalidateGame(client: Invalidator, userId: string | null)
     deferralsKey(userId),
     shadowTakeoversKey(userId),
     comebackKey(userId),
+    pastSelfKey(userId),
   ];
   await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));
 }

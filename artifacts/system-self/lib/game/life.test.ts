@@ -11,6 +11,7 @@ import {
   scheduleSeason,
   seasonChipLine,
   startDateChoices,
+  todayInZone,
 } from "./life";
 
 interface Call {
@@ -83,4 +84,18 @@ test("scheduleSeason and cancelSeason flush the outbox first and send an idempot
   assert.equal(api2.calls[0]!.method, "DELETE");
   assert.equal(api2.calls[0]!.path, "/api/seasons/s1");
   assert.equal(api2.calls[0]!.opts.idempotencyKey, "s-3");
+});
+
+test("start dates honour the earliest start (cooldown) and today is read in the account timezone", () => {
+  const c = startDateChoices("2026-10-19", 14, "2026-10-26");
+  assert.equal(c[0]!.date, "2026-10-26");
+  assert.equal(c.length, 14);
+  // An earliest start before tomorrow changes nothing.
+  assert.equal(startDateChoices("2026-10-19", 3, "2026-10-01")[0]!.date, "2026-10-20");
+  // 2026-10-19 20:00 UTC is already the 20th in Kolkata and still the 19th in New York.
+  const at = new Date("2026-10-19T20:00:00Z");
+  assert.equal(todayInZone("Asia/Kolkata", at), "2026-10-20");
+  assert.equal(todayInZone("America/New_York", at), "2026-10-19");
+  assert.equal(todayInZone("", at, "Asia/Kolkata"), "2026-10-20");
+  assert.equal(todayInZone("Mars/Olympus", at, "America/New_York"), "2026-10-19");
 });

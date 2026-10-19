@@ -7,7 +7,7 @@ import { lifeContext as lifeContextDef } from "@workspace/engine";
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { SettingsCard } from "@/components/SettingsParts";
 import { useApp } from "@/context/AppContext";
-import { useAuth } from "@/context/AuthContext";
+import { deviceTimezone, useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { useGameStateQuery, useGameUserId } from "@/hooks/useGameState";
 import { api } from "@/lib/api/client";
@@ -22,17 +22,13 @@ import {
   lifeContextOptions,
   seasonChipLine,
   startDateChoices,
+  todayInZone,
 } from "@/lib/game/life";
 import { applyProfile } from "@/lib/onboarding/actions";
 import { describeSettingsError } from "@/lib/settings/actions";
 import { settingsActions } from "@/lib/settings/instance";
 
 const SYNC_PENDING = "Queued entries have not reached the System yet. Retry shortly.";
-
-function localDateString(now: Date = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
 
 function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   const colors = useColors();
@@ -67,8 +63,12 @@ export default function LifeSettingsScreen() {
   const seasons = seasonsQ.data ?? null;
   const kinds = seasons?.availableKinds ?? [];
   const chosenKind = kind && kinds.includes(kind) ? kind : (kinds[0] ?? null);
-  const dates = startDateChoices(localDateString());
-  const chosenStart = startsOn ?? dates[0]!.date;
+  // "Today" is the account's day (its timezone, else the device's), and the server says when the cooldown clears.
+  const today = todayInZone(user?.timezone, new Date(), deviceTimezone());
+  const earliest = seasons?.earliestStart;
+  const dates = startDateChoices(today, 14, earliest);
+  const chosenStart = startsOn && dates.some((d) => d.date === startsOn) ? startsOn : dates[0]!.date;
+  const coolingDown = !!earliest && earliest > startDateChoices(today, 1)[0]!.date;
   const taken = !!(seasons?.active || seasons?.scheduled);
 
   const refreshSeasons = () => queryClient.invalidateQueries({ queryKey: seasonsKey(userId) });
@@ -155,6 +155,9 @@ export default function LifeSettingsScreen() {
                     ))}
                   </View>
                   <Text style={[s.label, { color: colors.mutedForeground }]}>STARTS</Text>
+                  {coolingDown ? (
+                    <Text style={[s.hint, { color: colors.mutedForeground }]}>Earliest start {earliest}. Seven days between seasons.</Text>
+                  ) : null}
                   <View style={s.chips}>
                     {dates.map((d) => (
                       <Chip key={d.date} label={d.label} active={chosenStart === d.date} onPress={() => setStartsOn(d.date)} />

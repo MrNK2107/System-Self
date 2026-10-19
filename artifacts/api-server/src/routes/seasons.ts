@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, eq } from "drizzle-orm";
 import { profiles, seasons, users, type Db } from "@workspace/db";
 import { SeasonRequestSchema, type SeasonsResponse } from "@workspace/contracts";
-import { lifeContext, localDate, validateSeason, type LifeContextKey } from "@workspace/engine";
+import { earliestSeasonStart, lifeContext, localDate, validateSeason, type LifeContextKey } from "@workspace/engine";
 import { withIdempotency } from "../services/idempotency";
 import { currentSeasons, toSeason } from "../services/seasons";
 import { withUserLock, type Tx } from "../services/user-lock";
@@ -27,8 +27,14 @@ export function seasonsRoutes(db: Db, clock: () => Date = () => new Date()): IRo
     const out = await withUserLock(db, userId, async (tx: Tx) => {
       const basis = await seasonBasis(tx, userId);
       if (!basis) return null;
-      const cur = await currentSeasons(tx, userId, localDate(clock(), basis.tz));
-      const body: SeasonsResponse = { ...cur, availableKinds: lifeContext(basis.life).seasons };
+      const today = localDate(clock(), basis.tz);
+      const cur = await currentSeasons(tx, userId, today);
+      const all = await tx.select({ endsOn: seasons.endsOn }).from(seasons).where(eq(seasons.userId, userId));
+      const body: SeasonsResponse = {
+        ...cur,
+        availableKinds: lifeContext(basis.life).seasons,
+        earliestStart: earliestSeasonStart(today, all),
+      };
       return body;
     });
     if (!out) {

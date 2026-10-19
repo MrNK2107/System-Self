@@ -34,7 +34,7 @@ test("POST season then GET shows scheduled; after startsOn it is active", { skip
   const { token } = await setup(a);
   const empty = await request(a).get("/api/seasons").set(auth(token));
   assertContract(SeasonsResponseSchema, empty.body);
-  assert.deepEqual(empty.body, { active: null, scheduled: null, availableKinds: ["exam", "away"] });
+  assert.deepEqual(empty.body, { active: null, scheduled: null, availableKinds: ["exam", "away"], earliestStart: TOMORROW() });
 
   const created = await post(a, token, { kind: "exam", startsOn: TOMORROW(), lengthDays: 5 });
   assert.equal(created.status, 201);
@@ -97,6 +97,7 @@ test("cooldown: a season may start 8 days after the previous one ends, not soone
   const a = clockApp();
   const { token, id } = await setup(a);
   await db!.insert(seasons).values({ userId: id, kind: "exam", startsOn: addDays(TODAY(), -6), endsOn: addDays(TODAY(), -1) });
+  assert.equal((await request(a).get("/api/seasons").set(auth(token))).body.earliestStart, addDays(TODAY(), 7));
   const tooSoon = await post(a, token, { kind: "exam", startsOn: addDays(TODAY(), 6), lengthDays: 2 });
   assert.equal(tooSoon.status, 409);
   assert.equal(tooSoon.body.code, "season_conflict");

@@ -707,5 +707,48 @@ export const SeasonsResponseSchema = z.object({
   active: SeasonSchema.nullable(),
   scheduled: SeasonSchema.nullable(),
   availableKinds: z.array(SeasonKindSchema),
+  /** The earliest start date a new season may have (tomorrow, or when the cooldown clears), in the user's timezone. */
+  earliestStart: z.string(),
 });
 export type SeasonsResponse = z.infer<typeof SeasonsResponseSchema>;
+
+// --- Past You and adherence metrics ----------------------------------------
+
+const DomainScoresSchema = z.object({
+  BODY: z.number(),
+  MIND: z.number(),
+  WEALTH: z.number(),
+  SOCIAL: z.number(),
+  DISCIPLINE: z.number(),
+});
+
+/** GET /api/progress/past-self: the user's own earliest snapshot next to today. Read-only. */
+export const PastSelfResponseSchema = z.object({
+  baselineDate: z.string(),
+  /** "DAY 1" when the baseline is the onboarding day, otherwise "SINCE {date}". */
+  label: z.string(),
+  baseline: DomainScoresSchema,
+  current: DomainScoresSchema,
+  gym: z.object({
+    /** Completed workout sessions, all time. */
+    sessionsTotal: z.number().int(),
+    /** Exercises with a personal record on file. */
+    prsImproved: z.number().int(),
+  }),
+});
+export type PastSelfResponse = z.infer<typeof PastSelfResponseSchema>;
+
+export const AdherenceMetricsQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).default(30),
+});
+
+/** GET /api/admin/metrics/adherence?days=30. Ratios are 0 when their denominator is 0. */
+export const AdherenceMetricsResponseSchema = z.object({
+  floorOffered: z.number().int(),
+  floorCompleted: z.number().int(),
+  floorUptake: z.number(),
+  secondVisitRate: z.number(),
+  comebackRate: z.number(),
+  deferralsPerActiveUser: z.number(),
+});
+export type AdherenceMetricsResponse = z.infer<typeof AdherenceMetricsResponseSchema>;

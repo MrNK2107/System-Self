@@ -25,7 +25,8 @@ import {
   type Trajectory,
 } from "@/context/AppContext";
 import { ShadowSelfCard, ShadowTakeoverTally } from "@/components/ShadowSelfCard";
-import { useShadowTakeoversQuery } from "@/hooks/useGameState";
+import { usePastSelfQuery, useShadowTakeoversQuery } from "@/hooks/useGameState";
+import { PastSelfCard } from "@/components/PastSelfCard";
 import { RankBadge } from "@/components/RankBadge";
 import { ChallengeModal } from "@/components/ChallengeModal";
 import { ChallengeOutcomeModal } from "@/components/ChallengeOutcomeModal";
@@ -681,6 +682,7 @@ export default function RivalsScreen() {
   } = useApp();
   const { generateRivalTaunt } = useSystemAI();
   const takeovers = useShadowTakeoversQuery().data?.items ?? [];
+  const pastSelf = usePastSelfQuery().data;
 
   const [refreshing, setRefreshing] = useState(false);
   const [challengeTarget, setChallengeTarget] = useState<Rival | null>(null);
@@ -855,6 +857,9 @@ export default function RivalsScreen() {
             <Text style={[styles.liveText, { color: "#E05555" }]}>LIVE</Text>
           </View>
         </View>
+
+        {/* Past You: the main comparison, first under the header */}
+        {pastSelf ? <PastSelfCard data={pastSelf} /> : null}
 
         {/* Challenge record strip */}
         {totalRecord > 0 && (

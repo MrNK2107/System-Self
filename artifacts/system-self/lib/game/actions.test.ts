@@ -20,7 +20,7 @@ import {
   validGameState,
 } from "./actions";
 import { NOTICE_KINDS_PARAM } from "./notices";
-import { chainsKey, comebackKey, deferralsKey, gameStateKey, invalidateGame, logsKey, noticesKey, questsKey, shadowTakeoversKey } from "./keys";
+import { chainsKey, comebackKey, deferralsKey, gameStateKey, invalidateGame, logsKey, noticesKey, pastSelfKey, questsKey, shadowTakeoversKey } from "./keys";
 
 function memoryStorage(): KeyValueStorage {
   const data = new Map<string, string>();
@@ -270,7 +270,7 @@ test("retryFailedEntries re-queues failed items; discardFailedEntries drops them
 test("invalidateGame invalidates state, quests and notices (plus logs, chains and the ledger views) for the user", async () => {
   const keys: unknown[] = [];
   await invalidateGame({ invalidateQueries: async (f: { queryKey: readonly unknown[] }) => void keys.push(f.queryKey) }, "u1");
-  assert.deepEqual(keys, [gameStateKey("u1"), questsKey("u1"), noticesKey("u1"), logsKey("u1"), chainsKey("u1"), deferralsKey("u1"), shadowTakeoversKey("u1"), comebackKey("u1")]);
+  assert.deepEqual(keys, [gameStateKey("u1"), questsKey("u1"), noticesKey("u1"), logsKey("u1"), chainsKey("u1"), deferralsKey("u1"), shadowTakeoversKey("u1"), comebackKey("u1"), pastSelfKey("u1")]);
 });
 
 test("validGameState passes a contract-valid cached state through unchanged and rejects a stale shape", () => {
