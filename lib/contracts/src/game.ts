@@ -452,7 +452,8 @@ export const DeferralsResponseSchema = z.object({
 });
 
 export const ShadowTakeoversQuerySchema = z.object({
-  days: z.coerce.number().int().min(1).max(365).default(30),
+  /** At most 90: analytics events (floor offered/completed) are kept 90 days. */
+  days: z.coerce.number().int().min(1).max(90).default(30),
 });
 export const ShadowTakeoversResponseSchema = z.object({
   items: z.array(z.object({ questTitle: z.string(), localDate: z.string() })),
@@ -863,7 +864,8 @@ export const PastSelfResponseSchema = z.object({
 export type PastSelfResponse = z.infer<typeof PastSelfResponseSchema>;
 
 export const AdherenceMetricsQuerySchema = z.object({
-  days: z.coerce.number().int().min(1).max(365).default(30),
+  /** At most 90: analytics events (floor offered/completed) are kept 90 days. */
+  days: z.coerce.number().int().min(1).max(90).default(30),
 });
 
 /**

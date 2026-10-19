@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useGameUserId } from "@/hooks/useGameState";
-import { api, ApiError } from "@/lib/api/client";
+import { api } from "@/lib/api/client";
 import { getOutbox } from "@/lib/api/outbox";
 import { useOnline } from "@/lib/api/query";
 import { newClientId } from "@/lib/game/actions";
@@ -14,6 +14,7 @@ import {
   activatePlan,
   applyFlushResult,
   buildPlanRequest,
+  closedSessionReason,
   completeGymSession,
   createPlan,
   createPlanClientIds,
@@ -46,7 +47,7 @@ import type {
 
 export type GymActionResult<T = void> =
   | { ok: true; value: T }
-  | { ok: false; reason: "sync_pending" | "invalid" | "already_completed" | "error"; message?: string; error?: unknown };
+  | { ok: false; reason: "sync_pending" | "invalid" | "already_completed" | "abandoned" | "error"; message?: string; error?: unknown };
 
 interface GymContextType {
   exercises: Exercise[];
@@ -65,6 +66,9 @@ interface GymContextType {
   dismissRejectedSets: () => void;
   /** The in-progress session (started or restored from the last run), if any. */
   activeSessionId: string | null;
+  /** True after a session was closed as abandoned (open for more than 12 h), until dismissed. */
+  abandonedNotice: boolean;
+  dismissAbandonedNotice: () => void;
   /** True when the active session was restored from storage and not touched since. */
   restoredSession: boolean;
   /** True until the saved session of the signed-in user has been loaded: nothing may start a session before. */
@@ -121,6 +125,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
   const [rejectedSets, setRejectedSets] = useState(0);
   const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null);
   const [restoredSession, setRestoredSession] = useState(false);
+  const [abandonedNotice, setAbandonedNotice] = useState(false);
   // The user id whose saved session has been loaded (state twin of restoredFor, for rendering).
   const [restoredUser, setRestoredUser] = useState<string | null>(null);
   const planIds = useRef(createPlanClientIds(() => newClientId("gym-plan")));
@@ -150,6 +155,18 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
     writing.current = writing.current.then(() => saveActive(AsyncStorage, userId, rec)).catch(() => undefined);
   }, [userId]);
 
+  /** The server will not take this session any more (completed elsewhere, or abandoned): close it here too. */
+  const closeLocally = useCallback(
+    (sessionId: string, points?: number) => {
+      setLocalSessions((prev) => {
+        const s = prev[sessionId];
+        return s ? { ...prev, [sessionId]: { ...s, completedAt: s.completedAt ?? new Date().toISOString(), ...(points === undefined ? {} : { points }) } } : prev;
+      });
+      if (activeIdRef.current === sessionId) setActiveId(null);
+    },
+    [setLocalSessions, setActiveId],
+  );
+
   // A different account starts clean; the signed-in account gets its unfinished session back.
   useEffect(() => {
     restoredFor.current = null;
@@ -158,6 +175,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
     setLastCompletion(null);
     setRejectedSets(0);
     setRestoredSession(false);
+    setAbandonedNotice(false);
     setRestoredUser(null);
     setActiveId(null);
     pendingStart.current = null;
@@ -166,7 +184,8 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
     setUnsyncedSets(0);
     if (!userId) return;
     let cancelled = false;
-    void loadActive(AsyncStorage, userId).then((rec) => {
+    // A saved session older than 12 h was closed by the server as abandoned: drop it (and its sets) on restore.
+    void loadActive(AsyncStorage, userId, new Date()).then((rec) => {
       if (cancelled) return;
       queue.current = [...rec.queue, ...queue.current];
       setUnsyncedSets(queue.current.length);
@@ -181,12 +200,16 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       }
       restoredFor.current = userId;
       setRestoredUser(userId);
+      if (rec.abandoned) {
+        setAbandonedNotice(true);
+        persist(); // rewrite the record without the stale session
+      }
       if (rec.queue.length > 0) void flushSetsRef.current();
     });
     return () => {
       cancelled = true;
     };
-  }, [userId, setLocalSessions, setActiveId]);
+  }, [userId, setLocalSessions, setActiveId, persist]);
 
   const flushSetsRef = useRef<() => Promise<boolean>>(async () => true);
   const flushSets = useCallback(async (): Promise<boolean> => {
@@ -198,9 +221,15 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       // Only processed sets leave the queue: one logged while this pass was in flight stays for the next.
       queue.current = applyFlushResult(queue.current, r);
       setUnsyncedSets(queue.current.length);
-      if (r.dropped.length > 0) {
-        console.warn(`gym: ${r.dropped.length} set(s) rejected by the server`, r.dropped.map((d) => d.key));
-        setRejectedSets((n) => n + r.dropped.length);
+      // Sets of an abandoned session are covered by the abandoned notice, not counted as rejected.
+      const rejected = r.dropped.filter((d) => !r.abandonedSessions.has(d.sessionId));
+      if (rejected.length > 0) {
+        console.warn(`gym: ${rejected.length} set(s) rejected by the server`, rejected.map((d) => d.key));
+        setRejectedSets((n) => n + rejected.length);
+      }
+      if (r.abandonedSessions.size > 0) {
+        for (const id of r.abandonedSessions) closeLocally(id, 0);
+        setAbandonedNotice(true);
       }
       persist();
     })();
@@ -211,7 +240,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       sending.current = null;
     }
     return queue.current.length === 0;
-  }, [persist]);
+  }, [persist, closeLocally]);
   flushSetsRef.current = flushSets;
 
   useEffect(() => {
@@ -343,13 +372,15 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
           if (activeIdRef.current === sessionId) setActiveId(null);
           return { ok: true, value: done };
         } catch (error) {
-          if (error instanceof ApiError && error.code === "already_completed") {
-            setLocalSessions((prev) => {
-              const s = prev[sessionId];
-              return s ? { ...prev, [sessionId]: { ...s, completedAt: s.completedAt ?? new Date().toISOString() } } : prev;
-            });
-            if (activeIdRef.current === sessionId) setActiveId(null);
+          const closed = closedSessionReason(error);
+          if (closed === "already_completed") {
+            closeLocally(sessionId);
             return { ok: false, reason: "already_completed" };
+          }
+          if (closed === "abandoned") {
+            closeLocally(sessionId, 0);
+            setAbandonedNotice(true);
+            return { ok: false, reason: "abandoned" };
           }
           throw error;
         } finally {
@@ -359,7 +390,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
           void invalidateGame(queryClient, userId, { activity: true });
         }
       }),
-    [guarded, flushSets, queryClient, userId, setLocalSessions, setActiveId, persist],
+    [guarded, flushSets, queryClient, userId, setLocalSessions, setActiveId, persist, closeLocally],
   );
 
   const discardActiveSession = useCallback(async () => {
@@ -378,6 +409,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
   }, [setLocalSessions, setActiveId, persist]);
 
   const dismissRejectedSets = useCallback(() => setRejectedSets(0), []);
+  const dismissAbandonedNotice = useCallback(() => setAbandonedNotice(false), []);
 
   const flushPendingSets = useCallback(async () => {
     await flushSets();
@@ -410,6 +442,8 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       unsyncedSets,
       rejectedSets,
       dismissRejectedSets,
+      abandonedNotice,
+      dismissAbandonedNotice,
       activeSessionId,
       restoredSession,
       restoring,
@@ -427,7 +461,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
       getPersonalRecords,
     }),
     [
-      view, workoutSessions, lastPrEvents, lastCompletion, unsyncedSets, rejectedSets, dismissRejectedSets, activeSessionId, restoredSession, restoring, flushPendingSets, discardActiveSession, userId, q.isPending, q.isError, q.data, refresh,
+      view, workoutSessions, lastPrEvents, lastCompletion, unsyncedSets, rejectedSets, dismissRejectedSets, abandonedNotice, dismissAbandonedNotice, activeSessionId, restoredSession, restoring, flushPendingSets, discardActiveSession, userId, q.isPending, q.isError, q.data, refresh,
       createWorkoutPlan, updateWorkoutPlan, startWorkoutSession, logPerformedSet, completeWorkoutSession,
       getBodyPartScores, getPersonalRecords,
     ],

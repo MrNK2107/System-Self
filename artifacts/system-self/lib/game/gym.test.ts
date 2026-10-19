@@ -23,6 +23,9 @@ import {
   weekdayOf,
   type PlanDraft,
   type QueuedSet,
+  ABANDONED_SESSION_MESSAGE,
+  SESSION_ABANDON_AFTER_MS,
+  closedSessionReason,
 } from "./gym";
 
 const EX = new Set(["ex_squat", "ex_bench", "ex_plank"]);
@@ -420,4 +423,50 @@ test("planClientIds reuses one clientId for the same draft until it succeeds", (
   assert.notEqual(second, first, "an edited draft is a different request");
   ids.succeeded();
   assert.notEqual(ids.idFor(edited), second, "a new save after success gets a new id");
+});
+
+test("closedSessionReason: 409 already_completed and session_abandoned close the session locally; others do not", () => {
+  assert.equal(closedSessionReason(http(409, "already_completed")), "already_completed");
+  assert.equal(closedSessionReason(http(409, "session_abandoned")), "abandoned");
+  assert.equal(closedSessionReason(http(409, "other")), null);
+  assert.equal(closedSessionReason(http(500)), null);
+  assert.equal(closedSessionReason(net()), null);
+  assert.equal(closedSessionReason(new Error("x")), null);
+  assert.equal(ABANDONED_SESSION_MESSAGE, "This session expired after 12 h and was closed without points.");
+});
+
+test("flushSetQueue drops sets of an abandoned session and names that session", async () => {
+  const a = fakeApi((c) => {
+    if (c.path.includes("dead")) throw http(409, "session_abandoned");
+    return SET_REPLY;
+  });
+  const queue = [
+    { key: "k1", sessionId: "dead", set: { exerciseId: "ex_squat", reps: 5, weight: 40, completed: true, setIndex: 0 } },
+    { key: "k2", sessionId: "live", set: { exerciseId: "ex_squat", reps: 5, weight: 40, completed: true, setIndex: 0 } },
+  ];
+  const r = await flushSetQueue(a.api, queue);
+  assert.deepEqual([...r.abandonedSessions], ["dead"]);
+  assert.deepEqual(r.dropped.map((d) => d.key), ["k1"]);
+  assert.equal(r.processed.size, 2);
+});
+
+test("loadActive(now) drops a saved session started more than 12 h ago, with its queued sets", async () => {
+  assert.equal(SESSION_ABANDON_AFTER_MS, 12 * 3_600_000);
+  const st = memStorage();
+  const startedAt = "2026-10-19T08:00:00.000Z";
+  const other = { key: "o1", sessionId: "other", set: { exerciseId: "ex_squat", reps: 5, weight: 40, completed: true, setIndex: 0 } };
+  const rec = {
+    session: { id: SESSION.id, planId: null, startedAt, performed: [] },
+    queue: [q(0), other],
+    pendingStart: { clientId: "gs-1" },
+  };
+  await saveActive(st, "u1", rec);
+  const fresh = await loadActive(st, "u1", new Date(Date.parse(startedAt) + 11 * 3_600_000));
+  assert.deepEqual(fresh, rec, "11 h old: restored as is");
+  const stale = await loadActive(st, "u1", new Date(Date.parse(startedAt) + 13 * 3_600_000));
+  assert.equal(stale.session, null);
+  assert.equal(stale.abandoned, true);
+  assert.deepEqual(stale.queue, [other], "only the stale session's sets go");
+  assert.deepEqual(stale.pendingStart, { clientId: "gs-1" });
+  assert.equal((await loadActive(st, "u1", new Date(Date.parse(startedAt) + 11 * 3_600_000))).abandoned, undefined);
 });

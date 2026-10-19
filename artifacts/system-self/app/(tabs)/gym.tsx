@@ -14,7 +14,7 @@ import { getOutbox } from "@/lib/api/outbox";
 import { submitCrowdReport, type CrowdLevel } from "@/lib/game/dungeon";
 import { quietHoursKey } from "@/lib/game/keys";
 import type { PlanDraft } from "@/lib/game/gym";
-import { planBlocksFor } from "@/lib/game/gym";
+import { ABANDONED_SESSION_MESSAGE, planBlocksFor } from "@/lib/game/gym";
 
 type TabKey = "plans" | "today" | "history" | "prs";
 
@@ -50,6 +50,8 @@ export default function GymScreen() {
     startWorkoutSession,
     logPerformedSet,
     completeWorkoutSession,
+    abandonedNotice,
+    dismissAbandonedNotice,
   } = useGym();
   const [activeTab, setActiveTab] = useState<TabKey>("today");
   const [reps, setReps] = useState("5");
@@ -111,6 +113,8 @@ export default function GymScreen() {
         );
       } else if (r.reason === "already_completed") {
         setMessage("This session was already recorded.");
+      } else if (r.reason === "abandoned") {
+        // Shown by the abandoned notice below.
       } else {
         setMessage(r.reason === "sync_pending" ? SYNC_PENDING_COMPLETE : "The session could not be completed. Try again.");
       }
@@ -281,6 +285,11 @@ export default function GymScreen() {
                 <Text style={{ color: "#E05555", fontSize: 12 }}>
                   {rejectedSets} {rejectedSets === 1 ? "set was" : "sets were"} rejected. Tap to dismiss.
                 </Text>
+              </TouchableOpacity>
+            )}
+            {abandonedNotice && (
+              <TouchableOpacity onPress={dismissAbandonedNotice}>
+                <Text style={{ color: "#C4873A", fontSize: 12 }}>{ABANDONED_SESSION_MESSAGE} Tap to dismiss.</Text>
               </TouchableOpacity>
             )}
             {message && <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{message}</Text>}

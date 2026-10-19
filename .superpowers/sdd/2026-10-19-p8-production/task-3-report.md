@@ -54,7 +54,7 @@ High/critical packages: `proxy-addr` (critical, through express), `path-to-regex
 - `node-forge` 1.4.0 (high: PKCS#1 v1.5 signature check). Path: `expo > @expo/cli > @expo/code-signing-certificates`. The advisory names >=1.4.1, but **no such version is published** (1.4.0 is the latest), so there is nothing to override to. Exposure: Expo CLI code-signing at build or dev time only.
 - `braces` 3.0.3 (high: stack exhaustion on deeply nested patterns). Path: `metro > metro-file-map > micromatch > braces`. The advisory names >=3.0.4, which is **not published**. Exposure: build-time globbing over the repo's own patterns.
 
-None of the remaining findings are in `artifacts/api-server`'s runtime dependency tree.
+**Correction (fix round 1):** this statement was wrong. After the first round, `qs` 6.15.0 (3 moderate) and `body-parser` 2.2.2 (1 low) were still in the API's runtime tree through express. Fix round 1 overrides both, and after that no finding remains in `artifacts/api-server`'s runtime tree (see below).
 
 ## 4. Parked hygiene
 
@@ -102,3 +102,28 @@ Runs:
 - With both budgets and Expo's 10 s request timeout, a worst-case worker tick takes about 15 + 15 + 10 s of push work on top of rollover. That is still under the worker's 60 s exit backstop, but closer to it.
 - The `SessionSchema` contract is unchanged: abandoned sessions look like completed 0-point sessions to the app. An `abandonedAt` contract field would be a small follow-up if the UI should label them.
 - Rate-limit stores are per process (finding 8).
+
+
+## Fix round 1
+
+Built on `630c409`. The controller's full-suite run there was 648/648. All rulings below are applied, each test written first and confirmed red.
+
+| Item | Change | Test (red, then green) |
+|---|---|---|
+| I1. App handling of abandoned sessions | `lib/game/gym.ts`: `closedSessionReason(err)` maps 409 `already_completed` to "already_completed" and `session_abandoned` to "abandoned". `ABANDONED_SESSION_MESSAGE` = "This session expired after 12 h and was closed without points." `flushSetQueue` reports `abandonedSessions`. `loadActive(storage, userId, now)` drops a saved session whose `startedAt` is more than 12 h old, together with its queued sets, and returns `abandoned: true`. `GymContext`: `session_abandoned` from `/complete` or `/sets` closes the session locally (completedAt set, 0 points, activeId cleared, persisted) and returns the new `abandoned` reason. The restore path passes `new Date()` and rewrites the cleaned record. Sets of an abandoned session are not counted as "rejected". `abandonedNotice` and `dismissAbandonedNotice` are exposed. `app/(tabs)/gym.tsx` shows the copy as a dismissable line. | `lib/game/gym.test.ts`: closedSessionReason and the copy, flushSetQueue with abandoned sessions, and loadActive at 11 h (kept) vs 13 h (dropped, other sessions' sets kept). |
+| I2. nginx | `deploy/nginx.conf`: `client_max_body_size 6m;` | `src/deploy-config.test.ts` (reads the file, requires at least 6 MB). |
+| I3. urlencoded | Grep: no route or app call sends form bodies (the RevenueCat webhook is JSON), so `express.urlencoded` is removed and the API is JSON-only. | `app-factory.test.ts`: a 101 KB form body is no longer parsed (404, not 413). |
+| I3. qs / body-parser | Overrides `qs@>=6.0.0 <6.16.0` to `^6.16.0` (resolves to 6.16.1) and `body-parser@>=2.0.0 <2.3.0` to `^2.3.0` (2.3.0). | `pnpm audit --prod`, below. |
+| M1. Bounded selectors | Every security override selector now carries its major's lower bound (`picomatch@>=2.0.0 <2.3.2`, `proxy-addr@>=2.0.0 <2.0.8`, ...). `pnpm install --frozen-lockfile` passes and the typechecks are clean. | |
+| M2. Sweep vs /complete | Chose the user lock. `closeAbandonedGymSessions` picks candidates (id-cursor batches) and closes each under `withUserLock(userId)`, re-checking `completed_at is null and started_at < cutoff` inside the lock. `/complete` already runs under the same lock (through `withIdempotency`), so the two serialize. A completion that wins leaves the row alone. A completion that loses sees `abandonedAt` first and returns 409 `session_abandoned` before any PR or score write. | `gym-abandon.test.ts`: the sweep blocks while the user lock is held (observed through `pg_locks`), and a session completed while the sweep waited is left untouched (points 3, no `abandoned_at`). |
+| M3. Metrics window | `AdherenceMetricsQuerySchema.days` is now `max(90)`. | `progress.test.ts`: `?days=90` gives 200, `?days=91` gives 400. |
+| M5. skipVoice | Matches `/api/logs/voice` and `/api/logs/voice/` case-insensitively, the same way Express routing does. | `app-factory.test.ts`: voice, voice/ and Voice are all skipped by the JSON parser. |
+
+**`pnpm audit --prod` after fix round 1:** 9 vulnerabilities (1 low, 4 moderate, 4 high, 0 critical), all under `artifacts/system-self`'s Expo/RN toolchain. The 4 highs are the unfixable `image-size` (2 advisories), `node-forge` and `braces` described above. The moderates are `yaml`, `uuid` 7 (needs 11), `decode-uri-component` 0.2 (needs 0.4) and `sprintf-js` 1.0 (needs 1.1); the low is `@babel/core`. **The API server's runtime tree has no findings.**
+
+**Verification:**
+- `typecheck:libs`, the server typecheck and the app typecheck: clean.
+- App tests: 344/344.
+- Full server suite, run once: **653/653**, 0 failures, 491 s.
+- Root `pnpm run build`: passes.
+- `pnpm install --frozen-lockfile`: up to date.

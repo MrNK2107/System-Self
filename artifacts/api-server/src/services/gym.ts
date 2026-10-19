@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import {
   exercises,
   personalRecords,
@@ -10,7 +10,7 @@ import {
   type WorkoutSession,
 } from "@workspace/db";
 import { DEFAULT_PLAN, WEEKDAYS, estimate1RM, type Weekday } from "@workspace/engine";
-import type { Tx } from "./user-lock";
+import { withUserLock, type Tx } from "./user-lock";
 
 /** Weekday of a local `YYYY-MM-DD` date, from its UTC date parts (never the server's local zone). */
 export function weekdayOf(date: string): Weekday {
@@ -137,7 +137,10 @@ export const ABANDON_GYM_SESSION_AFTER_MS = 12 * 3_600_000;
 /**
  * Closes sessions left open for more than 12 h as abandoned: completed_at and abandoned_at are stamped and points
  * stay 0. Rank-neutral by design: nothing is scored, no gym_session log, PR or body-part points are written (the
- * finish path only scores a session the user completes). Bounded batches; the rest waits for the next tick.
+ * finish path only scores a session the user completes). Each close runs under the user's lock, like
+ * POST /gym/sessions/:id/complete, and re-checks the row there: a session completed meanwhile is left alone, and a
+ * complete that comes after sees the abandoned row (409 session_abandoned) before writing anything. At most
+ * `batch` x `maxBatches` sessions per call; the rest waits for the next tick. Returns the sessions closed.
  */
 export async function closeAbandonedGymSessions(
   db: Db,
@@ -147,16 +150,28 @@ export async function closeAbandonedGymSessions(
   const batch = opts.batch ?? 500;
   const maxBatches = opts.maxBatches ?? 5;
   const cutoff = new Date(now.getTime() - ABANDON_GYM_SESSION_AFTER_MS);
+  const stale = () => and(isNull(workoutSessions.completedAt), lt(workoutSessions.startedAt, cutoff));
   let total = 0;
+  let after: string | null = null;
   for (let i = 0; i < maxBatches; i++) {
-    const res = await db.execute(sql`
-      update workout_sessions set completed_at = ${now}, abandoned_at = ${now}, points = 0
-      where id in (
-        select id from workout_sessions where completed_at is null and started_at < ${cutoff}
-        limit ${batch} for update skip locked
-      ) and completed_at is null`);
-    total += res.rowCount ?? 0;
-    if ((res.rowCount ?? 0) < batch) break;
+    const candidates = await db
+      .select({ id: workoutSessions.id, userId: workoutSessions.userId })
+      .from(workoutSessions)
+      .where(after === null ? stale() : and(stale(), gt(workoutSessions.id, after)))
+      .orderBy(asc(workoutSessions.id))
+      .limit(batch);
+    for (const c of candidates) {
+      const closed = await withUserLock(db, c.userId, (tx) =>
+        tx
+          .update(workoutSessions)
+          .set({ completedAt: now, abandonedAt: now, points: 0 })
+          .where(and(eq(workoutSessions.id, c.id), stale()))
+          .returning({ id: workoutSessions.id }),
+      );
+      total += closed.length;
+    }
+    if (candidates.length < batch) break;
+    after = candidates[candidates.length - 1]!.id;
   }
   return total;
 }

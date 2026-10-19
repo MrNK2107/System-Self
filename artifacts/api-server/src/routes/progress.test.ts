@@ -147,6 +147,9 @@ test("metrics requires admin", { skip }, async () => {
   assert.equal((await metrics(a, token)).status, 403);
   const admin = await makeAdmin(a);
   assert.equal((await metrics(a, admin.token, "?days=0")).status, 400);
+  // The window matches the 90-day analytics retention.
+  assert.equal((await metrics(a, admin.token, "?days=90")).status, 200);
+  assert.equal((await metrics(a, admin.token, "?days=91")).status, 400);
   assert.equal((await metrics(a, admin.token)).status, 200);
 });
 

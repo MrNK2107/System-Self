@@ -1,12 +1,13 @@
 import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { bodyPartScores, logs, personalRecords, scoreEvents, workoutSessions } from "@workspace/db";
 import { app, auth, db, score, setup, skip } from "../routes/game-test-helpers";
 import { ABANDON_GYM_SESSION_AFTER_MS, closeAbandonedGymSessions } from "../services/gym";
 import { runWorkerTick } from "./run-loop";
+import { withUserLock } from "../services/user-lock";
 
 after(async () => {
   await closeTestDb();
@@ -16,6 +17,17 @@ beforeEach(async () => {
 });
 
 const HOUR = 3_600_000;
+
+/** Bounded wait until some backend is observably blocked on an advisory lock (no timing guess). */
+async function waitForAdvisoryWaiter(timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const res = await db!.execute(sql`select count(*)::int as n from pg_locks where locktype = 'advisory' and not granted`);
+    if ((res.rows[0] as { n: number }).n > 0) return;
+    if (Date.now() > deadline) throw new Error("the sweep never waited on the user lock");
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
 
 async function openSession(a: ReturnType<typeof app>, token: string, clientId: string, startedAt: Date) {
   const res = await request(a).post("/api/gym/sessions").set(auth(token)).send({ clientId });
@@ -77,4 +89,61 @@ test("closing is bounded per call and runs in the worker tick", { skip }, async 
   await runWorkerTick(db!, now, undefined, 200, async () => []);
   const open = (await db!.select().from(workoutSessions)).filter((s) => s.completedAt === null);
   assert.equal(open.length, 0);
+});
+
+test("the sweep takes each user's lock, so it serializes with /complete (which runs under it)", { skip }, async () => {
+  const a = app();
+  const { token, id: userId } = await setup(a);
+  const now = new Date();
+  const stale = await openSession(a, token, "stale-lock", new Date(now.getTime() - 13 * HOUR));
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let locked!: () => void;
+  const isLocked = new Promise<void>((r) => (locked = r));
+  const holder = withUserLock(db!, userId, async () => {
+    locked();
+    await gate;
+  });
+  await isLocked;
+  let swept: number | null = null;
+  const sweep = closeAbandonedGymSessions(db!, now).then((n) => (swept = n));
+  try {
+    await waitForAdvisoryWaiter();
+    assert.equal(swept, null, "blocked while the user's lock is held");
+  } finally {
+    release();
+    await holder;
+  }
+  await sweep;
+  assert.equal(swept, 1);
+  const [s] = await db!.select().from(workoutSessions).where(eq(workoutSessions.id, stale));
+  assert.ok(s!.abandonedAt);
+});
+
+test("a session completed while the sweep waited is left alone (re-checked under the lock)", { skip }, async () => {
+  const a = app();
+  const { token, id: userId } = await setup(a);
+  const now = new Date();
+  const stale = await openSession(a, token, "stale-done", new Date(now.getTime() - 13 * HOUR));
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let locked!: () => void;
+  const isLocked = new Promise<void>((r) => (locked = r));
+  const holder = withUserLock(db!, userId, async (tx) => {
+    locked();
+    await gate;
+    await tx.update(workoutSessions).set({ completedAt: now, points: 3 }).where(eq(workoutSessions.id, stale));
+  });
+  await isLocked;
+  const sweep = closeAbandonedGymSessions(db!, now);
+  try {
+    await waitForAdvisoryWaiter();
+  } finally {
+    release();
+    await holder;
+  }
+  assert.equal(await sweep, 0);
+  const [s] = await db!.select().from(workoutSessions).where(eq(workoutSessions.id, stale));
+  assert.equal(s!.abandonedAt, null);
+  assert.equal(s!.points, 3);
 });

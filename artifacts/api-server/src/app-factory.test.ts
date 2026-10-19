@@ -83,3 +83,19 @@ test("helmet headers are set and x-powered-by is not", async () => {
   assert.ok(res.headers["strict-transport-security"]);
   assert.equal(res.headers["x-powered-by"], undefined);
 });
+
+test("JSON-only: form-encoded bodies are not parsed (a 101 KB form body is not a 413, it just has no body)", async () => {
+  const res = await request(createApp({ db: null, mailer }))
+    .post("/api/nope")
+    .set("Content-Type", "application/x-www-form-urlencoded")
+    .send(`pad=${"x".repeat(101 * 1024)}`);
+  assert.equal(res.status, 404);
+});
+
+test("the voice upload path skips the global JSON parser with or without a trailing slash", async () => {
+  const a = createApp({ db: null, mailer });
+  for (const p of ["/api/logs/voice", "/api/logs/voice/", "/api/logs/Voice"]) {
+    const res = await request(a).post(p).set("Content-Type", "application/json").send(jsonOfSize(101 * 1024));
+    assert.notEqual(res.status, 413, p);
+  }
+});

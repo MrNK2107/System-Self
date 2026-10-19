@@ -21,7 +21,7 @@ const HEALTH_PATHS = new Set(["/api/healthz", "/api/readyz"]);
 /** The RevenueCat webhook is authenticated by its secret and arrives from RevenueCat's few IPs in bursts. */
 export const BILLING_WEBHOOK_PATH = "/api/billing/revenuecat";
 export const BILLING_WEBHOOK_RATE_LIMIT_MAX = 600;
-/** JSON / urlencoded body limit. The voice upload route reads its own raw body (5 MB) and is skipped here. */
+/** JSON body limit (the API is JSON-only). The voice upload route reads its own raw body (5 MB) and is skipped here. */
 export const JSON_BODY_LIMIT = "100kb";
 const VOICE_UPLOAD_PATH = "/api/logs/voice";
 
@@ -40,8 +40,13 @@ function strictOrigin(origins: "*" | string[]): RequestHandler {
   };
 }
 
+/** Express routing is neither strict nor case-sensitive, so /api/logs/Voice/ reaches the voice route too: skip it as well. */
+const isVoiceUpload = (p: string) => {
+  const lower = p.toLowerCase();
+  return lower === VOICE_UPLOAD_PATH || lower === `${VOICE_UPLOAD_PATH}/`;
+};
 const skipVoice = (parser: RequestHandler): RequestHandler => (req, res, next) =>
-  req.path === VOICE_UPLOAD_PATH ? next() : parser(req, res, next);
+  isVoiceUpload(req.path) ? next() : parser(req, res, next);
 
 export function createApp(
   deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number; revenuecat?: RevenueCatClient | null; metricsToken?: string | null; logger?: Logger; corsOrigins?: "*" | string[]; timezoneKnown?: TimezoneCheck } = {},
@@ -123,7 +128,6 @@ export function createApp(
     );
   }
   app.use(skipVoice(express.json({ limit: JSON_BODY_LIMIT })));
-  app.use(skipVoice(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT })));
 
   app.use("/api", createRouter({ db, mailer, ai: deps.ai, now: deps.now, revenuecatSecret: deps.revenuecatSecret, revenuecat, timezoneKnown: deps.timezoneKnown }));
   app.use(notFoundHandler);

@@ -214,6 +214,18 @@ export function completeGymSession(
   );
 }
 
+/** The server closes sessions left open this long as abandoned (no points). */
+export const SESSION_ABANDON_AFTER_MS = 12 * 3_600_000;
+export const ABANDONED_SESSION_MESSAGE = "This session expired after 12 h and was closed without points.";
+
+/** Why the server refuses to touch a session any more, or null for any other error. Both mean "close it locally". */
+export function closedSessionReason(e: unknown): "already_completed" | "abandoned" | null {
+  if (!(e instanceof ApiError) || e.kind !== "http" || e.status !== 409) return null;
+  if (e.code === "already_completed") return "already_completed";
+  if (e.code === "session_abandoned") return "abandoned";
+  return null;
+}
+
 // --- sets (sent directly, retried) ---------------------------------------------------------
 
 export interface SetPayload {
@@ -259,6 +271,7 @@ export async function flushSetQueue(
 ): Promise<FlushResult> {
   const dropped: QueuedSet[] = [];
   const processed = new Set<string>();
+  const abandonedSessions = new Set<string>();
   for (let i = 0; i < queue.length; i++) {
     const item = queue[i]!;
     try {
@@ -268,12 +281,13 @@ export async function flushSetQueue(
         schema: SetSchema,
       });
     } catch (e) {
-      if (isRetryableSetError(e)) return { remaining: queue.slice(i), dropped, processed };
+      if (isRetryableSetError(e)) return { remaining: queue.slice(i), dropped, processed, abandonedSessions };
+      if (closedSessionReason(e) === "abandoned") abandonedSessions.add(item.sessionId);
       dropped.push(item);
     }
     processed.add(item.key);
   }
-  return { remaining: [], dropped, processed };
+  return { remaining: [], dropped, processed, abandonedSessions };
 }
 
 export interface FlushResult {
@@ -283,6 +297,8 @@ export interface FlushResult {
   dropped: QueuedSet[];
   /** Keys of the sets that are done with: sent or dropped. */
   processed: ReadonlySet<string>;
+  /** Sessions the server closed as abandoned (their sets were dropped): close them locally. */
+  abandonedSessions: ReadonlySet<string>;
 }
 
 /** The live queue after a flush: only processed sets leave it, so sets appended mid-flush are kept. */
@@ -341,16 +357,28 @@ export async function saveActive(storage: Storage, userId: string, rec: ActiveRe
   await storage.setItem(activeKey(userId), JSON.stringify(rec));
 }
 
-/** The saved record, or an empty one when nothing is saved or the data is unreadable. */
-export async function loadActive(storage: Storage, userId: string): Promise<ActiveRecord> {
+/**
+ * The saved record, or an empty one when nothing is saved or the data is unreadable. With `now`, a saved session
+ * started more than 12 h earlier is dropped with its queued sets (the server closes it as abandoned), and the result
+ * says so (`abandoned: true`).
+ */
+export async function loadActive(storage: Storage, userId: string, now?: Date): Promise<ActiveRecord & { abandoned?: true }> {
+  let rec: ActiveRecord;
   try {
     const raw = await storage.getItem(activeKey(userId));
     if (!raw) return emptyActive();
     const parsed = ActiveRecordSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : emptyActive();
+    if (!parsed.success) return emptyActive();
+    rec = parsed.data;
   } catch {
     return emptyActive();
   }
+  const s = rec.session;
+  const startedMs = s ? Date.parse(s.startedAt) : NaN;
+  if (now && s && Number.isFinite(startedMs) && now.getTime() - startedMs > SESSION_ABANDON_AFTER_MS) {
+    return { ...rec, session: null, queue: rec.queue.filter((x) => x.sessionId !== s.id), abandoned: true };
+  }
+  return rec;
 }
 
 export const clearActive = (storage: Storage, userId: string) => storage.removeItem(activeKey(userId));
