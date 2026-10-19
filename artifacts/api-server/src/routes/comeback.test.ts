@@ -14,9 +14,8 @@ import {
   SessionCompleteResponseSchema,
 } from "@workspace/contracts";
 import { createQuests } from "../services/quests";
-import { buildQuestPrompt, buildUserContext } from "../services/ai-context";
+import { buildQuestPrompt, buildUserContext, pickQuests } from "../services/ai-context";
 import { insertNotice } from "../services/scoring";
-import { pickQuests } from "../services/ai-context";
 import { templateQuests } from "../lib/ai-fallback";
 import { TZ, app, assertContract, assertStoredNoticesMatchContract, auth, db, score, setup, skip } from "./game-test-helpers";
 
@@ -453,6 +452,22 @@ test("an open daily blocks the quests item", { skip }, async () => {
   await mkDaily(id, "Still open", "SOCIAL");
   const cb = await request(a).get("/api/comeback").set(auth(token));
   assert.equal(cb.body.active.checklist.find((c: { key: string }) => c.key === "quests_today").done, false);
+});
+
+test("forbidden logs do not tick the comeback checklist", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, addDays(TODAY, -7));
+  assert.equal((await postLog(a, token, "fz-mind", "MIND", "read")).status, 201); // starts the comeback
+  const bad = await request(a)
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "fz-body", domain: "BODY", logType: "workout", forbidden: true, occurredAt: NOW.toISOString() });
+  assert.equal(bad.status, 201);
+  const cb = await request(a).get("/api/comeback").set(auth(token));
+  const done = Object.fromEntries(cb.body.active.checklist.map((c: { key: string; done: boolean }) => [c.key, c.done]));
+  assert.equal(done.body_session, false, "a forbidden BODY log is not a BODY session");
+  assert.equal(done.two_domains, false, "a forbidden log is not a second domain");
 });
 
 test("offerHomePath is false when the home path is already active", { skip }, async () => {

@@ -109,7 +109,9 @@ export async function evaluateComeback(
   const windowLogs = await tx
     .select({ domain: logs.domain })
     .from(logs)
-    .where(and(eq(logs.userId, userId), gte(logs.localDate, cb.startedOn), lte(logs.localDate, today)));
+    .where(
+      and(eq(logs.userId, userId), eq(logs.forbidden, false), gte(logs.localDate, cb.startedOn), lte(logs.localDate, today)),
+    );
   const [completed] = await tx
     .select({ n: count() })
     .from(quests)
