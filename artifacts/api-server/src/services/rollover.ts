@@ -39,9 +39,11 @@ import {
 import type { Notice, NoticePayload } from "@workspace/contracts";
 import { logger } from "../lib/logger";
 import { resolveDueForUser } from "./challenges";
+import { evaluateFinanceWeek, postRecurringIncome } from "./finance";
 import { abandonChain } from "./quests";
 import { expireAssignments, rivalRollover } from "./rivals";
 import { applyChanges, insertNotice, toShadowState, type ScoreChange } from "./scoring";
+import { notSystemLog } from "./system-logs";
 import { withUserLock, type Tx } from "./user-lock";
 
 /** At most this many missed dates are rolled one by one; older ones collapse into one decay step. */
@@ -80,7 +82,7 @@ async function inactiveDays(tx: Tx, userId: string, date: string, onboardDate: s
   const [row] = await tx
     .select({ last: max(logs.localDate) })
     .from(logs)
-    .where(and(eq(logs.userId, userId), lte(logs.localDate, date)));
+    .where(and(eq(logs.userId, userId), lte(logs.localDate, date), notSystemLog));
   const lastActive = row?.last ?? addDays(onboardDate, -1);
   return Math.max(0, daysBetween(lastActive, date));
 }
@@ -117,8 +119,9 @@ function decayChanges(perDomain: number): ScoreChange[] {
 }
 
 /**
- * Applies the daily rollover for one local date (quest expiry, streak breaks, decay, snapshot, rank
- * transition, shadow, rivals) and marks it rolled. A no-op returning [] if `date` was already rolled.
+ * Applies the daily rollover for one local date (recurring income, quest expiry, streak breaks, decay, the weekly
+ * finance evaluation, snapshot, rank transition, shadow, rivals) and marks it rolled. A no-op returning [] if `date`
+ * was already rolled.
  * Must run inside withUserLock.
  */
 export async function rolloverDate(tx: Tx, userId: string, date: string, now: Date): Promise<Notice[]> {
@@ -135,6 +138,9 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   const at = new Date(Math.min(now.getTime(), dayEnd.getTime()));
   const freezeActive = freezeActiveOn(date, profile.rankFreezeUntil);
   const out: Notice[] = [];
+
+  // 0. Recurring income due on this day of the month (system logs: no score, not activity).
+  await postRecurringIncome(tx, userId, date, tz, now);
 
   // 1. Expire active quests that ended by the end of `date`.
   const expired = await tx
@@ -190,6 +196,9 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   const k = await inactiveDays(tx, userId, date, localDate(profile.onboardedAt, tz));
   const decay = decayPerDomain(k);
   if (decay > 0 && !freezeActive) out.push(...(await applyChanges(tx, userId, decayChanges(decay), opts)).notices);
+
+  // 3b. Weekly WEALTH evaluation on the last local date of the ISO week (once per week).
+  out.push(...(await evaluateFinanceWeek(tx, userId, date, now)));
 
   // 4. Snapshot.
   const scores = await currentScores(tx, userId);

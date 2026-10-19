@@ -317,6 +317,18 @@ export default function StatsScreen() {
           )}
         </View>
 
+        {/* Finance (WEALTH): savings rate, budgets, goals, net worth. Private. */}
+        <TouchableOpacity
+          style={[styles.card, styles.expandHeader, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => router.push("/finance")}
+          activeOpacity={0.7}
+          accessibilityRole="link"
+          accessibilityLabel="Open finance"
+        >
+          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>FINANCE // WEALTH</Text>
+          <Feather name="chevron-right" size={13} color={colors.mutedForeground} />
+        </TouchableOpacity>
+
         {/* Weekly recap (its own screen; it left the tab bar when the Clan tab arrived) */}
         <TouchableOpacity
           style={[styles.card, styles.expandHeader, { backgroundColor: colors.card, borderColor: colors.border }]}

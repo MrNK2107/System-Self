@@ -51,6 +51,7 @@ test("NoticeSchema is a union by kind with the exact payload the server writes f
     milestone: { domain: "BODY", tier: 60, title: "T" },
     rank_change: { from: "E", to: "D", kind: "promotion", newCodename: "VECTOR // AB1-2" },
     chain_complete: { name: "PHYSICAL PROTOCOL", templateKey: "physical_protocol" },
+    goal_achieved: { goalId: "g1", title: "Emergency fund", targetAmount: 50000, currency: "INR" },
     quest_failed: { questId: "q1", title: "Q", type: "daily", penalty: 0.8 },
     streak_break: { domains: [{ domain: "BODY", lostStreak: 3 }], penalty: 2 },
     shadow_activated: { gap: 12, codename: "SHADOW // ALICE_1" },

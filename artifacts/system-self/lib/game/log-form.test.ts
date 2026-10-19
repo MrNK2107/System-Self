@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LOG_TYPES, RANKED_DOMAINS } from "@workspace/engine";
+import { EXPENSE_CATEGORIES, LOG_TYPES, RANKED_DOMAINS } from "@workspace/engine";
 import { checkLogForm, defaultTypeFor, initialValues, LOG_FIELDS, previewDelta, toLogData, typesFor } from "./log-form";
 
 test("every offered type opens valid: its defaults pass the check untouched (one-tap entry)", () => {
@@ -57,4 +57,11 @@ test("empty text fields that the server treats as absent pass the check", () => 
   assert.ok(checkLogForm("BODY", "meal", { description: " ", quality: 3 }).ok);
   assert.ok(checkLogForm("MIND", "focus", { minutes: 30, distraction: 2, subject: "" }).ok);
   assert.ok(!checkLogForm("WEALTH", "expense", { amount: 5, category: "" }).ok);
+});
+
+test("expense category is a choice of the budget categories, defaulting to other", () => {
+  const field = LOG_FIELDS.expense!.find((f) => f.key === "category")!;
+  assert.equal(field.kind, "choice");
+  assert.deepEqual(field.kind === "choice" ? field.options.map((o) => o.value) : [], [...EXPENSE_CATEGORIES]);
+  assert.equal(initialValues("WEALTH", "expense").category, "other");
 });

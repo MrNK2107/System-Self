@@ -1,6 +1,6 @@
 // The log modal's forms, as plain data: which fields a log type has, how typed text becomes the request
 // data, and the local check before queueing. No React Native imports (tested under plain node).
-import { LOG_TYPES, logChanges, streakMultiplier, type LogTypeInfo } from "@workspace/engine";
+import { EXPENSE_CATEGORIES, LOG_TYPES, logChanges, streakMultiplier, type LogTypeInfo } from "@workspace/engine";
 import { parseLogData } from "@workspace/contracts";
 import type { Domain } from "./types";
 
@@ -28,7 +28,12 @@ export const LOG_FIELDS: Record<string, FieldSpec[]> = {
   reading: [{ key: "pages", label: "PAGES", kind: "number" }],
   learning: [minutes()],
   journal: [{ key: "words", label: "WORDS", kind: "number" }],
-  expense: [amount, { key: "category", label: "CATEGORY", kind: "text", max: 40 }, { key: "note", label: "NOTE", kind: "text", max: 200, optional: true }],
+  // The budget categories, so every expense lands in a category a budget can name.
+  expense: [
+    amount,
+    { key: "category", label: "CATEGORY", kind: "choice", options: EXPENSE_CATEGORIES.map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) })) },
+    { key: "note", label: "NOTE", kind: "text", max: 200, optional: true },
+  ],
   income: [amount, { key: "category", label: "CATEGORY", kind: "text", max: 40 }, { key: "note", label: "NOTE", kind: "text", max: 200, optional: true }],
   saving: [amount],
   investment: [amount],

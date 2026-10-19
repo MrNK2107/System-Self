@@ -53,6 +53,10 @@ export const profiles = pgTable("profiles", {
   baselineDate: date("baseline_date", { mode: "string" }),
   /** Public codename (`USER // WORD-N`) shown to other players whenever the identity setting hides the username. Unique. */
   publicCodename: text("public_codename").notNull().unique(),
+  /** ISO 4217 code the finance amounts are in (private; never projected). */
+  currency: text("currency").notNull().default("INR"),
+  /** Stated savings rate target, 0..0.9 (the weekly WEALTH evaluation). */
+  savingsTarget: real("savings_target").notNull().default(0.2),
 });
 
 export const domainScores = pgTable(

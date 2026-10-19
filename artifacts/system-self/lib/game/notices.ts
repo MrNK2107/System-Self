@@ -7,6 +7,7 @@ import {
   type Notice,
   type NoticeKind,
 } from "@workspace/contracts";
+import { formatMoney } from "@workspace/engine";
 import type { Domain, MilestoneTier, PendingAchievement, PendingMilestone, QuestType, Rank, StreakBreakData } from "./types";
 
 /** The order modals are shown in. Every kind the server writes appears exactly once. */
@@ -16,6 +17,7 @@ export const NOTICE_ORDER: readonly NoticeKind[] = [
   "milestone",
   "streak_break",
   "chain_complete",
+  "goal_achieved",
   "shadow_activated",
   "shadow_resolved",
   "quest_failed",
@@ -165,6 +167,16 @@ export function noticeView(group: NoticeGroup): NoticeView {
         title: first.payload.name,
         body: "Every step is logged. The system has recorded the arc. Do not stop here.",
       };
+    case "goal_achieved": {
+      const p = first.payload;
+      return {
+        modal: "system",
+        tone: "info",
+        label: "GOAL ACHIEVED",
+        title: p.title,
+        body: `${formatMoney(p.targetAmount, p.currency)} saved. The target is met. Set the next one.`,
+      };
+    }
     case "shadow_activated":
       return {
         modal: "system",

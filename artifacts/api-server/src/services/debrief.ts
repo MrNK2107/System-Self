@@ -3,6 +3,7 @@ import { dailySnapshots, debriefs, domainScores, profiles, quests, users, type D
 import { RANKED_DOMAINS, debriefVerdict, localDate, localTimeToInstant, type RankedDomain } from "@workspace/engine";
 import type { AiDeps } from "../lib/ai";
 import { buildUserContext, generateMessage, type DebriefFacts, type PromptContext } from "./ai-context";
+import { financeVerdictFor } from "./finance";
 import { rollOverDue } from "./rollover";
 import { withUserLock } from "./user-lock";
 
@@ -43,13 +44,13 @@ export async function computeDebriefFacts(tx: Pick<Db, "select">, userId: string
   const questCompleted = resolved.filter((q) => q.status === "complete").length;
   const questTotal = resolved.length;
   const verdict = debriefVerdict(deltas, questTotal > 0 ? questCompleted / questTotal : 0);
-  return { deltas, questCompleted, questTotal, verdict };
+  return { deltas, questCompleted, questTotal, verdict, financeVerdict: await financeVerdictFor(tx, userId, today) };
 }
 
 export function templateDebriefText(ctx: PromptContext, facts: DebriefFacts): string {
   const deltas = RANKED_DOMAINS.map((d) => `${d} ${facts.deltas[d] >= 0 ? "+" : ""}${facts.deltas[d]}`).join(", ");
   const verdict = facts.verdict.charAt(0) + facts.verdict.slice(1).toLowerCase();
-  return `Day ${ctx.dayNumber} closed at rank ${ctx.rank}. ${deltas}. Quests resolved: ${facts.questCompleted} of ${facts.questTotal} completed. ${verdict}.`;
+  return `Day ${ctx.dayNumber} closed at rank ${ctx.rank}. ${deltas}. Quests resolved: ${facts.questCompleted} of ${facts.questTotal} completed. ${verdict}.${facts.financeVerdict ? ` ${facts.financeVerdict}` : ""}`;
 }
 
 export type DebriefOutcome =

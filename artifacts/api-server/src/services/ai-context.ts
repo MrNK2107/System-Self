@@ -9,7 +9,7 @@ import type { WeeklyRecap } from "./recap";
 import { rivalPassedLines } from "./rivals";
 import { buildGameState } from "./state";
 
-export const MESSAGE_PROMPT_VERSION = "system-message-v4";
+export const MESSAGE_PROMPT_VERSION = "system-message-v5";
 export const QUESTS_PROMPT_VERSION = "system-quests-v5";
 export const WEEKLY_DEBRIEF_PROMPT_VERSION = "weekly-debrief-v2";
 
@@ -196,6 +196,8 @@ export interface DebriefFacts {
   questCompleted: number;
   questTotal: number;
   verdict: string;
+  /** On the first day of a new ISO week: the closed finance week's verdict line (services/finance), else absent. */
+  financeVerdict?: string | null;
 }
 
 export interface MessageExtras {
@@ -277,14 +279,18 @@ export function buildMessagePrompt(
   if (extras.debrief) {
     const d = extras.debrief;
     const deltas = RANKED_DOMAINS.map((k) => `${k} ${d.deltas[k] >= 0 ? "+" : ""}${d.deltas[k]}`).join(", ");
-    blocks.push(`DEBRIEF FACTS:\n- Deltas today: ${deltas}\n- Quests resolved today: ${d.questCompleted} of ${d.questTotal} completed\n- Verdict: ${d.verdict}`);
+    blocks.push(`DEBRIEF FACTS:\n- Deltas today: ${deltas}\n- Quests resolved today: ${d.questCompleted} of ${d.questTotal} completed\n- Verdict: ${d.verdict}${d.financeVerdict ? `\n- Finance week verdict: ${quoted(d.financeVerdict)}` : ""}`);
   }
+  const financeLine =
+    type === "nightly_debrief" && extras.debrief?.financeVerdict
+      ? `\nA finance week verdict is listed in DEBRIEF FACTS. Repeat it word for word, without the quotation marks, before the verdict word.`
+      : "";
   const deferral =
     ctx.deferralsThisWeek > 0 && (type === "morning_briefing" || type === "nightly_debrief")
       ? `\nThe user deferred ${ctx.deferralsThisWeek} times this week. Quote up to 3 of their reasons verbatim, in quotation marks, as evidence. Do not comment on them beyond one line.`
       : "";
   return {
-    prompt: `${blocks.join("\n\n")}\n\nGenerate a ${type.replace(/_/g, " ")} for this user.\n${config.instruction}${deferral}\nOutput only the message. No preamble. No explanation. Maximum ${config.maxWords} words.`,
+    prompt: `${blocks.join("\n\n")}\n\nGenerate a ${type.replace(/_/g, " ")} for this user.\n${config.instruction}${financeLine}${deferral}\nOutput only the message. No preamble. No explanation. Maximum ${config.maxWords} words.`,
     maxWords: config.maxWords,
   };
 }

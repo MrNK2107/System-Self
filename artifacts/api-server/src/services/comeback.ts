@@ -12,6 +12,7 @@ import {
 } from "@workspace/engine";
 import type { Notice } from "@workspace/contracts";
 import { insertNotice } from "./scoring";
+import { notSystemLog } from "./system-logs";
 import type { Tx } from "./user-lock";
 
 /**
@@ -128,7 +129,7 @@ export async function evaluateComeback(
     .select({ domain: logs.domain })
     .from(logs)
     .where(
-      and(eq(logs.userId, userId), eq(logs.forbidden, false), gte(logs.localDate, cb.startedOn), lte(logs.localDate, today)),
+      and(eq(logs.userId, userId), eq(logs.forbidden, false), gte(logs.localDate, cb.startedOn), lte(logs.localDate, today), notSystemLog),
     );
   const [completed] = await tx
     .select({ n: count() })

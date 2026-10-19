@@ -42,6 +42,7 @@ test("NOTICE_ORDER covers every server notice kind exactly once", () => {
     "milestone",
     "streak_break",
     "chain_complete",
+    "goal_achieved",
     "shadow_activated",
     "shadow_resolved",
     "quest_failed",
@@ -94,6 +95,26 @@ test("comeback, returner mark and gym unlock render as SYSTEM modals after chain
     label: "TIER I CLEARED",
     title: "The gym is open to you now.",
     body: "Tier I cleared. The gym is open to you now.",
+  });
+});
+
+test("goal_achieved renders as a SYSTEM modal right after chain_complete, the target in the profile currency", () => {
+  const goal = {
+    id: id(64),
+    kind: "goal_achieved",
+    payload: { goalId: id(65), title: "Emergency fund", targetAmount: 50000, currency: "INR" },
+    createdAt: at(),
+  };
+  const chain = { id: id(66), kind: "chain_complete", payload: { name: "PHYSICAL PROTOCOL", templateKey: "p" }, createdAt: at() };
+  const parsed = parseNotices([goal, chain]).notices;
+  assert.equal(nextNoticeGroup(parsed, new Set())!.kind, "chain_complete");
+  assert.equal(nextNoticeGroup(parsed, new Set([id(66)]))!.kind, "goal_achieved");
+  assert.deepEqual(noticeView({ kind: "goal_achieved", notices: parseNotices([goal]).notices }), {
+    modal: "system",
+    tone: "info",
+    label: "GOAL ACHIEVED",
+    title: "Emergency fund",
+    body: "₹50,000 saved. The target is met. Set the next one.",
   });
 });
 

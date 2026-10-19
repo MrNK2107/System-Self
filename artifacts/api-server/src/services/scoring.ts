@@ -24,6 +24,7 @@ import {
   type ShadowState,
 } from "@workspace/engine";
 import type { Notice, NoticeKind, NoticePayload } from "@workspace/contracts";
+import { notSystemLog } from "./system-logs";
 import type { Tx } from "./user-lock";
 
 export type ScoreReason =
@@ -36,7 +37,8 @@ export type ScoreReason =
   | "gym"
   | "streak_break"
   | "decay"
-  | "challenge";
+  | "challenge"
+  | "finance_week";
 
 export type ScoreChange = ChangeSpec & { reason: ScoreReason; refId?: string };
 
@@ -173,7 +175,8 @@ export async function applyChanges(
   const scores = Object.fromEntries(finalStates.map((s) => [s.domain, s.score])) as Record<RankedDomain, number>;
   const streaks = finalStates.map((s) => s.streak);
   // Sequential: a transaction is a single connection and must not run concurrent queries.
-  const [logsCount] = await tx.select({ n: count() }).from(logs).where(eq(logs.userId, userId));
+  // Recurring income the rollover posts is not the user's own log (services/system-logs).
+  const [logsCount] = await tx.select({ n: count() }).from(logs).where(and(eq(logs.userId, userId), notSystemLog));
   const [forbiddenLogs] = await tx
     .select({ n: count() })
     .from(logs)

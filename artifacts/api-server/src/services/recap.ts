@@ -1,6 +1,7 @@
 import { and, eq, gte, lte, ne, sql } from "drizzle-orm";
 import { achievements, logs, questChains, quests, scoreEvents, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, addDays, endOfLocalDay, type RankedDomain } from "@workspace/engine";
+import { notSystemLog } from "./system-logs";
 
 export interface WeeklyRecap {
   weekStart: string;
@@ -60,7 +61,7 @@ export async function buildWeeklyRecap(
       forbidden: sql<number>`count(*) filter (where ${logs.forbidden})::int`,
     })
     .from(logs)
-    .where(and(eq(logs.userId, userId), gte(logs.localDate, weekStart), lte(logs.localDate, today)));
+    .where(and(eq(logs.userId, userId), gte(logs.localDate, weekStart), lte(logs.localDate, today), notSystemLog));
 
   const [chainRow] = await db
     .select({ n: sql<number>`count(*)::int` })

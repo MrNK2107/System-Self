@@ -32,8 +32,8 @@ export const LOG_TYPES: Record<RankedDomain, LogTypeInfo[]> = {
     { type: "journal", label: "Journal", defaults: { words: 200 } },
   ],
   WEALTH: [
-    { type: "expense", label: "Expense", defaults: { amount: 100, category: "General" } },
-    { type: "income", label: "Income", defaults: { amount: 1000, category: "General" } },
+    { type: "expense", label: "Expense", defaults: { amount: 100, category: "other" } },
+    { type: "income", label: "Income", defaults: { amount: 1000, category: "salary" } },
     { type: "saving", label: "Saving", defaults: { amount: 100 } },
     { type: "investment", label: "Investment", defaults: { amount: 100 } },
   ],

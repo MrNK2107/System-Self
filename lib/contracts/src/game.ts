@@ -67,6 +67,11 @@ export const OnboardingRequestSchema = z.object({
 });
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
 
+/** ISO 4217 alphabetic code, e.g. INR (finance amounts are in the profile currency). */
+export const CurrencySchema = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Expected an ISO 4217 code");
+/** The stated savings rate target the weekly WEALTH evaluation compares against. */
+export const SavingsTargetSchema = z.number().min(0).max(0.9);
+
 /** PATCH /api/profile: any subset of these, at least one. */
 export const ProfileUpdateSchema = z
   .object({
@@ -75,6 +80,8 @@ export const ProfileUpdateSchema = z
     identitySetting: IdentitySettingSchema,
     primaryGoal: z.string().trim().min(5).max(200),
     lifeContext: LifeContextSchema,
+    currency: CurrencySchema,
+    savingsTarget: SavingsTargetSchema,
   })
   .partial()
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "Nothing to update" });
@@ -86,6 +93,7 @@ export const NOTICE_KINDS = [
   "milestone",
   "rank_change",
   "chain_complete",
+  "goal_achieved",
   "quest_failed",
   "streak_break",
   "shadow_activated",
@@ -117,6 +125,8 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
     newCodename: z.string(),
   }),
   chain_complete: z.object({ name: z.string(), templateKey: z.string() }),
+  /** A financial goal's saved amount reached its target (no score change). Amounts are in the profile currency. */
+  goal_achieved: z.object({ goalId: z.string(), title: z.string(), targetAmount: z.number(), currency: z.string() }),
   quest_failed: z.object({ questId: z.string(), title: z.string(), type: QuestTypeSchema, penalty: z.number() }),
   streak_break: z.object({
     domains: z.array(z.object({ domain: RankedDomainSchema, lostStreak: z.number().int() })),
@@ -195,6 +205,7 @@ export const NoticeSchema = z.discriminatedUnion("kind", [
   noticeOf("milestone"),
   noticeOf("rank_change"),
   noticeOf("chain_complete"),
+  noticeOf("goal_achieved"),
   noticeOf("quest_failed"),
   noticeOf("streak_break"),
   noticeOf("shadow_activated"),

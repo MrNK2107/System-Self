@@ -2,6 +2,7 @@ import { and, count, countDistinct, eq, gte, isNotNull, lte, sql } from "drizzle
 import { analyticsEvents, comebacks, logs, quests, type Db } from "@workspace/db";
 import { COMEBACK_MIN_GAP_DAYS, addDays, localDate } from "@workspace/engine";
 import type { AdherenceMetricsResponse } from "@workspace/contracts";
+import { notSystemLog } from "./system-logs";
 
 /** BODY log types that are a training session. */
 export const SESSION_LOG_TYPES = ["gym_session", "home_session", "floor_session"] as const;
@@ -70,8 +71,8 @@ export async function adherenceMetrics(db: Db, now: Date, days: number): Promise
     .from(comebacks)
     .where(and(gte(comebacks.startedOn, windowStart), lte(comebacks.startedOn, cutoff)));
 
-  const activeUsers = sql`select user_id from logs where local_date >= ${windowStart}::date`;
-  const [active] = await db.select({ n: countDistinct(logs.userId) }).from(logs).where(gte(logs.localDate, windowStart));
+  const activeUsers = sql`select user_id from ${logs} where local_date >= ${windowStart}::date and ${notSystemLog}`;
+  const [active] = await db.select({ n: countDistinct(logs.userId) }).from(logs).where(and(gte(logs.localDate, windowStart), notSystemLog));
   const [deferrals] = await db
     .select({ n: count() })
     .from(quests)
