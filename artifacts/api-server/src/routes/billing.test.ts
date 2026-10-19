@@ -6,6 +6,7 @@ import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { billingEvents, entitlements } from "@workspace/db";
 import { BillingStatusSchema } from "@workspace/contracts";
 import { createApp } from "../app-factory";
+import { grantEntitlement } from "../services/entitlements";
 import { assertContract, auth, db, setup, skip } from "./game-test-helpers";
 
 after(async () => {
@@ -152,8 +153,6 @@ test("unknown event types are ignored with 200; malformed payloads are 400", { s
   assert.equal((await post(a, { nope: true })).status, 400);
   assert.equal((await post(a, "garbage")).status, 400);
 });
-
-import { grantEntitlement } from "../services/entitlements";
 
 test("an active admin grant is never downgraded or re-sourced by webhook events", { skip }, async () => {
   const a = app();

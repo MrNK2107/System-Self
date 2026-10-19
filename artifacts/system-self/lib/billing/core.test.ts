@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FALLBACK_PLANS, PRO_FEATURES, isExpoGo, plansFromPackages, resolvePurchasesKey } from "./core";
+import { FALLBACK_PLANS, POLL_DELAYS_MS, PRO_FEATURES, isExpoGo, plansFromPackages, pollUntilPro, resolvePurchasesKey } from "./core";
 
 test("Expo Go never gets a purchases key", () => {
   const keys = { iosKey: "appl_x", androidKey: "goog_x" };
@@ -30,7 +30,6 @@ test("the feature list does not promise anything that scores", () => {
   assert.ok(!PRO_FEATURES.some((f) => /S-rank|score boost|multiplier/i.test(f)));
 });
 
-import { POLL_DELAYS_MS, pollUntilPro } from "./core";
 
 const st = (tier: "free" | "pro") => ({ tier, expiresAt: null, source: null });
 
@@ -48,4 +47,22 @@ test("pollUntilPro times out after the full schedule (about 30 s) and survives f
   assert.equal(r, "pending");
   assert.deepEqual(slept, [...POLL_DELAYS_MS]);
   assert.equal(slept.reduce((a, b) => a + b, 0), 29000);
+});
+
+test("pollUntilPro makes no further fetches once stop returns true", async () => {
+  let fetches = 0;
+  let stopped = false;
+  const r = await pollUntilPro(
+    async () => {
+      fetches++;
+      return st("free");
+    },
+    async () => {
+      if (fetches === 2) stopped = true;
+    },
+    POLL_DELAYS_MS,
+    () => stopped,
+  );
+  assert.equal(r, "stopped");
+  assert.equal(fetches, 2);
 });

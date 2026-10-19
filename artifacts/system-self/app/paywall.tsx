@@ -2,7 +2,7 @@
 // stays authoritative: after a purchase or restore only the billing status is refetched, and the webhook grants PRO.
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { useColors } from "@/hooks/useColors";
@@ -48,9 +48,18 @@ export default function PaywallScreen() {
     };
   }, [userId]);
 
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   // The webhook grants PRO, so after a purchase or restore poll the server (about 29 s) until it says pro.
-  const confirm = useCallback(async () => {
-    setMessage({ text: "Purchase received. The System is confirming your access.", tone: "info" });
+  const confirm = useCallback(async (lead: string) => {
+    if (!mounted.current) return;
+    setMessage({ text: lead, tone: "info" });
     const result = await pollUntilPro(
       async () => {
         const status = await fetchBillingStatus(api);
@@ -58,8 +67,12 @@ export default function PaywallScreen() {
         return status;
       },
       (ms) => new Promise((r) => setTimeout(r, ms)),
+      undefined,
+      () => !mounted.current,
     );
+    if (result === "stopped" || !mounted.current) return;
     await qc.invalidateQueries({ queryKey: billingStatusKey(userId) });
+    if (!mounted.current) return;
     setMessage(
       result === "pro"
         ? { text: "Access confirmed. PRO is active.", tone: "info" }
@@ -75,12 +88,13 @@ export default function PaywallScreen() {
     setBusy("buy");
     setMessage(null);
     const result = await purchasePlan(userId, store.packages[selected]);
+    if (!mounted.current) return;
     if (result === "purchased") {
-      await confirm();
+      await confirm("Purchase received. The System is confirming your access.");
     } else if (result === "failed") {
       setMessage({ text: "The purchase did not complete. You were not charged by the System.", tone: "error" });
     }
-    setBusy(null);
+    if (mounted.current) setBusy(null);
   };
 
   const restore = async () => {
@@ -88,12 +102,13 @@ export default function PaywallScreen() {
     setBusy("restore");
     setMessage(null);
     const result = await restorePurchases(userId);
+    if (!mounted.current) return;
     if (result === "restored") {
-      await confirm();
+      await confirm("Restore complete. The System is confirming your access.");
     } else {
       setMessage({ text: "Nothing could be restored right now.", tone: "error" });
     }
-    setBusy(null);
+    if (mounted.current) setBusy(null);
   };
 
   return (
