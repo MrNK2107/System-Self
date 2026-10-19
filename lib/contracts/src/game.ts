@@ -241,6 +241,10 @@ export type Notice = z.infer<typeof NoticeSchema>;
 export type NoticePayload<K extends NoticeKind> = z.infer<(typeof NOTICE_PAYLOAD_SCHEMAS)[K]>;
 
 export const TrajectorySchema = z.enum(["up", "stable", "down"]);
+/** Adaptive UI state (presentational only; free users always get STABLE). */
+export const UI_STATE_VALUES = ["FALLING", "STABLE", "CLIMBING", "PEAK"] as const;
+export const UiStateSchema = z.enum(UI_STATE_VALUES);
+export type UiState = z.infer<typeof UiStateSchema>;
 
 const ScoresRecordSchema = z.object({
   BODY: z.number(),
@@ -281,6 +285,7 @@ export const GameStateSchema = z.object({
   ),
   tierProgress: z.number(),
   trajectory: TrajectorySchema,
+  uiState: UiStateSchema,
   shadow: z
     .object({
       active: z.boolean(),
@@ -504,7 +509,8 @@ export const NoticeKindsParamSchema = z
   })
   .optional();
 export const NoticeListQuerySchema = z.object({ kinds: NoticeKindsParamSchema });
-export const StateQuerySchema = z.object({ noticeKinds: NoticeKindsParamSchema });
+/** `uiState` is an admin-only debug override; an invalid value reads as absent. */
+export const StateQuerySchema = z.object({ noticeKinds: NoticeKindsParamSchema, uiState: UiStateSchema.optional().catch(undefined) });
 export const NoticeListResponseSchema = z.object({ items: z.array(NoticeSchema), hasMore: z.boolean() });
 
 export const NoticesSeenRequestSchema = z.object({

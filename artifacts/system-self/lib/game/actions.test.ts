@@ -190,6 +190,7 @@ const state = {
   scores: [{ domain: "BODY", score: 20, streak: 0, lastLogDate: null }],
   tierProgress: 40,
   trajectory: "stable",
+  uiState: "STABLE",
   shadow: null,
   unseenNotices: [{ id: "n1", kind: "kind_from_the_future", payload: {}, createdAt: "2026-10-19T00:00:00.000Z" }],
   hasMoreNotices: false,

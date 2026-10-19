@@ -16,6 +16,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { NotificationPrompt } from "@/components/NotificationPrompt";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AppProvider } from "@/context/AppContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 import { GymProvider } from "@/features/gym/context/GymContext";
 import { useNotificationSync } from "@/hooks/useNotifications";
 import { QueryProvider } from "@/lib/api/query";
@@ -85,6 +86,7 @@ export default function RootLayout() {
       <ErrorBoundary>
         <QueryProvider>
           <AuthProvider>
+            <ThemeProvider>
             <GestureHandlerRootView style={{ flex: 1 }}>
               <KeyboardProvider>
                 <AppProvider>
@@ -94,6 +96,7 @@ export default function RootLayout() {
                 </AppProvider>
               </KeyboardProvider>
             </GestureHandlerRootView>
+            </ThemeProvider>
           </AuthProvider>
         </QueryProvider>
       </ErrorBoundary>

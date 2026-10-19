@@ -12,6 +12,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import type { Domain, DebriefData, DebriefVerdict } from "@/context/AppContext";
 import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
+import { verdictHaptic } from "@/lib/haptics";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -35,6 +36,7 @@ interface Props {
   onAcknowledge: () => void;
 }
 
+
 export function NightlyDebriefModal({ visible, debrief, username, dayNumber, onAcknowledge }: Props) {
   const verdictColor = VERDICT_COLORS[debrief.verdict];
 
@@ -55,6 +57,11 @@ export function NightlyDebriefModal({ visible, debrief, username, dayNumber, onA
   // Typewriter for AI text
   const [displayedText, setDisplayedText] = useState("");
   const [showContent, setShowContent] = useState(false);
+
+  // The verdict is delivered once per opening, not on every re-render or AI text update.
+  useEffect(() => {
+    if (visible) verdictHaptic();
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;

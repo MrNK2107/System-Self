@@ -3,13 +3,16 @@ import { Tabs } from "expo-router";
 import { BlurView } from "expo-blur";
 import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
+import { GridTexture } from "@/components/GridTexture";
 import { NoticeHost } from "@/components/NoticeHost";
 import { OfflineBar } from "@/components/OfflineBar";
+import { useTheme } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
 import { QuestSchedulerProvider } from "@/hooks/useQuestScheduler";
 
 export default function TabLayout() {
   const colors = useColors();
+  const theme = useTheme();
   const isIOS = Platform.OS === "ios";
 
   return (
@@ -94,6 +97,7 @@ export default function TabLayout() {
           }}
         />
       </Tabs>
+      {theme.grid && <GridTexture color={theme.accent} />}
       <OfflineBar />
       {/* Server notices (rank changes, achievements, milestones, ...) as modals, one at a time. */}
       <NoticeHost />

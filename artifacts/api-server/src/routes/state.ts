@@ -8,7 +8,7 @@ export function stateRoutes(db: Db): IRouter {
   const router = Router();
 
   router.get("/state", async (req, res) => {
-    const { noticeKinds } = StateQuerySchema.parse(req.query);
+    const { noticeKinds, uiState } = StateQuerySchema.parse(req.query);
     const now = new Date();
     await ensureRolledOver(db, req.user!.id, now);
     const state = await buildGameState(db, req.user!.id, now, { noticeKinds });
@@ -16,6 +16,8 @@ export function stateRoutes(db: Db): IRouter {
       res.status(404).json({ error: "Not onboarded", code: "not_onboarded" });
       return;
     }
+    // Debug override for manual palette checks: admins only. Anyone else sending it gets the normal state.
+    if (uiState && req.user!.role === "admin") state.uiState = uiState;
     res.json(state);
   });
 

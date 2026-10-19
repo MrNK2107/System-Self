@@ -1,5 +1,5 @@
 // Mounted once in the tabs layout: shows unseen server notices one at a time with the existing modals.
-import React from "react";
+import React, { useEffect } from "react";
 import { AchievementModal } from "@/components/AchievementModal";
 import { ChallengeOutcomeModal } from "@/components/ChallengeOutcomeModal";
 import { FailureModal } from "@/components/FailureModal";
@@ -9,13 +9,23 @@ import { RankUpModal } from "@/components/RankUpModal";
 import { StreakBrokenModal } from "@/components/StreakBrokenModal";
 import { SystemNoticeModal } from "@/components/SystemNoticeModal";
 import { useNotices } from "@/hooks/useNotices";
+import { rankChangeHaptic, shadowActivatedHaptic } from "@/lib/haptics";
 
 export function NoticeHost() {
   const { group, view, dismiss } = useNotices();
+  // Keyed by the notice ids so each notice gets a fresh modal (animations and per-notice state reset).
+  const key = group ? group.notices.map((n) => n.id).join(",") : "";
+  const kind = !view ? null : view.modal === "rank_up" ? "rank" : view.modal === "system" && view.label === "SHADOW SELF ACTIVATED" ? "shadow" : null;
+
+  // Haptics fire once per notice group (the effect re-runs only when the group changes), never on re-render.
+  useEffect(() => {
+    if (kind === "rank") rankChangeHaptic();
+    else if (kind === "shadow") shadowActivatedHaptic();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
   if (!group || !view) return null;
 
-  // Keyed by the notice ids so each notice gets a fresh modal (animations and per-notice state reset).
-  const key = group.notices.map((n) => n.id).join(",");
   const onAcknowledge = () => void dismiss();
 
   switch (view.modal) {

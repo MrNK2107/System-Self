@@ -54,6 +54,7 @@ const gameState = {
   scores: [],
   tierProgress: 0,
   trajectory: "stable",
+  uiState: "STABLE",
   shadow: null,
   unseenNotices: [],
   hasMoreNotices: false,

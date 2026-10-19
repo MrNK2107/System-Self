@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useTheme } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
+import { TYPEWRITER_MS } from "@/lib/theme/theme";
 
 interface SystemMessageProps {
   message: string;
@@ -10,6 +12,8 @@ interface SystemMessageProps {
 
 export function SystemMessage({ message, animate = true, label }: SystemMessageProps) {
   const colors = useColors();
+  const { uiState } = useTheme();
+  const speed = TYPEWRITER_MS[uiState];
   const [displayed, setDisplayed] = useState(animate ? "" : message);
 
   useEffect(() => {
@@ -26,9 +30,9 @@ export function SystemMessage({ message, animate = true, label }: SystemMessageP
       } else {
         clearInterval(interval);
       }
-    }, 18);
+    }, speed);
     return () => clearInterval(interval);
-  }, [message, animate]);
+  }, [message, animate, speed]);
 
   return (
     <View style={[styles.container, { borderLeftColor: colors.primary, borderLeftWidth: 1, paddingLeft: 12 }]}>

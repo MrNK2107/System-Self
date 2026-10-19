@@ -24,6 +24,7 @@ import {
   shadowScores,
   tierProgress,
   trajectory,
+  uiState as computeUiState,
   type Rank,
   type RankedDomain,
 } from "@workspace/engine";
@@ -31,6 +32,7 @@ import { NOTICE_PAGE_SIZE, type GameState, type Notice, type NoticeKind } from "
 import { toNotice, toShadowState } from "./scoring";
 import { currentSeasons } from "./seasons";
 import { countsForRank } from "./quests";
+import { isPro } from "./entitlements";
 
 /**
  * The oldest NOTICE_PAGE_SIZE unseen notices, and whether more are waiting. With `kinds` only those kinds are
@@ -181,6 +183,10 @@ export async function buildGameState(
     .orderBy(asc(milestones.unlockedAt), asc(milestones.domain), asc(milestones.tier));
 
   const rank = profile.rank as Rank;
+  // Purely presentational; free users always read STABLE, and no score or rule reads it.
+  const ui = (await isPro(db, userId, now))
+    ? computeUiState({ shadowActive: shadow?.active === true, trajectory: trend, rank })
+    : "STABLE";
   return {
     profile: {
       username: user.username,
@@ -202,6 +208,7 @@ export async function buildGameState(
     scores,
     tierProgress: tierProgress(hidden, rank),
     trajectory: trend,
+    uiState: ui,
     shadow,
     unseenNotices: unseen.items,
     hasMoreNotices: unseen.hasMore,

@@ -33,6 +33,7 @@ import type { RefuseOutcome } from "@/context/AppContext";
 import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
 import { useQuestScheduler } from "@/hooks/useQuestScheduler";
 import { DOMAIN_COLORS } from "@/constants/domains";
+import { questCompleteHaptic } from "@/lib/haptics";
 
 const BONUS_LIMIT_LINE = "Bonus quests: 3 issued today. The limit resets tomorrow.";
 
@@ -185,7 +186,8 @@ export default function QuestsScreen() {
     setNotice(null);
     try {
       const r = await completeQuest(id);
-      if (!r.ok && !isStale(r)) setNotice(describeFailure(r));
+      if (r.ok) questCompleteHaptic();
+      else if (!isStale(r)) setNotice(describeFailure(r));
     } finally {
       setBusy(id, false);
     }
