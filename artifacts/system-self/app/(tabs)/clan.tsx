@@ -66,7 +66,7 @@ function RaidCard() {
     );
   }
   return (
-    <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.primary + "40" }]}>
+    <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.accentFill + "40" }]}>
       <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>WEEKLY RAID</Text>
       <Text style={[s.clanName, { color: colors.foreground }]}>{raidTitle(raid)}</Text>
       <Text style={[s.muted, { color: colors.mutedForeground }]}>{RAID_TYPE_RULE[raid.type]}</Text>
@@ -124,7 +124,7 @@ function MyClan({ data, onError }: { data: MyClanResponse; onError: (m: string |
 
   return (
     <>
-      <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.primary + "40" }]}>
+      <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.accentFill + "40" }]}>
         <Text style={[s.clanName, { color: colors.foreground }]}>{clanLabel(clan)}</Text>
         {clan.description ? <Text style={[s.muted, { color: colors.mutedForeground }]}>{clan.description}</Text> : null}
         <Text style={[s.status, { color: clan.status === "active" ? colors.primary : "#C4873A" }]}>{clanStatusLine(clan)}</Text>

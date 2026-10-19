@@ -38,7 +38,7 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
       activeOpacity={0.75}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={[s.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? `${colors.primary}20` : "transparent" }]}
+      style={[s.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? `${colors.accentFill}20` : "transparent" }]}
     >
       <Text style={[s.chipText, { color: active ? colors.primary : colors.mutedForeground }]}>{label}</Text>
     </TouchableOpacity>

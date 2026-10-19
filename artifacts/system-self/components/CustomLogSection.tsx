@@ -72,7 +72,7 @@ export function CustomLogSection({ onLogged, onNavigate }: { onLogged: () => voi
                 activeOpacity={0.7}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                style={[s.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary + "20" : "transparent" }]}
+                style={[s.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.accentFill + "20" : "transparent" }]}
               >
                 <Text style={[s.chipText, { color: active ? colors.primary : colors.mutedForeground }]} numberOfLines={1}>
                   {d.name}

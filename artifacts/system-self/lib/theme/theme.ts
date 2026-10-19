@@ -16,7 +16,7 @@ export interface ThemeTokens {
 
 export const THEMES: Record<UiState, ThemeTokens> = {
   FALLING: { background: "#0A0A0A", accent: "#8B0000", accentText: "#E05555", onAccent: "#FFFFFF", grid: false },
-  STABLE: { background: "#111318", accent: "#3A7BD5", accentText: "#4D8CE0", onAccent: "#FFFFFF", grid: false },
+  STABLE: { background: "#111318", accent: "#3A7BD5", accentText: "#4D8CE0", onAccent: "#0A0E17", grid: false },
   CLIMBING: { background: "#0D1B2A", accent: "#00D4FF", accentText: "#00D4FF", onAccent: "#04121C", grid: false },
   PEAK: { background: "#0A0E17", accent: "#E8D5A3", accentText: "#E8D5A3", onAccent: "#0A0E17", grid: true },
 };

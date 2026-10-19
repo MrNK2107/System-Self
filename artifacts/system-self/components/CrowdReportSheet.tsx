@@ -30,7 +30,7 @@ export function CrowdReportSheet({ visible, busy, onChoose }: Props) {
                   styles.btn,
                   {
                     borderColor: o.level ? colors.primary + "80" : colors.border,
-                    backgroundColor: o.level ? colors.primary + "18" : "transparent",
+                    backgroundColor: o.level ? colors.accentFill + "18" : "transparent",
                     opacity: busy ? 0.5 : 1,
                   },
                 ]}

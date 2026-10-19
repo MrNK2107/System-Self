@@ -54,3 +54,10 @@ test("accent fills keep the PRD hex values", () => {
     ["#8B0000", "#3A7BD5", "#00D4FF", "#E8D5A3"],
   );
 });
+
+test("onAccent label is readable (>= 4.5:1) on every state's accent fill", () => {
+  for (const [state, t] of Object.entries(THEMES)) {
+    const ratio = contrast(t.onAccent, t.accent);
+    assert.ok(ratio >= 4.5, `${state}: ${t.onAccent} on ${t.accent} = ${ratio.toFixed(2)}`);
+  }
+});

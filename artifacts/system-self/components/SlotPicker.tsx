@@ -51,7 +51,7 @@ export function SlotPicker({ visible, questTitle, current, suggestions, hint, bu
   const slot = buildSlot(start, effective);
   const chip = (selected: boolean) => ({
     borderColor: selected ? colors.primary : colors.border,
-    backgroundColor: selected ? colors.primary + "20" : "transparent",
+    backgroundColor: selected ? colors.accentFill + "20" : "transparent",
   });
 
   return (

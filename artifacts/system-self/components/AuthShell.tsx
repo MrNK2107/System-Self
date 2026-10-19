@@ -89,7 +89,7 @@ export function AuthButton({ label, onPress, loading, disabled }: AuthButtonProp
       activeOpacity={0.85}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!inactive, busy: !!loading }}
-      style={[s.button, { backgroundColor: inactive ? colors.muted : colors.primary }]}
+      style={[s.button, { backgroundColor: inactive ? colors.muted : colors.accentFill }]}
     >
       {loading ? (
         <ActivityIndicator color={colors.primaryForeground} />

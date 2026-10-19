@@ -445,7 +445,7 @@ export default function Dashboard() {
           ) : (
             activeQuests.slice(0, 3).map(q => (
               <View key={q.id} style={[styles.questRow, { borderColor: colors.border }]}>
-                <View style={[styles.questDot, { backgroundColor: colors.domain[q.domain as keyof typeof colors.domain] ?? colors.primary }]} />
+                <View style={[styles.questDot, { backgroundColor: colors.domain[q.domain as keyof typeof colors.domain] ?? colors.accentFill }]} />
                 <Text style={[styles.questTitle, { color: colors.foreground }]} numberOfLines={1}>
                   {q.title}
                 </Text>

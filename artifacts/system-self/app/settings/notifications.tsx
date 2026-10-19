@@ -94,7 +94,7 @@ export default function NotificationSettingsScreen() {
                   value={prefsQ.data[row.key]}
                   onValueChange={(v) => void toggle(row.key, v)}
                   accessibilityLabel={row.label}
-                  trackColor={{ true: colors.primary, false: colors.muted }}
+                  trackColor={{ true: colors.accentFill, false: colors.muted }}
                 />
               </View>
             </React.Fragment>

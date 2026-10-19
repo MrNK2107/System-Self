@@ -37,7 +37,7 @@ function TimeChips({ times, selected, onSelect }: { times: string[]; selected: s
             accessibilityState={{ selected: active }}
             style={[
               s.chip,
-              { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? `${colors.primary}20` : "transparent" },
+              { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? `${colors.accentFill}20` : "transparent" },
             ]}
           >
             <Text style={[s.chipText, { color: active ? colors.primary : colors.mutedForeground }]}>{t}</Text>

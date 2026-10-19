@@ -79,7 +79,7 @@ function LeaderRow({
 
   const posColor = isFirst ? "#D4B483" : isUser ? colors.primary : colors.mutedForeground;
   const borderColor = isUser ? colors.primary + "60" : isShadow ? "#E0555550" : colors.border;
-  const bgColor = isUser ? colors.primary + "08" : isShadow ? "#E0555506" : "transparent";
+  const bgColor = isUser ? colors.accentFill + "08" : isShadow ? "#E0555506" : "transparent";
 
   const statusColorMap: Record<LeaderStatus, string> = {
     THREATENING: "#E05555",

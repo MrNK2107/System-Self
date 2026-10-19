@@ -142,7 +142,7 @@ export default function SignUpScreen() {
               styles.box,
               {
                 borderColor: fieldErrors.acceptTerms ? colors.destructive : acceptTerms ? colors.primary : colors.border,
-                backgroundColor: acceptTerms ? colors.primary : "transparent",
+                backgroundColor: acceptTerms ? colors.accentFill : "transparent",
               },
             ]}
           >

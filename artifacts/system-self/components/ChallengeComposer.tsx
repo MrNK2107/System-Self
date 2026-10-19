@@ -18,7 +18,7 @@ function Chip({ label, selected, onPress }: { label: string; selected: boolean; 
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected }}
-      style={[s.chip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + "20" : "transparent" }]}
+      style={[s.chip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.accentFill + "20" : "transparent" }]}
     >
       <Text style={[s.chipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{label}</Text>
     </TouchableOpacity>

@@ -108,7 +108,7 @@ export function PlanEditor({ exercises, saving, error, onSave, onCancel }: Props
                 s.chip,
                 {
                   borderColor: active ? colors.primary : colors.border,
-                  backgroundColor: on ? colors.primary + (active ? "30" : "14") : colors.card,
+                  backgroundColor: on ? colors.accentFill + (active ? "30" : "14") : colors.card,
                 },
               ]}
             >

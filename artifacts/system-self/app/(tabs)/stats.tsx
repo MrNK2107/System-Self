@@ -198,7 +198,7 @@ export default function StatsScreen() {
               <View style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
                 <View style={[styles.progressFill, {
                   width: `${Math.min(100, progressToNext)}%` as any,
-                  backgroundColor: progressToNext >= 75 ? "#C4873A" : colors.primary,
+                  backgroundColor: progressToNext >= 75 ? "#C4873A" : colors.accentFill,
                 }]} />
               </View>
               {showRankUpPrep && (

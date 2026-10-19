@@ -193,7 +193,7 @@ export default function GymScreen() {
                 styles.tab,
                 {
                   borderColor: activeTab === tab ? colors.primary : colors.border,
-                  backgroundColor: activeTab === tab ? colors.primary + "20" : colors.card,
+                  backgroundColor: activeTab === tab ? colors.accentFill + "20" : colors.card,
                 },
               ]}
               onPress={() => setActiveTab(tab)}

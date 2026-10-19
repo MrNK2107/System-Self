@@ -273,7 +273,7 @@ export function FreeFormLog({
               activeOpacity={0.8}
               accessibilityRole="button"
               accessibilityLabel={`Confirm ${proposalSummary(p)}`}
-              style={[s.action, { backgroundColor: colors.accentFill, borderColor: colors.primary }]}
+              style={[s.action, { backgroundColor: colors.accentFill, borderColor: colors.accentFill }]}
             >
               <Text style={[s.actionText, { color: colors.primaryForeground }]}>CONFIRM</Text>
             </TouchableOpacity>

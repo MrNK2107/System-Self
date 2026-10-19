@@ -49,7 +49,7 @@ function MemberRow({
                 s.cell,
                 {
                   borderColor: selected ? colors.primary : colors.border,
-                  backgroundColor: selected ? colors.primary + "22" : "transparent",
+                  backgroundColor: selected ? colors.accentFill + "22" : "transparent",
                   opacity: enabled || selected ? 1 : 0.4,
                 },
               ]}

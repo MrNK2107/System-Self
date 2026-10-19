@@ -52,7 +52,7 @@ export function CustomDomainForm({
           value={draft.isPublic}
           onValueChange={(v) => set("isPublic", v)}
           accessibilityLabel="Show to followers and clan"
-          trackColor={{ true: colors.primary, false: colors.muted }}
+          trackColor={{ true: colors.accentFill, false: colors.muted }}
         />
       </View>
       <AuthButton label={submitLabel} loading={busy} onPress={submit} />
