@@ -323,23 +323,50 @@ test("6 home sessions unlock the gym", { skip }, async () => {
 test("home sessions count at most once per local day toward the unlock", { skip }, async () => {
   const a = clockApp();
   const { token, id } = await setup(a);
-  await seed(id, null, 0);
+  // Onboarded yesterday with yesterday not yet rolled. The offline log for yesterday syncs first (as the outbox sends
+  // it), so it is for a date not yet rolled over: it counts on its own date. A backdated log for a date already rolled
+  // over never counts (see the I3 test below).
+  await seed(id, null, 1);
+  await db!.update(userDayState).set({ lastRolledDate: addDays(TODAY, -2) }).where(eq(userDayState.userId, id));
   await request(a).post("/api/profile/home-path").set(auth(token)).send({ active: true });
   const homeCount = async () => (await db!.select().from(profiles).where(eq(profiles.userId, id)))[0]!.homeSessions;
-  assert.equal((await postLog(a, token, "d0-a", "BODY", "home_session")).status, 201);
-  assert.equal(await homeCount(), 1);
-  // A second home or floor session the same local day does not count again.
-  assert.equal((await postLog(a, token, "d0-b", "BODY", "floor_session")).status, 201);
-  assert.equal((await postLog(a, token, "d0-c", "BODY", "home_session")).status, 201);
-  assert.equal(await homeCount(), 1);
-  // A backdated one for yesterday is that day's first: it counts.
   const yesterday = new Date(NOW.getTime() - 86_400_000);
   const back = await request(a)
     .post("/api/logs")
     .set(auth(token))
     .send({ clientId: "d-1", domain: "BODY", logType: "home_session", occurredAt: yesterday.toISOString() });
   assert.equal(back.status, 201);
+  assert.equal(await homeCount(), 1);
+  // Today's first is a different local day: it counts.
+  assert.equal((await postLog(a, token, "d0-a", "BODY", "home_session")).status, 201);
   assert.equal(await homeCount(), 2);
+  // A second home or floor session the same local day does not count again.
+  assert.equal((await postLog(a, token, "d0-b", "BODY", "floor_session")).status, 201);
+  assert.equal((await postLog(a, token, "d0-c", "BODY", "home_session")).status, 201);
+  assert.equal(await homeCount(), 2);
+});
+
+test("I3: a backdated home session for a date already rolled over scores but never counts toward the gym unlock", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, null); // everything before today rolled
+  await request(a).post("/api/profile/home-path").set(auth(token)).send({ active: true });
+  await db!.update(profiles).set({ homeSessions: 5 }).where(eq(profiles.userId, id));
+  const back = await request(a)
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "bk-home", domain: "BODY", logType: "home_session", occurredAt: new Date(NOW.getTime() - 30 * 3600_000).toISOString() });
+  assert.equal(back.status, 201);
+  assert.equal(back.body.log.isRetroactive, true);
+  assert.ok(!kindsOf(back.body).includes("gym_unlocked"));
+  let [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.homeSessions, 5);
+  assert.equal(p!.homePathActive, true);
+  // A live one today still counts and unlocks.
+  const live = await postLog(a, token, "live-home", "BODY", "home_session");
+  assert.ok(kindsOf(live.body).includes("gym_unlocked"));
+  [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.homeSessions, 6);
 });
 
 test("gym session while home path active still scores (and a gym return after a gap is a comeback)", { skip }, async () => {

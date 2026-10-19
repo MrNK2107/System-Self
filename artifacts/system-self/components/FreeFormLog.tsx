@@ -44,6 +44,12 @@ export function FreeFormLog({
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [proposals, setProposals] = useState<LogProposalDto[]>([]);
+  // The proposals still open, kept in step with every update so two confirms finishing back to back both see the
+  // other's removal (the "all settled" check below reads it, not a render-time snapshot).
+  const openProposals = useRef<LogProposalDto[]>([]);
+  useEffect(() => {
+    openProposals.current = proposals;
+  }, [proposals]);
   /** The text the proposals came from (typed, or the voice transcript): what a confirmed proposal carries as freeText. */
   const [source, setSource] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -172,8 +178,9 @@ export function FreeFormLog({
   );
 
   const settle = (p: LogProposalDto) => {
-    const rest = proposals.filter((x) => x !== p);
-    setProposals(rest);
+    const rest = openProposals.current.filter((x) => x !== p);
+    openProposals.current = rest;
+    setProposals((prev) => prev.filter((x) => x !== p));
     return rest;
   };
 

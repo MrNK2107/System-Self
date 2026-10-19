@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UserLogClientIdSchema } from "./game";
 
 /** CUSTOM domains (PRD 8): user-defined stats with their own 0-100 score, never part of rank. */
 export const CUSTOM_NAME_MAX = 24;
@@ -48,7 +49,7 @@ export type CustomDomainUpdate = z.infer<typeof CustomDomainUpdateSchema>;
 
 /** POST /api/custom-domains/:id/logs */
 export const CustomLogRequestSchema = z.object({
-  clientId: z.string().min(1).max(200),
+  clientId: UserLogClientIdSchema,
   value: num,
   note: z.string().trim().max(CUSTOM_NOTE_MAX).optional(),
   occurredAt: z.string().datetime({ offset: true }).optional(),

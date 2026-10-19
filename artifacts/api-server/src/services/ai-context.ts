@@ -8,6 +8,7 @@ import { generatedQuestsPayloadSchema } from "../lib/schemas";
 import type { WeeklyRecap } from "./recap";
 import { rivalPassedLines } from "./rivals";
 import { buildGameState } from "./state";
+import { notSystemLog } from "./system-logs";
 
 export const MESSAGE_PROMPT_VERSION = "system-message-v5";
 export const QUESTS_PROMPT_VERSION = "system-quests-v5";
@@ -73,6 +74,20 @@ export function weakestDomainOf(scores: Record<RankedDomain, number>): RankedDom
   return weakest;
 }
 
+/**
+ * The prompt's recent logs. One free-form text or voice transcript confirmed as several proposals is stored on each of
+ * those logs; it is quoted on the first (most recent) only.
+ */
+function recentLogsOf(rows: { domain: string; logType: string; freeText: string | null }[]): PromptContext["recentLogs"] {
+  const quoted = new Set<string>();
+  return rows.map((l) => {
+    const t = l.freeText?.trim() ? l.freeText.trim().slice(0, 120) : null;
+    const text = t !== null && !quoted.has(t) ? t : null;
+    if (text !== null) quoted.add(text);
+    return { domain: l.domain, logType: l.logType, text };
+  });
+}
+
 /** Builds all prompt context from server data. Returns null for a user who has not onboarded. */
 export async function buildUserContext(
   tx: Pick<Db, "select">,
@@ -103,7 +118,7 @@ export async function buildUserContext(
   const logRows = await tx
     .select({ domain: logs.domain, logType: logs.logType, freeText: logs.freeText })
     .from(logs)
-    .where(and(eq(logs.userId, userId), gte(logs.localDate, addDays(today, -6))))
+    .where(and(eq(logs.userId, userId), gte(logs.localDate, addDays(today, -6)), notSystemLog))
     .orderBy(desc(logs.occurredAt))
     .limit(40);
   const refusals = await tx
@@ -144,11 +159,7 @@ export async function buildUserContext(
     shadowActive: state.shadow?.active ?? false,
     shadowGap: state.shadow?.gap ?? 0,
     primaryGoal: state.profile.primaryGoal,
-    recentLogs: logRows.map((l) => ({
-      domain: l.domain,
-      logType: l.logType,
-      text: l.freeText?.trim() ? l.freeText.trim().slice(0, 120) : null,
-    })),
+    recentLogs: recentLogsOf(logRows),
     completionRate30: resolved30.length > 0 ? completed.length / resolved30.length : null,
     weakestDomain: weakestDomainOf(scores),
     recentRefusals: refusals.map((r) => r.reason?.trim()).filter((r): r is string => Boolean(r)),

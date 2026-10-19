@@ -139,15 +139,99 @@ test("budget penalties are capped at -2.0 and use month-to-date spend through th
   assert.deepEqual(await financeDeltas(id), [2, -2], "savings 100% this week +2.0; five categories over: -2.0, not -2.5");
 });
 
-test("a week with income 0 and expenses > 0 is a savings rate of 0: -1.0; no budgets: no budget change", { skip }, async () => {
+test("no income in the 28-day window: the savings component is skipped (0), not -1.0; no budgets: no budget change", { skip }, async () => {
   const { id } = await onboardAtD0();
   await wealthLog(id, "2026-01-08", "expense", { amount: 100, category: "food" });
   await setLastRolled(id, SAT);
   await roll(id, SUN);
-  assert.deepEqual(await financeDeltas(id), [-1]);
+  assert.deepEqual(await financeDeltas(id), []);
   const [week] = await db!.select().from(financeWeeks).where(eq(financeWeeks.userId, id));
+  assert.equal(week!.income, 0);
+  assert.equal(week!.expenses, 100);
   assert.equal(week!.savingsRate, 0);
+  assert.equal(week!.delta, 0);
   assert.equal(week!.discretionaryBudget, null);
+});
+
+test("a monthly salary in week 1 carries weeks 2-4: the savings rate is over the trailing 28 days, never -1.0", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  // The salary is a recurring auto-log (system): it counts as income in the window.
+  await db!.insert(logs).values({
+    userId: id,
+    clientId: `recurring:test:2026-01`,
+    domain: "WEALTH",
+    logType: "income",
+    data: { amount: 1000, category: "salary" },
+    system: true,
+    occurredAt: at(MON, "00:00"),
+    localDate: MON,
+  });
+  const sundays = [SUN, "2026-01-18", "2026-01-25", "2026-02-01"];
+  for (const sun of sundays) {
+    await wealthLog(id, addDays(sun, -5), "expense", { amount: 100, category: "housing" }); // Tuesday, a healthy week
+    await setLastRolled(id, addDays(sun, -1));
+    await roll(id, sun);
+  }
+  // 28-day rates: 90%, 80%, 70%, 60%: all at or over the 20% target.
+  assert.deepEqual(await financeDeltas(id), [2, 2, 2, 2]);
+  const weeks = await db!.select().from(financeWeeks).where(eq(financeWeeks.userId, id)).orderBy(asc(financeWeeks.weekKey));
+  assert.deepEqual(
+    weeks.map((w) => [w.weekKey, w.income, w.expenses]),
+    [
+      ["2026-W02", 1000, 100],
+      ["2026-W03", 1000, 200],
+      ["2026-W04", 1000, 300],
+      ["2026-W05", 1000, 400],
+    ],
+  );
+});
+
+test("a Sunday expense logged on Monday (after the week closed) counts in the next week's 28-day window", { skip }, async () => {
+  const { token, id } = await onboardAtD0();
+  await wealthLog(id, MON, "income", { amount: 1000, category: "salary" });
+  await wealthLog(id, "2026-01-06", "expense", { amount: 100, category: "food" });
+  await setLastRolled(id, SAT);
+  await roll(id, SUN);
+  const monday = at("2026-01-12", "10:00");
+  const res = await request(app({ now: () => monday }))
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "late-sunday", domain: "WEALTH", logType: "expense", data: { amount: 300, category: "food" }, occurredAt: at(SUN, "18:00").toISOString() });
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assert.equal(res.body.log.localDate, SUN);
+  await wealthLog(id, "2026-01-14", "expense", { amount: 50, category: "food" });
+  await setLastRolled(id, "2026-01-17");
+  await roll(id, "2026-01-18");
+  const weeks = await db!.select().from(financeWeeks).where(eq(financeWeeks.userId, id)).orderBy(asc(financeWeeks.weekKey));
+  assert.deepEqual(
+    weeks.map((w) => [w.weekKey, w.expenses]),
+    [
+      ["2026-W02", 100],
+      ["2026-W03", 450],
+    ],
+  );
+});
+
+test("savings target: below 0.05 is rejected; 0.05 and 0.9 are accepted", { skip }, async () => {
+  const a = app();
+  const { token } = await setup(a);
+  for (const bad of [0, 0.04, 0.95]) {
+    const res = await request(a).patch("/api/profile").set(auth(token)).send({ savingsTarget: bad });
+    assert.equal(res.status, 400, `target ${bad}`);
+  }
+  for (const ok of [0.05, 0.9]) {
+    assert.equal((await request(a).patch("/api/profile").set(auth(token)).send({ savingsTarget: ok })).status, 200, `target ${ok}`);
+  }
+});
+
+test("a stored target below the floor (written before it) is clamped to 0.05 at evaluation", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  await db!.update(profiles).set({ savingsTarget: 0 }).where(eq(profiles.userId, id));
+  await wealthLog(id, MON, "income", { amount: 1000, category: "salary" });
+  await wealthLog(id, "2026-01-06", "expense", { amount: 980, category: "housing" }); // 2%: under 0.05 / 2
+  await setLastRolled(id, SAT);
+  await roll(id, SUN);
+  assert.deepEqual(await financeDeltas(id), [-1]);
 });
 
 test("no WEALTH log that week: no evaluation (recurring auto-logs alone do not count)", { skip }, async () => {
@@ -343,13 +427,13 @@ test("nightly debrief on week close carries the finance verdict line; the AI pro
   await putBudgets(token, [{ category: "food", monthlyLimit: 3100 }]); // 700 a week in a 31-day month
   await wealthLog(id, MON, "income", { amount: 1000, category: "salary" });
   await wealthLog(id, "2026-01-06", "expense", { amount: 900, category: "food" });
-  // The Monday debrief rolls the closed week: savings 10% is exactly target/2 (0); food 900 <= 3100 (+1.0).
+  // The Monday debrief rolls the closed week: 28-day savings 10% is exactly target/2 (0); food 900 <= 3100 (+1.0).
   const out = await getOrBuildDebrief(db!, id, at("2026-01-12", "22:00"), {});
   assert.equal(out.kind, "ready");
   const text = out.kind === "ready" ? out.row.text! : "";
   assert.ok(
     text.endsWith(
-      "You logged ₹900 in discretionary spending this week against a stated budget of ₹700. Your WEALTH score rose 1.0 points. The math is not complicated.",
+      "You logged ₹900 in discretionary spending this week against a stated budget of ₹700. Your 28-day savings rate was 10%. Your WEALTH score rose 1.0 points. The math is not complicated.",
     ),
     text,
   );

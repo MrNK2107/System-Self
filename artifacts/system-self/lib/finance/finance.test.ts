@@ -88,6 +88,10 @@ test("form parsing: amounts and the savings target", () => {
   assert.equal(parseSavingsTarget("25"), 0.25);
   assert.equal(parseSavingsTarget("95"), null);
   assert.equal(parseSavingsTarget("-1"), null);
+  // The server floor is 5%: below it is refused here, before a 400.
+  assert.equal(parseSavingsTarget("0"), null);
+  assert.equal(parseSavingsTarget("4.9"), null);
+  assert.equal(parseSavingsTarget("5"), 0.05);
 });
 
 test("budget draft round-trips the summary; blank fields drop the budget", () => {

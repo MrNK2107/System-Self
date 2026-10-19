@@ -22,8 +22,8 @@ import {
   ProRequiredSchema,
   SocialProfileResponseSchema,
 } from "@workspace/contracts";
-import { RANKED_DOMAINS, type RankedDomain } from "@workspace/engine";
-import { app, assertContract, auth, db, setup, skip } from "./game-test-helpers";
+import { RANKED_DOMAINS, addDays, localDate, type RankedDomain } from "@workspace/engine";
+import { TZ, app, assertContract, auth, db, setup, skip } from "./game-test-helpers";
 import { grantEntitlement } from "../services/entitlements";
 import { hiddenAndTrajectory } from "../services/state";
 
@@ -42,6 +42,14 @@ let n = 0;
 async function mk(name = "cu") {
   const username = `u_${name}${n++}`;
   const { token, id } = await setup(a(), { email: `${username}@example.com`, username });
+  // Onboarding stamps wall-clock time, which is after the test clock; pin it before the test clock so the onboarding
+  // floor on log dates never applies to these fixtures (including the 30-day PRO backfills). Rollover still starts
+  // where the wall-clock onboarding put it (the state route reads the wall clock), so nothing decays.
+  await db!.update(profiles).set({ onboardedAt: at("2026-02-01T08:00:00Z") }).where(eq(profiles.userId, id));
+  await db!
+    .update(userDayState)
+    .set({ lastRolledDate: addDays(localDate(new Date(), TZ), -1) })
+    .where(eq(userDayState.userId, id));
   return { token, id, name: username };
 }
 type U = Awaited<ReturnType<typeof mk>>;

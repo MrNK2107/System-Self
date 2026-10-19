@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { count, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { aiUsageDaily, analyticsEvents, logs, scoreEvents, users } from "@workspace/db";
+import { aiUsageDaily, analyticsEvents, logs, profiles, scoreEvents, userDayState, users } from "@workspace/db";
 import { ParseResponseSchema, VoiceResponseSchema } from "@workspace/contracts";
-import { PARSE_LIMIT_PER_DAY, VOICE_LIMIT_PER_DAY } from "@workspace/engine";
+import { PARSE_LIMIT_PER_DAY, VOICE_LIMIT_PER_DAY, addDays, localDate } from "@workspace/engine";
 import { env } from "../lib/env";
 import type { AiDeps, ModelCaller } from "../lib/ai";
 import { grantEntitlement } from "../services/entitlements";
-import { app, assertContract, auth, db, setup, skip } from "./game-test-helpers";
+import { buildUserContext } from "../services/ai-context";
+import { TZ, app, assertContract, auth, db, setup as onboard, skip } from "./game-test-helpers";
 
 after(async () => {
   await closeTestDb();
@@ -20,6 +21,17 @@ beforeEach(async () => {
 
 let clock = new Date("2026-03-10T08:00:00Z"); // 13:30 in Asia/Kolkata
 const a = (ai?: AiDeps) => app({ now: () => clock, ai });
+
+/**
+ * Onboards via the routes. Onboarding stamps wall-clock time, which is after the test clock: pin it before the test
+ * clock so the onboarding floor on log dates never applies, with rollover left where the wall-clock onboarding put it.
+ */
+async function setup(a: ReturnType<typeof app>) {
+  const u = await onboard(a);
+  await db!.update(profiles).set({ onboardedAt: new Date("2026-02-01T08:00:00Z") }).where(eq(profiles.userId, u.id));
+  await db!.update(userDayState).set({ lastRolledDate: addDays(localDate(new Date(), TZ), -1) }).where(eq(userDayState.userId, u.id));
+  return u;
+}
 
 async function withKey<T>(fn: () => Promise<T>): Promise<T> {
   const saved = env.GEMINI_API_KEY;
@@ -151,6 +163,30 @@ test("a confirmed proposal is posted to /api/logs with the original text as free
   const [row] = await db!.select().from(logs).where(eq(logs.userId, id));
   assert.equal(row!.freeText, text);
   assert.equal(row!.logType, "sleep");
+});
+
+test("M6: the AI context skips system logs and quotes a transcript shared by several proposals once", { skip }, async () => {
+  const { token, id } = await setup(a());
+  const transcript = "slept 7 hours, read 20 pages and ran 5k";
+  const send = (clientId: string, domain: string, logType: string, data: Record<string, unknown>) =>
+    request(a()).post("/api/logs").set(auth(token)).send({ clientId, domain, logType, data, freeText: transcript });
+  assert.equal((await send("v-1", "BODY", "sleep", { hours: 7, quality: 3 })).status, 201);
+  assert.equal((await send("v-2", "MIND", "reading", { pages: 20 })).status, 201);
+  await db!.insert(logs).values({
+    userId: id,
+    clientId: "recurring:sys:2026-03",
+    domain: "WEALTH",
+    logType: "income",
+    data: { amount: 5000, category: "salary", note: "Salary" },
+    system: true,
+    occurredAt: clock,
+    localDate: "2026-03-10",
+  });
+  const ctx = (await buildUserContext(db!, id, clock))!;
+  assert.equal(ctx.recentLogs.length, 2, json(ctx.recentLogs));
+  assert.ok(ctx.recentLogs.every((l) => l.domain !== "WEALTH"), "no system log");
+  assert.equal(ctx.recentLogs.filter((l) => l.text === transcript).length, 1, "the transcript once");
+  assert.deepEqual(ctx.recentLogs.map((l) => l.logType).sort(), ["reading", "sleep"]);
 });
 
 // ---- voice ----

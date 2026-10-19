@@ -1,9 +1,10 @@
 import { and, asc, desc, eq, gte, isNull, lt, lte } from "drizzle-orm";
 import { budgets, financeWeeks, financialGoals, logs, profiles, recurringIncome, users } from "@workspace/db";
 import {
-  DEFAULT_SAVINGS_TARGET,
   DISCRETIONARY_CATEGORIES,
+  SAVINGS_WINDOW_DAYS,
   addDays,
+  effectiveSavingsTarget,
   daysInMonth,
   financeTotals,
   financeVerdictLine,
@@ -77,9 +78,13 @@ export async function postRecurringIncome(tx: Tx, userId: string, date: string, 
 
 /**
  * Rollover hook for the last local date of an ISO week: the weekly WEALTH evaluation (engine weeklyFinanceChanges),
- * only when the user logged at least one WEALTH entry themselves that week. Savings rate from the week's income and
- * expenses (recurring income included); budgets from month-to-date spend through `date`. Reason `finance_week`, no
- * bonus, not activity. The finance_weeks row (primary key user + ISO week) makes it exactly once per week.
+ * only when the user logged at least one WEALTH entry themselves that week. The savings rate covers the trailing
+ * SAVINGS_WINDOW_DAYS (28) local days ending at `date`: income is the user's own income logs plus recurring auto-logs,
+ * expenses are expense logs, and a window with no income skips the savings component. A monthly salary therefore
+ * carries the weeks after it, and a late log for a closed week still counts in the next weeks' windows. Budgets use
+ * month-to-date spend through `date`. Reason `finance_week`, no bonus, not activity. The finance_weeks row (primary key
+ * user + ISO week) makes it exactly once per week, and keeps the 28-day income/expenses/rate it evaluated plus the ISO
+ * week's discretionary spend.
  */
 export async function evaluateFinanceWeek(tx: Tx, userId: string, date: string, now: Date): Promise<Notice[]> {
   if (!isLastDayOfIsoWeek(date)) return [];
@@ -100,15 +105,17 @@ export async function evaluateFinanceWeek(tx: Tx, userId: string, date: string, 
 
   const month = monthOf(date);
   const monthStart = `${month}-01`;
-  const rows = await wealthLogs(tx, userId, weekStart < monthStart ? weekStart : monthStart, date);
+  const windowStart = addDays(date, -(SAVINGS_WINDOW_DAYS - 1));
+  const rows = await wealthLogs(tx, userId, windowStart < monthStart ? windowStart : monthStart, date);
+  const window = financeTotals(rows.filter((r) => r.localDate >= windowStart));
   const week = financeTotals(rows.filter((r) => r.localDate >= weekStart));
   const monthToDate = financeTotals(rows.filter((r) => r.localDate >= monthStart));
   const userBudgets = await loadBudgets(tx, userId);
   const [profile] = await tx.select({ target: profiles.savingsTarget }).from(profiles).where(eq(profiles.userId, userId)).limit(1);
   const result = weeklyFinanceChanges(
-    { income: week.income, expenses: week.expenses, categorySpend: monthToDate.byCategory },
+    { income: window.income, expenses: window.expenses, categorySpend: monthToDate.byCategory },
     userBudgets,
-    profile?.target ?? DEFAULT_SAVINGS_TARGET,
+    effectiveSavingsTarget(profile?.target),
   );
   const applied = await applyChanges(
     tx,
@@ -121,8 +128,8 @@ export async function evaluateFinanceWeek(tx: Tx, userId: string, date: string, 
   await tx
     .update(financeWeeks)
     .set({
-      income: week.income,
-      expenses: week.expenses,
+      income: window.income,
+      expenses: window.expenses,
       savingsRate: result.savingsRate,
       discretionary: Math.round(discretionary * 100) / 100,
       discretionaryBudget: weeklyDiscretionaryBudget(userBudgets, daysInMonth(month)),
@@ -148,7 +155,13 @@ export async function financeVerdictFor(tx: Reader, userId: string, today: strin
     .limit(1);
   if (!row || row.week.quotedAt !== null || row.week.discretionaryBudget === null) return null;
   const line = financeVerdictLine(
-    { discretionary: row.week.discretionary, budget: row.week.discretionaryBudget, delta: row.week.delta },
+    {
+      discretionary: row.week.discretionary,
+      budget: row.week.discretionaryBudget,
+      delta: row.week.delta,
+      // The 28-day rate the evaluation scored; no income in the window means savings were skipped.
+      savingsRate: row.week.income > 0 ? row.week.savingsRate : null,
+    },
     (n) => formatMoney(n, row.currency),
   );
   return { line, weekKey: row.week.weekKey };

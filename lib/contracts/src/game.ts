@@ -70,7 +70,8 @@ export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
 /** ISO 4217 alphabetic code, e.g. INR (finance amounts are in the profile currency). */
 export const CurrencySchema = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Expected an ISO 4217 code");
 /** The stated savings rate target the weekly WEALTH evaluation compares against. */
-export const SavingsTargetSchema = z.number().min(0).max(0.9);
+/** 5%..90% (engine MIN_SAVINGS_TARGET / MAX_SAVINGS_TARGET; older stored values below 5% are clamped at read time). */
+export const SavingsTargetSchema = z.number().min(0.05).max(0.9);
 
 /** PATCH /api/profile: any subset of these, at least one. */
 export const ProfileUpdateSchema = z
@@ -292,8 +293,16 @@ export type GameState = z.infer<typeof GameStateSchema>;
 
 const ClientIdSchema = z.string().min(1).max(200);
 
+/** clientId prefixes only the server writes on logs (recurring income `recurring:<id>:<month>`, goal contributions `goal:<id>:<key>`). */
+export const RESERVED_CLIENT_ID_PREFIXES = ["recurring:", "goal:"] as const;
+
+/** A client-chosen log clientId: never one of the server-reserved prefixes, so a client cannot pre-empt a server log. */
+export const UserLogClientIdSchema = ClientIdSchema.refine((v) => !RESERVED_CLIENT_ID_PREFIXES.some((p) => v.startsWith(p)), {
+  message: "clientId uses a reserved prefix",
+});
+
 export const LogRequestSchema = z.object({
-  clientId: ClientIdSchema,
+  clientId: UserLogClientIdSchema,
   domain: RankedDomainSchema,
   logType: z.string().min(1).max(40),
   data: z

@@ -20,6 +20,11 @@ export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export const DISCRETIONARY_CATEGORIES: readonly ExpenseCategory[] = ["shopping", "entertainment", "food"];
 
 export const DEFAULT_SAVINGS_TARGET = 0.2;
+/** The savings target range (the contract enforces it on write; effectiveSavingsTarget clamps older stored values). */
+export const MIN_SAVINGS_TARGET = 0.05;
+export const MAX_SAVINGS_TARGET = 0.9;
+/** The weekly evaluation's savings rate covers the trailing 28 local days ending at the week close, not the ISO week. */
+export const SAVINGS_WINDOW_DAYS = 28;
 export const SAVINGS_HIT_DELTA = 2.0;
 export const SAVINGS_MISS_DELTA = -1.0;
 export const BUDGET_OVER_DELTA = -0.5;
@@ -27,6 +32,12 @@ export const BUDGET_PENALTY_CAP = -2.0;
 export const BUDGET_CLEAN_DELTA = 1.0;
 
 const round2 = (n: number) => Math.round(Number(n.toPrecision(12)) * 100) / 100;
+
+/** The target the evaluation uses: the stored one clamped to [MIN, MAX] (rows written before the 0.05 floor may hold less); default when unset. */
+export function effectiveSavingsTarget(stored: number | null | undefined): number {
+  if (stored === null || stored === undefined || !Number.isFinite(stored)) return DEFAULT_SAVINGS_TARGET;
+  return Math.min(MAX_SAVINGS_TARGET, Math.max(MIN_SAVINGS_TARGET, stored));
+}
 
 export const normalizeCategory = (category: string): string => category.trim().toLowerCase();
 
@@ -37,7 +48,10 @@ export function savingsRate(income: number, expenses: number): number {
 }
 
 export interface FinanceWeekSummary {
-  /** Income and expenses logged in the ISO week (Monday..Sunday). */
+  /**
+   * Income (the user's own income logs plus recurring auto-logs) and expenses over the trailing SAVINGS_WINDOW_DAYS
+   * local days ending at the week close.
+   */
   income: number;
   expenses: number;
   /** Month-to-date expense per normalized category, through the week's last day. */
@@ -52,6 +66,8 @@ export interface Budget {
 export interface FinanceWeekResult {
   savingsRate: number;
   savingsDelta: number;
+  /** False when the window had no income: the savings component was skipped (0), not scored as a miss. */
+  savingsEvaluated: boolean;
   overBudget: string[];
   budgetDelta: number;
   /** WEALTH changes (never bonus, never activity); zero components are left out. */
@@ -59,13 +75,15 @@ export interface FinanceWeekResult {
 }
 
 /**
- * The weekly WEALTH evaluation. Savings rate vs target: >= target +2.0, >= target/2 0, else -1.0. Budgets: every
+ * The weekly WEALTH evaluation. Savings rate over the trailing 28 days vs target: >= target +2.0, >= target/2 0,
+ * else -1.0; no income in the window skips the savings component (0). Budgets: every
  * category whose month-to-date spend is over its monthly limit -0.5 (at most -2.0 in total); at least one budget set
  * and none over +1.0; no budgets 0.
  */
 export function weeklyFinanceChanges(summary: FinanceWeekSummary, budgets: readonly Budget[], target: number): FinanceWeekResult {
   const rate = savingsRate(summary.income, summary.expenses);
-  const savingsDelta = rate >= target ? SAVINGS_HIT_DELTA : rate >= target / 2 ? 0 : SAVINGS_MISS_DELTA;
+  const savingsEvaluated = summary.income > 0;
+  const savingsDelta = !savingsEvaluated ? 0 : rate >= target ? SAVINGS_HIT_DELTA : rate >= target / 2 ? 0 : SAVINGS_MISS_DELTA;
   const overBudget = budgets
     .filter((b) => (summary.categorySpend[normalizeCategory(b.category)] ?? 0) > b.monthlyLimit)
     .map((b) => normalizeCategory(b.category));
@@ -74,7 +92,7 @@ export function weeklyFinanceChanges(summary: FinanceWeekSummary, budgets: reado
   const changes: ChangeSpec[] = [savingsDelta, budgetDelta]
     .filter((delta) => delta !== 0)
     .map((delta) => ({ domain: "WEALTH", delta, bonus: false, activity: false }));
-  return { savingsRate: rate, savingsDelta, overBudget, budgetDelta, changes };
+  return { savingsRate: rate, savingsDelta, savingsEvaluated, overBudget, budgetDelta, changes };
 }
 
 /** Days in a `YYYY-MM` month. */
@@ -106,13 +124,23 @@ export function formatMoney(amount: number, currency: string, locale = "en-US"):
   }
 }
 
-/** The SYSTEM verdict on a closed finance week (nightly debrief). `delta` is the WEALTH change the evaluation applied. */
+/**
+ * The SYSTEM verdict on a closed finance week (nightly debrief). `delta` is the WEALTH change the evaluation applied.
+ * `savingsRate` is the 28-day rate the evaluation scored, or null when the window had no income (savings skipped);
+ * left out, the line carries no savings sentence.
+ */
 export function financeVerdictLine(
-  v: { discretionary: number; budget: number; delta: number },
+  v: { discretionary: number; budget: number; delta: number; savingsRate?: number | null },
   money: (amount: number) => string,
 ): string {
   const moved = v.delta > 0 ? "rose" : v.delta < 0 ? "declined" : "moved";
-  return `You logged ${money(v.discretionary)} in discretionary spending this week against a stated budget of ${money(v.budget)}. Your WEALTH score ${moved} ${Math.abs(v.delta).toFixed(1)} points. The math is not complicated.`;
+  const savings =
+    v.savingsRate === undefined
+      ? ""
+      : v.savingsRate === null
+        ? " No income was logged in the last 28 days, so savings were not scored."
+        : ` Your 28-day savings rate was ${Math.round(v.savingsRate * 100)}%.`;
+  return `You logged ${money(v.discretionary)} in discretionary spending this week against a stated budget of ${money(v.budget)}.${savings} Your WEALTH score ${moved} ${Math.abs(v.delta).toFixed(1)} points. The math is not complicated.`;
 }
 
 export const goalAchieved = (saved: number, target: number): boolean => saved >= target;

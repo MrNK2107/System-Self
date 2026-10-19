@@ -80,10 +80,10 @@ export function parseDeadline(text: string): string | null | undefined {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === t ? t : undefined;
 }
 
-/** A savings target typed as a percentage (0..90) to the 0..0.9 fraction the server stores; null when out of range. */
+/** A savings target typed as a percentage (5..90) to the 0.05..0.9 fraction the server stores; null when out of range. */
 export function parseSavingsTarget(text: string): number | null {
   const n = Number(text.trim().replace(/%$/, ""));
-  if (text.trim() === "" || !Number.isFinite(n) || n < 0 || n > 90) return null;
+  if (text.trim() === "" || !Number.isFinite(n) || n < 5 || n > 90) return null;
   return Math.round(n * 10) / 1000;
 }
 

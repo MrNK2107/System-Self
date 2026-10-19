@@ -1,4 +1,6 @@
-import type { Db } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { profiles, users, type Db } from "@workspace/db";
+import { localDate } from "@workspace/engine";
 import type { HandlerResult } from "./idempotency";
 import { isPro } from "./entitlements";
 
@@ -20,9 +22,16 @@ export function occurredAtError(now: Date, occurredAt: Date, opts: { pro: boolea
   return null;
 }
 
+/** The 422 for a log dated before the user's onboarding local date: PRO's window must not backfill a history (and a streak) that predates the account. */
+export const BEFORE_ONBOARDING: HandlerResult = {
+  status: 422,
+  body: { error: "Log is dated before you started", code: "before_onboarding" },
+};
+
 /**
- * What the log routes call: occurredAtError with the user's tier. PRO is looked up only when the log is older than the
- * free window, so the common path (a log from the last two days) costs no query.
+ * What the log routes call: occurredAtError with the user's tier, then the onboarding floor (a log whose local date is
+ * before the onboarding local date is 422 before_onboarding). PRO is looked up only when the log is older than the
+ * free window. A user who is not onboarded passes here; the route answers 409 not_onboarded.
  */
 export async function checkOccurredAt(
   db: Pick<Db, "select">,
@@ -31,5 +40,14 @@ export async function checkOccurredAt(
   occurredAt: Date,
 ): Promise<HandlerResult | null> {
   const pro = now.getTime() - occurredAt.getTime() > RETROACTIVE_LIMIT_MS && (await isPro(db, userId, now));
-  return occurredAtError(now, occurredAt, { pro });
+  const bad = occurredAtError(now, occurredAt, { pro });
+  if (bad) return bad;
+  const [row] = await db
+    .select({ onboardedAt: profiles.onboardedAt, tz: users.timezone })
+    .from(profiles)
+    .innerJoin(users, eq(users.id, profiles.userId))
+    .where(eq(profiles.userId, userId))
+    .limit(1);
+  if (row && localDate(occurredAt, row.tz) < localDate(row.onboardedAt, row.tz)) return BEFORE_ONBOARDING;
+  return null;
 }

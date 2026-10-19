@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { domainScores, idempotencyKeys, logs, notices, scoreEvents } from "@workspace/db";
+import { domainScores, idempotencyKeys, logs, notices, profiles, scoreEvents } from "@workspace/db";
 import { addDays, localDate } from "@workspace/engine";
 import { GameStateSchema, LogListResponseSchema, LogResponseSchema, NoticeListResponseSchema } from "@workspace/contracts";
 import { app, auth, db, score, setup, skip, TZ, assertContract, assertStoredNoticesMatchContract } from "./game-test-helpers";
@@ -98,8 +98,10 @@ test("forbidden log gives +5 to its domain and -2 DISCIPLINE", { skip }, async (
 
 test("two logs at 23:50 and 00:10 Asia/Kolkata give streak 2", { skip }, async () => {
   const a = app();
-  const { token } = await setup(a);
+  const { token, id } = await setup(a);
   const now = new Date();
+  // Onboarded three days ago (nothing rolled yet), so both backdated dates are on or after the onboarding date.
+  await db!.update(profiles).set({ onboardedAt: new Date(now.getTime() - 3 * 86400_000) }).where(eq(profiles.userId, id));
   const today = localDate(now, TZ);
   const ist = new Date(now.getTime() + 5.5 * 3600_000);
   const minutesNow = ist.getUTCHours() * 60 + ist.getUTCMinutes();

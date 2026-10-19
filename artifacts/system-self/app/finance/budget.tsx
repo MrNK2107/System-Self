@@ -70,7 +70,7 @@ export default function BudgetScreen() {
   const saveSettings = async () => {
     const savingsTarget = parseSavingsTarget(target);
     const code = currency.trim().toUpperCase();
-    if (savingsTarget === null) return setNotice({ tone: "error", message: "The savings target is a percentage from 0 to 90." });
+    if (savingsTarget === null) return setNotice({ tone: "error", message: "The savings target is a percentage from 5 to 90." });
     if (!/^[A-Z]{3}$/.test(code)) return setNotice({ tone: "error", message: "The currency is a three-letter code, like INR or USD." });
     await attempt(() => actions.saveSettings({ savingsTarget, currency: code }), "Target recorded.");
   };

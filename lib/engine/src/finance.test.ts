@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_SAVINGS_TARGET,
   EXPENSE_CATEGORIES,
+  MIN_SAVINGS_TARGET,
+  SAVINGS_WINDOW_DAYS,
   daysInMonth,
+  effectiveSavingsTarget,
   financeVerdictLine,
   formatMoney,
   goalAchieved,
@@ -50,11 +53,28 @@ test("savings rate vs target: >= target +2, >= target/2 0, else -1", () => {
   assert.deepEqual(at(1000, 900).changes, [], "exactly target/2: 0, no change emitted");
   assert.equal(at(1000, 900).savingsDelta, 0);
   assert.deepEqual(at(1000, 950).changes, [wealth(-1)]);
-  // Review focus: income 0 with expenses > 0 is a savings rate of 0, -1.0 against any positive target.
-  const zero = at(0, 500);
+});
+
+test("no income in the 28-day window: the savings component is skipped (0), never -1.0", () => {
+  assert.equal(SAVINGS_WINDOW_DAYS, 28);
+  const zero = weeklyFinanceChanges({ income: 0, expenses: 500, categorySpend: {} }, [], 0.2);
   assert.equal(zero.savingsRate, 0);
-  assert.deepEqual(zero.changes, [wealth(-1)]);
-  assert.deepEqual(at(0, 500, 0.05).changes, [wealth(-1)]);
+  assert.equal(zero.savingsDelta, 0);
+  assert.equal(zero.savingsEvaluated, false);
+  assert.deepEqual(zero.changes, []);
+  // The budget component still runs on its own.
+  const withBudget = weeklyFinanceChanges({ income: 0, expenses: 500, categorySpend: { food: 50 } }, [{ category: "food", monthlyLimit: 100 }], 0.2);
+  assert.deepEqual(withBudget.changes, [wealth(1)]);
+  assert.equal(weeklyFinanceChanges({ income: 1000, expenses: 950, categorySpend: {} }, [], 0.2).savingsEvaluated, true);
+});
+
+test("savings target floor: stored targets below 0.05 are clamped at read time, max 0.9", () => {
+  assert.equal(MIN_SAVINGS_TARGET, 0.05);
+  assert.equal(effectiveSavingsTarget(0), 0.05);
+  assert.equal(effectiveSavingsTarget(0.01), 0.05);
+  assert.equal(effectiveSavingsTarget(0.2), 0.2);
+  assert.equal(effectiveSavingsTarget(0.95), 0.9);
+  assert.equal(effectiveSavingsTarget(null), DEFAULT_SAVINGS_TARGET);
 });
 
 test("budgets: -0.5 per category over the monthly limit, capped at -2.0; none over +1.0; none set 0", () => {
@@ -117,6 +137,15 @@ test("verdict line for the nightly debrief", () => {
   );
   assert.match(financeVerdictLine({ discretionary: 10, budget: 20, delta: 3 }, money), /Your WEALTH score rose 3\.0 points\./);
   assert.match(financeVerdictLine({ discretionary: 10, budget: 20, delta: 0 }, money), /Your WEALTH score moved 0\.0 points\./);
+  // The savings figure the evaluation used is the trailing 28 days, and the line says so.
+  assert.equal(
+    financeVerdictLine({ discretionary: 900, budget: 700, delta: 1, savingsRate: 0.1 }, money),
+    "You logged ₹900 in discretionary spending this week against a stated budget of ₹700. Your 28-day savings rate was 10%. Your WEALTH score rose 1.0 points. The math is not complicated.",
+  );
+  assert.match(
+    financeVerdictLine({ discretionary: 900, budget: 700, delta: 0, savingsRate: null }, money),
+    /No income was logged in the last 28 days, so savings were not scored\. Your WEALTH score/,
+  );
   assert.equal(formatMoney(1234.5, "USD"), "$1,234.50");
   assert.equal(formatMoney(12, "ZZZ").includes("12"), true);
 });

@@ -88,9 +88,11 @@ export const financeWeeks = pgTable(
     userId: userIdCol(),
     weekKey: text("week_key").notNull(), // YYYY-Www
     evaluatedOn: date("evaluated_on", { mode: "string" }).notNull(),
+    /** Income, expenses and savings rate over the trailing 28 local days ending at evaluatedOn (what was scored). */
     income: doublePrecision("income").notNull().default(0),
     expenses: doublePrecision("expenses").notNull().default(0),
     savingsRate: real("savings_rate").notNull().default(0),
+    /** Discretionary spend in the ISO week itself. */
     discretionary: doublePrecision("discretionary").notNull().default(0),
     /** The week's discretionary budget, or null when no discretionary category has a budget. */
     discretionaryBudget: doublePrecision("discretionary_budget"),

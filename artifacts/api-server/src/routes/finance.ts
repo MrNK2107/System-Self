@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { budgets, financialGoals, logs, netWorthSnapshots, profiles, recurringIncome, type Db } from "@workspace/db";
-import { EXPENSE_CATEGORIES, localDate, logChanges, monthOf, savingsRate } from "@workspace/engine";
+import { EXPENSE_CATEGORIES, effectiveSavingsTarget, localDate, logChanges, monthOf, savingsRate } from "@workspace/engine";
 import {
   BudgetsRequestSchema,
   FinanceSummaryQuerySchema,
@@ -88,7 +88,7 @@ export function financeRoutes(db: Db, clock: () => Date = () => new Date()): IRo
       income: totals.income,
       expenses: totals.expenses,
       savingsRate: round2(savingsRate(totals.income, totals.expenses) * 100) / 100,
-      target: profile.target,
+      target: effectiveSavingsTarget(profile.target),
       byCategory: [...EXPENSE_CATEGORIES, ...extra].map((category) => ({
         category,
         spent: totals.byCategory[category] ?? 0,
