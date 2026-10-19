@@ -177,3 +177,11 @@ Every call I made on your behalf while building the product, written as **decisi
 - refresh-token prune grace = max(REFRESH_TOKEN_TTL_DAYS, 30) days instead of 7 — reuse detection and orphan push-token pruning need revoked rows that long — cost: slightly more rows
 - per-IP auth ceiling mounts before express.json; add --go to dev script/README/HOLD; privacy text "30 days, or the session lifetime if longer"; DEPLOYMENT note on per-account budgets
 
+## device QA (after P8)
+
+- Expo Go on Android logs a red toast when expo-notifications loads (remote push removed from Expo Go in SDK 53); hide only that exact dev-only message via LogBox, keep local reminders working — store builds are unaffected — cost if wrong: a real notifications error with the same prefix would be hidden in dev only
+- Life contexts get separate user-facing copy (`blurb`); the model prompt line stays server-only — prompt text is written for the model, not people — cost: two strings per context to keep in sync
+- Keyboard avoidance uses `padding` on Android too for the modal sheets with text inputs — Android edge-to-edge (SDK 54) does not resize transparent modals — cost: none seen on device
+- Export filenames use the account's local date — a user's export taken after local midnight was dated the previous day — cost: one extra indexed read per export
+- Merged to local `main` by fast-forward; not pushed — pushing publishes the code, which stays your call (HOLD H-12)
+
