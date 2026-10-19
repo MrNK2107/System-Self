@@ -50,3 +50,7 @@ Thumbs.db
 
 # Production env (copy of .env.prod.example)
 .env.prod
+
+# Load test (scripts/load): tokens of seeded users and run results
+scripts/load/.tokens.json
+scripts/load/results/

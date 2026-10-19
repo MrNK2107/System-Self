@@ -111,6 +111,23 @@ test("DB_POOL_MAX defaults to 10 and must be a positive integer", () => {
   assert.throws(() => parseEnv({ NODE_ENV: "test", DB_POOL_MAX: "0" }), /DB_POOL_MAX/);
 });
 
+test("RATE_LIMIT_DISABLED: refused in production unless LOAD_TEST=1; allowed in development/test; typos rejected", () => {
+  assert.throws(() => parseEnv({ ...PROD_BASE, RATE_LIMIT_DISABLED: "1" }), /RATE_LIMIT_DISABLED/);
+  // NODE_ENV unset is production-like.
+  const { NODE_ENV: _unset, ...noNodeEnv } = PROD_BASE;
+  assert.throws(() => parseEnv({ ...noNodeEnv, RATE_LIMIT_DISABLED: "1" }), /RATE_LIMIT_DISABLED/);
+  assert.throws(() => parseEnv({ ...PROD_BASE, RATE_LIMIT_DISABLED: "1", LOAD_TEST: "0" }), /RATE_LIMIT_DISABLED/);
+  assert.throws(() => parseEnv({ ...PROD_BASE, RATE_LIMIT_DISABLED: "1", LOAD_TEST: "true" }), /LOAD_TEST/);
+  assert.throws(() => parseEnv({ ...PROD_BASE, RATE_LIMIT_DISABLED: "yes", LOAD_TEST: "1" }), /RATE_LIMIT_DISABLED/);
+  const load = parseEnv({ ...PROD_BASE, RATE_LIMIT_DISABLED: "1", LOAD_TEST: "1" });
+  assert.equal(load.RATE_LIMIT_DISABLED, true);
+  assert.equal(load.LOAD_TEST, true);
+  assert.equal(parseEnv(PROD_BASE).RATE_LIMIT_DISABLED, false);
+  assert.equal(parseEnv({ ...PROD_BASE, LOAD_TEST: "1" }).RATE_LIMIT_DISABLED, false, "LOAD_TEST alone changes nothing");
+  assert.equal(parseEnv({ NODE_ENV: "development", RATE_LIMIT_DISABLED: "1" }).RATE_LIMIT_DISABLED, true);
+  assert.equal(parseEnv({ NODE_ENV: "test", RATE_LIMIT_DISABLED: "1" }).RATE_LIMIT_DISABLED, true);
+});
+
 test("formatEnvError names every offending variable on one line each", () => {
   let message = "";
   try {

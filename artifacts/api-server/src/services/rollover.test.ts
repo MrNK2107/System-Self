@@ -21,7 +21,7 @@ import {
 import { RANKED_DOMAINS, addDays, endOfLocalDay, hiddenScore, localDate } from "@workspace/engine";
 import { app, auth, db, score, setup, skip, TZ, assertStoredNoticesMatchContract } from "../routes/game-test-helpers";
 import { createQuests } from "./quests";
-import { claimDueUsers, ensureRolledOver, rolloverDate } from "./rollover";
+import { claimDueUsers, ensureRolledOver, ensureRolledOverIfDue, rolloverDate } from "./rollover";
 import { withUserLock } from "./user-lock";
 import { runLoop, runWorkerTick } from "../jobs/run-loop";
 import { signAccessToken } from "../lib/auth/tokens";
@@ -720,6 +720,41 @@ test("ensureRolledOver writes nothing when nothing is due and the schedule is un
   await ensureRolledOver(db!, id, now);
   await ensureRolledOver(db!, id, at(addDays(D0, 1), "20:00"));
   assert.equal(await version(), before);
+});
+
+test("ensureRolledOverIfDue: nothing due -> no locked catch-up at all; due -> the same catch-up as ensureRolledOver", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  // A stored lease the full catch-up would rewrite: left alone proves the fast path never ran it.
+  const lease = new Date(at(D0).getTime() + 5 * 60_000);
+  await db!.update(userDayState).set({ nextRolloverAt: lease }).where(eq(userDayState.userId, id));
+  await ensureRolledOverIfDue(db!, id, at(D0, "23:00"));
+  // D0 ends at midnight; its grace runs to 02:00 on D0+1, so at 01:59 it is still not due.
+  await ensureRolledOverIfDue(db!, id, at(addDays(D0, 1), "01:59"));
+  let [day] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
+  assert.equal(day!.lastRolledDate, null);
+  assert.equal(day!.nextRolloverAt.getTime(), lease.getTime());
+
+  // Past the grace window D0 is due: rolled, and the schedule moves to D0+1's due instant.
+  await ensureRolledOverIfDue(db!, id, at(addDays(D0, 1), "02:01"));
+  [day] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
+  assert.equal(day!.lastRolledDate, D0);
+  assert.equal(day!.nextRolloverAt.getTime(), new Date(endOfLocalDay(addDays(D0, 1), TZ).getTime() + 2 * 3600_000).getTime());
+  const snaps = await db!.select().from(dailySnapshots).where(eq(dailySnapshots.userId, id));
+  assert.deepEqual(snaps.map((s) => s.localDate).sort(), [D0]);
+
+  // A multi-day gap catches up every due date, like ensureRolledOver.
+  await ensureRolledOverIfDue(db!, id, at(addDays(D0, 4), "12:00"));
+  [day] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
+  assert.equal(day!.lastRolledDate, addDays(D0, 3));
+});
+
+test("ensureRolledOverIfDue without a profile falls back to ensureRolledOver (which backs the schedule off)", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  await db!.delete(profiles).where(eq(profiles.userId, id));
+  const now = at(addDays(D0, 3));
+  await ensureRolledOverIfDue(db!, id, now);
+  const [day] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
+  assert.equal(day!.nextRolloverAt.getTime(), now.getTime() + 86_400_000);
 });
 
 // --- activity inside the grace window rolls the previous dates first -------------------------

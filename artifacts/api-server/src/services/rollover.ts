@@ -382,13 +382,8 @@ export async function rollOverDue(tx: Tx, userId: string, now: Date, opts: { bef
   const tz = user.timezone;
   const yesterday = addDays(localDate(now, tz), -1);
   // Passive: yesterday once its grace window has passed, else the day before. Activity: the day before `before`.
-  const lastDue =
-    opts.before !== undefined
-      ? minDate(addDays(opts.before, -1), yesterday)
-      : now.getTime() >= rolloverDueAt(yesterday, tz).getTime()
-        ? yesterday
-        : addDays(yesterday, -1);
-  let start = day.lastRolledDate !== null ? addDays(day.lastRolledDate, 1) : localDate(profile.onboardedAt, tz);
+  const lastDue = opts.before !== undefined ? minDate(addDays(opts.before, -1), yesterday) : passiveLastDue(now, tz);
+  let start = firstUnrolledDate(day.lastRolledDate, profile.onboardedAt, tz);
 
   if (daysBetween(start, lastDue) + 1 > MAX_CATCH_UP_DAYS) {
     const lastCollapsed = addDays(lastDue, -MAX_CATCH_UP_DAYS);
@@ -411,6 +406,17 @@ export async function rollOverDue(tx: Tx, userId: string, now: Date, opts: { bef
 
 const minDate = (a: string, b: string) => (a < b ? a : b);
 
+/** The last local date a passive catch-up may roll at `now`: yesterday once its grace window has passed, else the day before. */
+function passiveLastDue(now: Date, tz: string): string {
+  const yesterday = addDays(localDate(now, tz), -1);
+  return now.getTime() >= rolloverDueAt(yesterday, tz).getTime() ? yesterday : addDays(yesterday, -1);
+}
+
+/** The first local date not yet rolled: the day after `lastRolledDate`, or the onboarding date. */
+function firstUnrolledDate(lastRolledDate: string | null, onboardedAt: Date, tz: string): string {
+  return lastRolledDate !== null ? addDays(lastRolledDate, 1) : localDate(onboardedAt, tz);
+}
+
 /** For a write that counts as activity (or scores) on the user's local today: rolls every date before today. */
 export async function rollOverBeforeToday(tx: Tx, userId: string, now: Date): Promise<void> {
   const [user] = await tx.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
@@ -420,6 +426,25 @@ export async function rollOverBeforeToday(tx: Tx, userId: string, now: Date): Pr
 /** rollOverDue in its own per-user locked transaction (GET /state and the worker). */
 export async function ensureRolledOver(db: Db, userId: string, now: Date): Promise<void> {
   await withUserLock(db, userId, (tx) => rollOverDue(tx, userId, now));
+}
+
+/**
+ * GET /state's catch-up: one unlocked read decides whether a passive catch-up has anything to roll (the same test
+ * rollOverDue makes), and only then takes the per-user lock. Reading without the lock is safe: a date only ever becomes
+ * due with time, and a concurrent rollover can only make a stale read look due (then the locked path re-checks).
+ * Unlike ensureRolledOver it does not rewrite a stale schedule when nothing is due; that is the worker's job (it claims
+ * the user when the stored nextRolloverAt passes and ensureRolledOver resets it), so the worker keeps ensureRolledOver.
+ */
+export async function ensureRolledOverIfDue(db: Db, userId: string, now: Date): Promise<void> {
+  const [row] = await db
+    .select({ tz: users.timezone, lastRolledDate: userDayState.lastRolledDate, onboardedAt: profiles.onboardedAt })
+    .from(userDayState)
+    .innerJoin(users, eq(users.id, userDayState.userId))
+    .innerJoin(profiles, eq(profiles.userId, userDayState.userId))
+    .where(eq(userDayState.userId, userId))
+    .limit(1);
+  if (row && firstUnrolledDate(row.lastRolledDate, row.onboardedAt, row.tz) > passiveLastDue(now, row.tz)) return;
+  await ensureRolledOver(db, userId, now);
 }
 
 /**

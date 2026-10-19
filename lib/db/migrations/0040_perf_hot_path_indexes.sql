@@ -1,0 +1,3 @@
+CREATE INDEX "notices_user_unseen_idx" ON "notices" USING btree ("user_id","created_at","id") WHERE "notices"."seen_at" is null;--> statement-breakpoint
+CREATE INDEX "quests_user_resolved_date_idx" ON "quests" USING btree ("user_id","resolved_local_date") WHERE "quests"."resolved_local_date" is not null;--> statement-breakpoint
+CREATE INDEX "quests_active_deadline_idx" ON "quests" USING btree ("expires_at") WHERE "quests"."status" = 'active' and "quests"."bonus" = false;

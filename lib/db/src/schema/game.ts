@@ -150,7 +150,14 @@ export const quests = pgTable(
     bonus: boolean("bonus").notNull().default(false),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
-  (t) => [index("quests_user_status_expires_idx").on(t.userId, t.status, t.expiresAt)],
+  (t) => [
+    index("quests_user_status_expires_idx").on(t.userId, t.status, t.expiresAt),
+    // Resolved-quest windows per user (completion multiplier in the game state and rollover, GET /quests recent):
+    // a range on the resolved date instead of every quest the user ever had.
+    index("quests_user_resolved_date_idx").on(t.userId, t.resolvedLocalDate).where(sql`${t.resolvedLocalDate} is not null`),
+    // The quest-deadline notice job scans active, non-bonus quests expiring soon across all users.
+    index("quests_active_deadline_idx").on(t.expiresAt).where(sql`${t.status} = 'active' and ${t.bonus} = false`),
+  ],
 );
 
 export const questChains = pgTable(
@@ -218,6 +225,9 @@ export const notices = pgTable(
   },
   (t) => [
     index("notices_user_seen_created_idx").on(t.userId, t.seenAt, t.createdAt),
+    // A user's unseen notices oldest first (the game state's notice page): an exact ordered range, so the planner never
+    // walks notices_created_idx across every user's notices instead.
+    index("notices_user_unseen_idx").on(t.userId, t.createdAt, t.id).where(sql`${t.seenAt} is null`),
     index("notices_created_idx").on(t.createdAt),
   ],
 );

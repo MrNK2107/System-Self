@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import type { Db } from "@workspace/db";
 import { StateQuerySchema } from "@workspace/contracts";
-import { ensureRolledOver } from "../services/rollover";
+import { ensureRolledOverIfDue } from "../services/rollover";
 import { buildGameState } from "../services/state";
 
 export function stateRoutes(db: Db): IRouter {
@@ -10,7 +10,8 @@ export function stateRoutes(db: Db): IRouter {
   router.get("/state", async (req, res) => {
     const { noticeKinds, uiState } = StateQuerySchema.parse(req.query);
     const now = new Date();
-    await ensureRolledOver(db, req.user!.id, now);
+    // Hot path: skips the locked transaction when nothing is due (almost every call).
+    await ensureRolledOverIfDue(db, req.user!.id, now);
     const state = await buildGameState(db, req.user!.id, now, { noticeKinds });
     if (!state) {
       res.status(404).json({ error: "Not onboarded", code: "not_onboarded" });

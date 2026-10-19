@@ -20,6 +20,16 @@ test("TRUST_PROXY=1: different X-Forwarded-For IPs get separate login limiter bu
   assert.equal(other.status, 503);
 });
 
+test("rateLimitDisabled (load-test switch): no limiter answers 429", async () => {
+  const a = createApp({ db: null, mailer, rateLimitDisabled: true });
+  for (let i = 0; i < 15; i++) {
+    assert.equal((await request(a).post("/api/auth/login").send(login)).status, 503, `login ${i + 1}`);
+  }
+  for (let i = 0; i < env.RATE_LIMIT_MAX + 5; i++) {
+    assert.equal((await request(a).get("/api/nope")).status, 404, `global ${i + 1}`);
+  }
+});
+
 test("health probes are exempt from the global rate limiter", async () => {
   const a = createApp({ db: null, mailer });
   for (let i = 0; i < env.RATE_LIMIT_MAX + 5; i++) {

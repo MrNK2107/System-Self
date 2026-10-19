@@ -26,6 +26,7 @@ Optional tuning (defaults shown):
 - `GEMINI_RETRY_BASE_MS=250`
 - `RATE_LIMIT_WINDOW_MS=60000`
 - `RATE_LIMIT_MAX=60`
+- `RATE_LIMIT_DISABLED` / `LOAD_TEST`: load-test targets only (see `docs/PERFORMANCE.md`). The API refuses to boot outside development/test with `RATE_LIMIT_DISABLED=1` unless `LOAD_TEST=1` is also set. Never set either in a deployment.
 - `LOG_LEVEL=info` (defaults to `silent` when `NODE_ENV=test`)
 
 ### Reverse proxies (`TRUST_PROXY`)

@@ -2,8 +2,7 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src"]
+  "include": ["src", "load", "../artifacts/api-server/src/types/express.d.ts"]
 }

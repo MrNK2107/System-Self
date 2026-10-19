@@ -5,10 +5,17 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
+    "load:seed": "tsx ./load/seed.ts",
+    "load:run": "tsx ./load/run.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@types/autocannon": "^7.12.7",
     "@types/node": "catalog:",
+    "@workspace/db": "workspace:*",
+    "@workspace/engine": "workspace:*",
+    "autocannon": "^8.0.0",
+    "drizzle-orm": "catalog:",
     "tsx": "catalog:"
   }
 }

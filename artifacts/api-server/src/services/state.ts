@@ -33,6 +33,7 @@ import { toNotice, toShadowState } from "./scoring";
 import { currentSeasons } from "./seasons";
 import { countsForRank } from "./quests";
 import { isPro } from "./entitlements";
+import { reads } from "../lib/reads";
 
 /**
  * The oldest NOTICE_PAGE_SIZE unseen notices, and whether more are waiting. With `kinds` only those kinds are
@@ -57,6 +58,21 @@ export async function unseenNotices(
 
 export type Trajectory = "up" | "stable" | "down";
 
+/** The newest 30 snapshots of each of many users. */
+function recentSnapshotsOf(db: Pick<Db, "select">, ids: string[]) {
+  const ranked = db
+    .select({
+      userId: dailySnapshots.userId,
+      date: dailySnapshots.localDate,
+      hidden: dailySnapshots.hidden,
+      rn: sql<number>`row_number() over (partition by ${dailySnapshots.userId} order by ${dailySnapshots.localDate} desc)`.as("rn"),
+    })
+    .from(dailySnapshots)
+    .where(inArray(dailySnapshots.userId, ids))
+    .as("ranked");
+  return db.select({ userId: ranked.userId, date: ranked.date, hidden: ranked.hidden }).from(ranked).where(lte(ranked.rn, 30));
+}
+
 /**
  * Hidden score (server-side only: callers must never put it in a response) and 7-day trajectory for many users
  * in a constant number of queries (one for resolved quests, one for the newest 30 snapshots of each user).
@@ -71,7 +87,7 @@ export async function hiddenAndTrajectoryBatch(
   const ids = entries.map((e) => e.userId);
   const earliest = entries.map((e) => addDays(e.today, -29)).sort()[0]!;
 
-  const resolved = await db
+  const resolvedQuery = db
     .select({ userId: quests.userId, status: quests.status, day: quests.resolvedLocalDate })
     .from(quests)
     .where(
@@ -82,17 +98,17 @@ export async function hiddenAndTrajectoryBatch(
         gte(quests.resolvedLocalDate, earliest),
       ),
     );
-  const ranked = db
-    .select({
-      userId: dailySnapshots.userId,
-      date: dailySnapshots.localDate,
-      hidden: dailySnapshots.hidden,
-      rn: sql<number>`row_number() over (partition by ${dailySnapshots.userId} order by ${dailySnapshots.localDate} desc)`.as("rn"),
-    })
-    .from(dailySnapshots)
-    .where(inArray(dailySnapshots.userId, ids))
-    .as("ranked");
-  const recent = await db.select().from(ranked).where(lte(ranked.rn, 30));
+  // One user (the game state): an index range read of the newest 30, independent of how long the history is.
+  const recentQuery =
+    ids.length === 1
+      ? db
+          .select({ userId: dailySnapshots.userId, date: dailySnapshots.localDate, hidden: dailySnapshots.hidden })
+          .from(dailySnapshots)
+          .where(eq(dailySnapshots.userId, ids[0]!))
+          .orderBy(desc(dailySnapshots.localDate))
+          .limit(30)
+      : recentSnapshotsOf(db, ids);
+  const [resolved, recent] = await reads(db, [() => resolvedQuery, () => recentQuery]);
 
   // Grouped by user once, so a batch of N users costs O(rows), not O(N x rows).
   const group = <T extends { userId: string }>(rows: readonly T[]) => {
@@ -138,12 +154,30 @@ export async function buildGameState(
   now: Date,
   opts: { noticeKinds?: readonly NoticeKind[] } = {},
 ): Promise<GameState | null> {
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  const [profile] = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
+  // Independent reads go out together on the pool (GET /state); inside a transaction they run one by one (see reads).
+  const [[user], [profile], rows, [shadowRow], unseen, achievementRows, milestoneRows, pro] = await reads(db, [
+    () => db.select().from(users).where(eq(users.id, userId)).limit(1),
+    () => db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1),
+    () => db.select().from(domainScores).where(eq(domainScores.userId, userId)),
+    () => db.select().from(shadowSelves).where(eq(shadowSelves.userId, userId)).limit(1),
+    () => unseenNotices(db, userId, opts.noticeKinds),
+    () =>
+      db
+        .select()
+        .from(achievements)
+        .where(eq(achievements.userId, userId))
+        .orderBy(asc(achievements.unlockedAt), asc(achievements.achievementId)),
+    () =>
+      db
+        .select()
+        .from(milestones)
+        .where(eq(milestones.userId, userId))
+        .orderBy(asc(milestones.unlockedAt), asc(milestones.domain), asc(milestones.tier)),
+    () => isPro(db, userId, now),
+  ]);
   if (!user || !profile) return null;
 
   const today = localDate(now, user.timezone);
-  const rows = await db.select().from(domainScores).where(eq(domainScores.userId, userId));
   const byDomain = new Map(rows.map((r) => [r.domain, r]));
   const scores = RANKED_DOMAINS.map((d) => {
     const r = byDomain.get(d);
@@ -151,9 +185,11 @@ export async function buildGameState(
   });
   const scoreMap = Object.fromEntries(scores.map((s) => [s.domain, s.score])) as Record<RankedDomain, number>;
 
-  const { hidden, trajectory: trend } = await hiddenAndTrajectory(db, userId, today, scoreMap);
+  const [{ hidden, trajectory: trend }, { active: season }] = await reads(db, [
+    () => hiddenAndTrajectory(db, userId, today, scoreMap),
+    () => currentSeasons(db, userId, today),
+  ]);
 
-  const [shadowRow] = await db.select().from(shadowSelves).where(eq(shadowSelves.userId, userId)).limit(1);
   const shadowState = toShadowState(shadowRow);
   let shadow: GameState["shadow"] = null;
   if (shadowState) {
@@ -168,23 +204,9 @@ export async function buildGameState(
     };
   }
 
-  const unseen = await unseenNotices(db, userId, opts.noticeKinds);
-  const { active: season } = await currentSeasons(db, userId, today);
-
-  const achievementRows = await db
-    .select()
-    .from(achievements)
-    .where(eq(achievements.userId, userId))
-    .orderBy(asc(achievements.unlockedAt), asc(achievements.achievementId));
-  const milestoneRows = await db
-    .select()
-    .from(milestones)
-    .where(eq(milestones.userId, userId))
-    .orderBy(asc(milestones.unlockedAt), asc(milestones.domain), asc(milestones.tier));
-
   const rank = profile.rank as Rank;
   // Purely presentational; free users always read STABLE, and no score or rule reads it.
-  const ui = (await isPro(db, userId, now))
+  const ui = pro
     ? computeUiState({ shadowActive: shadow?.active === true, trajectory: trend, rank })
     : "STABLE";
   return {

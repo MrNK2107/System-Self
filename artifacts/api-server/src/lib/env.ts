@@ -20,6 +20,19 @@ const trustProxy = z
     return z.NEVER;
   });
 
+/** "1" on, "0" or unset off; anything else is a typo and is refused rather than read as off. */
+const flag = (name: string) =>
+  z
+    .string()
+    .trim()
+    .optional()
+    .transform((v, ctx): boolean => {
+      if (v === undefined || v === "" || v === "0") return false;
+      if (v === "1") return true;
+      ctx.addIssue({ code: "custom", message: `${name} must be "1" or "0"` });
+      return z.NEVER;
+    });
+
 const envSchema = z.object({
   // No default: an unset NODE_ENV is treated as production-like for secrets and mail.
   NODE_ENV: z.enum(["development", "test", "production"]).optional(),
@@ -33,6 +46,14 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
   TRUST_PROXY: trustProxy,
+  /**
+   * Load testing only: turns off the per-IP limiters (global, auth, billing webhook), which would otherwise throttle a
+   * load generator on one IP. Outside development/test it is refused unless LOAD_TEST=1 is also set, so it cannot be
+   * switched on in a real deployment by one stray variable. See docs/PERFORMANCE.md.
+   */
+  RATE_LIMIT_DISABLED: flag("RATE_LIMIT_DISABLED"),
+  /** Marks a production-mode process as a load-test target (the only thing it allows is RATE_LIMIT_DISABLED). */
+  LOAD_TEST: flag("LOAD_TEST"),
   MAILER: z.enum(["log", "resend"]).optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
   MAIL_FROM: z.string().min(1).default("SYSTEM // SELF <no-reply@systemself.app>"),
@@ -88,6 +109,13 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
           if (value && PLACEHOLDER.test(value)) {
             ctx.addIssue({ code: "custom", path: [name], message: `${name} is a placeholder value` });
           }
+        }
+        if (v.RATE_LIMIT_DISABLED && !v.LOAD_TEST) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["RATE_LIMIT_DISABLED"],
+            message: "RATE_LIMIT_DISABLED is refused outside development/test unless LOAD_TEST=1 (load-test targets only)",
+          });
         }
         if (!v.JWT_SECRET) {
           ctx.addIssue({

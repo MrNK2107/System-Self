@@ -49,7 +49,7 @@ const skipVoice = (parser: RequestHandler): RequestHandler => (req, res, next) =
   isVoiceUpload(req.path) ? next() : parser(req, res, next);
 
 export function createApp(
-  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number; revenuecat?: RevenueCatClient | null; metricsToken?: string | null; logger?: Logger; corsOrigins?: "*" | string[]; timezoneKnown?: TimezoneCheck } = {},
+  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number; revenuecat?: RevenueCatClient | null; metricsToken?: string | null; logger?: Logger; corsOrigins?: "*" | string[]; timezoneKnown?: TimezoneCheck; rateLimitDisabled?: boolean } = {},
 ): Express {
   const db = deps.db === undefined ? defaultDb : deps.db;
   const mailer = deps.mailer ?? createMailer();
@@ -58,6 +58,11 @@ export function createApp(
   const app: Express = express();
   // Client IPs (and so rate-limit buckets) come from X-Forwarded-For only for trusted proxy hops.
   app.set("trust proxy", deps.trustProxy ?? env.TRUST_PROXY);
+
+  // Load-test switch (env guard: production needs LOAD_TEST=1 too). Never on in a real deployment.
+  const limitsOff = deps.rateLimitDisabled ?? env.RATE_LIMIT_DISABLED;
+  if (limitsOff) (deps.logger ?? defaultLogger).warn({ event: "rate_limits_disabled" }, "Per-IP rate limits are DISABLED (load test)");
+  const limiter = (opts: Parameters<typeof rateLimit>[0]): RequestHandler => (limitsOff ? (_req, _res, next) => next() : rateLimit(opts));
 
   const metricsToken = deps.metricsToken === undefined ? (env.METRICS_TOKEN ?? null) : deps.metricsToken;
   app.use(
@@ -96,7 +101,7 @@ export function createApp(
     }),
   );
   app.use(
-    rateLimit({
+    limiter({
       windowMs: env.RATE_LIMIT_WINDOW_MS,
       max: env.RATE_LIMIT_MAX,
       standardHeaders: true,
@@ -107,7 +112,7 @@ export function createApp(
   // Its own generous bucket: RevenueCat retries and bursts (e.g. renewals at the top of the hour) from shared IPs.
   app.use(
     BILLING_WEBHOOK_PATH,
-    rateLimit({
+    limiter({
       windowMs: 60_000,
       max: BILLING_WEBHOOK_RATE_LIMIT_MAX,
       standardHeaders: true,
@@ -118,7 +123,7 @@ export function createApp(
   for (const prefix of ["login", "register", "password", "email"]) {
     app.use(
       `/api/auth/${prefix}`,
-      rateLimit({
+      limiter({
         windowMs: 15 * 60_000,
         max: 10,
         standardHeaders: true,
