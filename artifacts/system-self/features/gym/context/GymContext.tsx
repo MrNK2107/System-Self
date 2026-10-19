@@ -356,7 +356,7 @@ export function GymProvider({ children }: { children: React.ReactNode }) {
           persist();
           // Points, notices and scores changed on the server.
           void queryClient.invalidateQueries({ queryKey: gymKey(userId) });
-          void invalidateGame(queryClient, userId);
+          void invalidateGame(queryClient, userId, { activity: true });
         }
       }),
     [guarded, flushSets, queryClient, userId, setLocalSessions, setActiveId, persist],

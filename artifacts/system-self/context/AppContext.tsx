@@ -240,7 +240,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const pendingCount = outboxSnap.pending.length;
   const prevPendingSet = useRef<readonly OutboxItem[]>([]);
   useEffect(() => {
-    if (pendingSetChanged(prevPendingSet.current, outboxSnap.pending)) void invalidateGame(queryClient, userId);
+    // Outbox items are logs: activity.
+    if (pendingSetChanged(prevPendingSet.current, outboxSnap.pending)) void invalidateGame(queryClient, userId, { activity: true });
     if (outboxSnap.pending.length === 0) setSyncBlocked(false);
     prevPendingSet.current = outboxSnap.pending;
   }, [outboxSnap.pending, queryClient, userId]);
@@ -261,7 +262,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const runGuarded = useCallback(
-    async <T,>(prefix: string, send: (clientId: string) => Promise<MutationResult<T>>): Promise<GameMutationResult<T>> => {
+    async <T,>(
+      prefix: string,
+      send: (clientId: string) => Promise<MutationResult<T>>,
+      opts: { activity?: boolean } = {},
+    ): Promise<GameMutationResult<T>> => {
       try {
         const r = await send(newClientId(prefix));
         if (!r.ok) {
@@ -273,14 +278,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         return { ok: false, reason: "error", error };
       } finally {
-        void invalidateGame(queryClient, userId);
+        void invalidateGame(queryClient, userId, opts);
       }
     },
     [queryClient, userId],
   );
 
   const completeQuest = useCallback(
-    (questId: string) => runGuarded("quest-complete", (id) => completeQuestRequest(api, getOutbox(), questId, id)),
+    (questId: string) =>
+      runGuarded("quest-complete", (id) => completeQuestRequest(api, getOutbox(), questId, id), { activity: true }),
     [runGuarded],
   );
   const refuseQuest = useCallback(

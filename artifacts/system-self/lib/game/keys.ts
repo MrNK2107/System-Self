@@ -37,8 +37,12 @@ export interface Invalidator {
   invalidateQueries(filters: { queryKey: readonly unknown[] }): Promise<void> | void;
 }
 
-/** After any game mutation: refetch state, quests and notices (and the logs / chains / ledger views of them). */
-export async function invalidateGame(client: Invalidator, userId: string | null): Promise<void> {
+/**
+ * After any game mutation: refetch state, quests and notices (and the logs / chains / ledger views of them). The
+ * comeback checklist only moves with activity, so it is refetched only after an activity mutation (a log leaving
+ * the outbox, a quest completion, a gym session completion).
+ */
+export async function invalidateGame(client: Invalidator, userId: string | null, opts: { activity?: boolean } = {}): Promise<void> {
   const keys = [
     gameStateKey(userId),
     questsKey(userId),
@@ -47,7 +51,7 @@ export async function invalidateGame(client: Invalidator, userId: string | null)
     chainsKey(userId),
     deferralsKey(userId),
     shadowTakeoversKey(userId),
-    comebackKey(userId),
+    ...(opts.activity ? [comebackKey(userId)] : []),
     pastSelfKey(userId),
   ];
   await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));
