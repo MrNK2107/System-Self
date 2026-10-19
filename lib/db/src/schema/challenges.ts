@@ -30,6 +30,8 @@ export const namedChallenges = pgTable(
     opponentEnd: real("opponent_end"),
     winnerId: uuid("winner_id").references(() => users.id, { onDelete: "set null" }),
     resolvedAt: ts("resolved_at"),
+    /** Last time the social job tried to settle it (rotation, so a challenge that keeps deferring cannot starve the rest). */
+    lastAttemptAt: ts("last_attempt_at"),
   },
   (t) => [
     index("named_challenges_challenger_idx").on(t.challengerId, t.status),

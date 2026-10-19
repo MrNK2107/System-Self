@@ -15,7 +15,6 @@ import { withIdempotency, type HandlerResult } from "../services/idempotency";
 import { ensureRolledOver, rollOverDue } from "../services/rollover";
 import { insertNotice } from "../services/scoring";
 import {
-  domainScoreOf,
   expirePending,
   listChallenges,
   lockSlots,
@@ -24,14 +23,15 @@ import {
   openCount,
   resolveOpponent,
   respondByFor,
+  round2,
   sameClan,
+  startAtAccept,
   toChallengeDtos,
 } from "../services/challenges";
 import { loadProjectionSubjects, projectUser } from "../services/projection";
 import { track } from "../services/analytics";
 
 const IdSchema = z.string().uuid();
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const err = (status: number, code: string, error: string): HandlerResult => ({ status, body: { error, code } });
 const notFound = () => err(404, "not_found", "Challenge not found");
@@ -123,8 +123,9 @@ export function challengesRoutes(db: Db, clock: () => Date = () => new Date()): 
         return err(409, "expired", "The 48 hours to answer have passed");
       }
       if (!(await mayChallenge(tx, c.challengerId, me))) {
+        // The challenger unfollowed or a block appeared: the challenge is withdrawn. Nothing reveals which.
         await tx.update(namedChallenges).set({ status: "void", resolvedAt: now }).where(eq(namedChallenges.id, c.id));
-        return notEligible();
+        return err(409, "not_pending", "This challenge was withdrawn");
       }
       const domain = c.domain as RankedDomain;
       const [mine] = await tx.select({ tz: users.timezone }).from(users).where(eq(users.id, me)).limit(1);
@@ -135,8 +136,9 @@ export function challengesRoutes(db: Db, clock: () => Date = () => new Date()): 
           status: "active",
           startDate,
           endDate: addDays(startDate, c.days - 1),
-          challengerStart: round2(await domainScoreOf(tx, c.challengerId, domain)),
-          opponentStart: round2(await domainScoreOf(tx, me, domain)),
+          // Each start is the player's own snapshot of the day before the window (null until it exists).
+          challengerStart: await startAtAccept(tx, c.challengerId, domain, startDate),
+          opponentStart: await startAtAccept(tx, me, domain, startDate),
         })
         .where(and(eq(namedChallenges.id, c.id), eq(namedChallenges.status, "pending")))
         .returning();

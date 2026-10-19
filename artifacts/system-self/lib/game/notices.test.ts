@@ -306,6 +306,9 @@ test("named challenge and shame notices render as SYSTEM modals; shame notices s
   assert.equal((noticeView(one) as { title: string }).title, "uma_1 failed to complete: Run 5k. Logged.");
   const many = nextNoticeGroup(parseNotices([shame(86, "uma_1", "Run 5k"), shame(87, "mal_1", "Read")]).notices, new Set())!;
   assert.equal(many.notices.length, 2);
+  const same = nextNoticeGroup(parseNotices([shame(88, "uma_1", "Run 5k"), shame(89, "uma_1", "Read")]).notices, new Set())!;
+  assert.equal((noticeView(same) as { title: string }).title, "2 FAILURES BY uma_1");
+  assert.ok((rcv as { body: string }).body.includes("winner +3.0 DISCIPLINE, loser -1.5. Answer within 48 hours"));
   const m = noticeView(many) as { title: string; body: string };
   assert.equal(m.title, "2 CLANMATES FAILED");
   assert.equal(m.body, "uma_1 failed to complete: Run 5k. Logged.\nmal_1 failed to complete: Read. Logged.");

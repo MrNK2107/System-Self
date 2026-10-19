@@ -12,7 +12,7 @@
  * resolves it). Nothing ever blocks from a higher id to a lower one, so no wait cycle can form.
  */
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
-import { clanMembers, dailySnapshots, domainScores, follows, namedChallenges, userDayState, users, type Db, type NamedChallenge } from "@workspace/db";
+import { clanMembers, dailySnapshots, domainScores, follows, namedChallenges, profiles, userDayState, users, type Db, type NamedChallenge } from "@workspace/db";
 import {
   CHALLENGE_IGNORED_LINE,
   CHALLENGE_LOSS_DELTA,
@@ -20,7 +20,7 @@ import {
   type Challenge,
   type Notice,
 } from "@workspace/contracts";
-import { localDate, type RankedDomain } from "@workspace/engine";
+import { addDays, localDate, type RankedDomain } from "@workspace/engine";
 import { logger } from "../lib/logger";
 import { loadProjectionSubjects, projectUser } from "./projection";
 import { ensureRolledOver } from "./rollover";
@@ -30,7 +30,7 @@ import type { Tx } from "./user-lock";
 
 type Reader = Pick<Db, "select">;
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+export const round2 = (n: number) => Math.round(n * 100) / 100;
 const HOUR_MS = 3_600_000;
 /** Lock namespace for the per-user "open challenge slots" lock (distinct from the one-key user lock). */
 const SLOT_LOCK_NAMESPACE = 5502;
@@ -174,13 +174,69 @@ export const respondByFor = (now: Date, hours: number) => new Date(now.getTime()
 
 export type ResolveResult = "resolved" | "void" | "deferred" | "inactive";
 
-async function scoreOf(tx: Reader, userId: string, domain: RankedDomain): Promise<number> {
+export async function domainScoreOf(tx: Reader, userId: string, domain: RankedDomain): Promise<number> {
   const [row] = await tx
     .select({ score: domainScores.score })
     .from(domainScores)
     .where(and(eq(domainScores.userId, userId), eq(domainScores.domain, domain)))
     .limit(1);
   return row?.score ?? 0;
+}
+
+/** The user's domain score in their daily snapshot of `date` (their own local date), or null when there is none. */
+async function snapshotScore(tx: Reader, userId: string, domain: RankedDomain, date: string): Promise<number | null> {
+  const [snap] = await tx
+    .select({ scores: dailySnapshots.scores })
+    .from(dailySnapshots)
+    .where(and(eq(dailySnapshots.userId, userId), eq(dailySnapshots.localDate, date)))
+    .limit(1);
+  const v = (snap?.scores as Partial<Record<string, number>> | undefined)?.[domain];
+  return typeof v === "number" ? v : null;
+}
+
+/**
+ * The start value of a window beginning on `startDate`: the user's own snapshot of the day before, so a day the user
+ * has not rolled yet (its penalties, decay) is counted exactly as it will be for the opponent. A user with nothing to
+ * roll before the window (rolled through that day, or onboarded on/after the start) starts at the live score. Anyone
+ * else gets null now and is filled from their snapshot once it exists (at resolution; see startFromHistory).
+ */
+export async function startAtAccept(tx: Reader, userId: string, domain: RankedDomain, startDate: string): Promise<number | null> {
+  const day = addDays(startDate, -1);
+  const snap = await snapshotScore(tx, userId, domain, day);
+  if (snap !== null) return round2(snap);
+  const [info] = await tx
+    .select({ last: userDayState.lastRolledDate, tz: users.timezone, onboardedAt: profiles.onboardedAt })
+    .from(users)
+    .innerJoin(profiles, eq(profiles.userId, users.id))
+    .leftJoin(userDayState, eq(userDayState.userId, users.id))
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!info) return null;
+  const nothingToRoll = (info.last !== null && info.last >= day) || localDate(info.onboardedAt, info.tz) >= startDate;
+  return nothingToRoll ? round2(await domainScoreOf(tx, userId, domain)) : null;
+}
+
+/**
+ * The start value at resolution for a user whose start was not known at acceptance: the snapshot of the day before the
+ * window; if the user's history has none (a collapsed catch-up), the latest earlier snapshot, else their earliest one,
+ * else the live score.
+ */
+async function startFromHistory(tx: Reader, userId: string, domain: RankedDomain, startDate: string): Promise<number> {
+  const day = addDays(startDate, -1);
+  const exact = await snapshotScore(tx, userId, domain, day);
+  if (exact !== null) return round2(exact);
+  const pick = async (order: "latest" | "earliest") => {
+    const [snap] = await tx
+      .select({ scores: dailySnapshots.scores })
+      .from(dailySnapshots)
+      .where(order === "latest" ? and(eq(dailySnapshots.userId, userId), lte(dailySnapshots.localDate, day)) : eq(dailySnapshots.userId, userId))
+      .orderBy(order === "latest" ? desc(dailySnapshots.localDate) : asc(dailySnapshots.localDate))
+      .limit(1);
+    const v = (snap?.scores as Partial<Record<string, number>> | undefined)?.[domain];
+    return typeof v === "number" ? v : null;
+  };
+  const found = (await pick("latest")) ?? (await pick("earliest"));
+  return round2(found ?? (await domainScoreOf(tx, userId, domain)));
 }
 
 /** The user's domain score at the end of `date` (their daily snapshot), or the live score when no snapshot exists. */
@@ -191,7 +247,7 @@ async function scoreAtEndOf(tx: Reader, userId: string, domain: RankedDomain, da
     .where(and(eq(dailySnapshots.userId, userId), eq(dailySnapshots.localDate, date)))
     .limit(1);
   const v = (snap?.scores as Partial<Record<string, number>> | undefined)?.[domain];
-  return typeof v === "number" ? v : scoreOf(tx, userId, domain);
+  return typeof v === "number" ? v : domainScoreOf(tx, userId, domain);
 }
 
 /** How the viewer is shown another player: a clanmate (username) or anyone else (public rules). The handle only. */
@@ -248,13 +304,15 @@ export async function resolveChallenge(
 
   const challengerEnd = round2(await scoreAtEndOf(tx, challengerId, domain, endDate));
   const opponentEnd = round2(await scoreAtEndOf(tx, opponentId, domain, endDate));
-  const challengerGain = round2(challengerEnd - (c.challengerStart ?? 0));
-  const opponentGain = round2(opponentEnd - (c.opponentStart ?? 0));
+  const challengerStart = c.challengerStart ?? (await startFromHistory(tx, challengerId, domain, c.startDate!));
+  const opponentStart = c.opponentStart ?? (await startFromHistory(tx, opponentId, domain, c.startDate!));
+  const challengerGain = round2(challengerEnd - challengerStart);
+  const opponentGain = round2(opponentEnd - opponentStart);
   const winnerId = challengerGain > opponentGain ? challengerId : challengerGain < opponentGain ? opponentId : null;
 
   const [done] = await tx
     .update(namedChallenges)
-    .set({ status: "resolved", challengerEnd, opponentEnd, winnerId, resolvedAt: now })
+    .set({ status: "resolved", challengerStart, opponentStart, challengerEnd, opponentEnd, winnerId, resolvedAt: now })
     .where(and(eq(namedChallenges.id, id), eq(namedChallenges.status, "active")))
     .returning({ id: namedChallenges.id });
   if (!done) return none("inactive");
@@ -274,7 +332,8 @@ export async function resolveChallenge(
         tx,
         s.userId,
         [{ domain: "DISCIPLINE", delta, bonus: false, activity: false, reason: "challenge", refId: id }],
-        { localDate: localDate(now, tz), now },
+        // The holder's event belongs to the date being rolled (a multi-day catch-up must not stamp wall-clock today).
+        { localDate: holder && s.userId === holder.userId ? holder.rolledThrough : localDate(now, tz), now },
       );
       if (s.userId === holder?.userId) out.push(...applied.notices);
     }
@@ -318,7 +377,12 @@ export async function resolveChallengeById(db: Db, id: string, now: Date): Promi
  * challenges whose window ended (rolling both participants first so their end-date snapshots exist). Returns the
  * number settled as resolved or void by this pass.
  */
-export async function resolveNamedChallenges(db: Db, now: Date, limit = JOB_BATCH): Promise<number> {
+export async function resolveNamedChallenges(
+  db: Db,
+  now: Date,
+  limit = JOB_BATCH,
+  opts: { resolve?: typeof resolveChallengeById } = {},
+): Promise<number> {
   await voidOrphans(db, now);
   await expirePending(db, now);
   const utcToday = now.toISOString().slice(0, 10);
@@ -326,13 +390,15 @@ export async function resolveNamedChallenges(db: Db, now: Date, limit = JOB_BATC
     .select()
     .from(namedChallenges)
     .where(and(eq(namedChallenges.status, "active"), lte(namedChallenges.endDate, utcToday)))
-    .orderBy(asc(namedChallenges.endDate), asc(namedChallenges.createdAt))
+    // Least recently attempted first (never attempted before all): a challenge that keeps deferring goes to the back.
+    .orderBy(sql`${namedChallenges.lastAttemptAt} asc nulls first`, asc(namedChallenges.endDate), asc(namedChallenges.createdAt))
     .limit(limit);
   let settled = 0;
   for (const c of due) {
     try {
+      await db.update(namedChallenges).set({ lastAttemptAt: now }).where(eq(namedChallenges.id, c.id));
       for (const userId of [c.challengerId, c.opponentId]) if (userId) await ensureRolledOver(db, userId, now);
-      const r = await resolveChallengeById(db, c.id, now);
+      const r = await (opts.resolve ?? resolveChallengeById)(db, c.id, now);
       if (r === "resolved" || r === "void") settled++;
     } catch (err) {
       logger.error({ err, challengeId: c.id }, "Challenge resolution failed");
@@ -357,14 +423,29 @@ export async function toChallengeDtos(db: Reader, viewerId: string, rows: readon
     .where(inArray(domainScores.userId, [viewerId, ...others]));
   const liveScore = (userId: string, domain: string) => live.find((s) => s.userId === userId && s.domain === domain)?.score ?? 0;
 
+  // A start still waiting for its owner's snapshot shows once that snapshot exists (never a live guess).
+  const previews = new Map<string, { challenger: number | null; opponent: number | null }>();
+  for (const r of rows) {
+    if (r.status !== "active" || !r.startDate || !r.challengerId || !r.opponentId) continue;
+    if (r.challengerStart !== null && r.opponentStart !== null) continue;
+    const day = addDays(r.startDate, -1);
+    const domain = r.domain as RankedDomain;
+    const c = r.challengerStart ?? (await snapshotScore(db, r.challengerId, domain, day));
+    const o = r.opponentStart ?? (await snapshotScore(db, r.opponentId, domain, day));
+    previews.set(r.id, { challenger: c === null ? null : round2(c), opponent: o === null ? null : round2(o) });
+  }
+
   return rows.map((r): Challenge => {
     const isChallenger = r.challengerId === viewerId;
     const otherId = otherOf(r);
     const subject = otherId ? subjects.get(otherId) : undefined;
     const clanmate = !!myClan && !!otherId && mine.some((m) => m.userId === otherId && m.clanId === myClan);
     const profile = subject ? projectUser(subject, clanmate ? "clanmate" : "public") : null;
-    const myStart = isChallenger ? r.challengerStart : r.opponentStart;
-    const theirStart = isChallenger ? r.opponentStart : r.challengerStart;
+    const preview = previews.get(r.id);
+    const challengerStart = r.challengerStart ?? preview?.challenger ?? null;
+    const opponentStart = r.opponentStart ?? preview?.opponent ?? null;
+    const myStart = isChallenger ? challengerStart : opponentStart;
+    const theirStart = isChallenger ? opponentStart : challengerStart;
     const myEnd = isChallenger ? r.challengerEnd : r.opponentEnd;
     const theirEnd = isChallenger ? r.opponentEnd : r.challengerEnd;
     let myGain: number | null = null;
@@ -414,4 +495,3 @@ export async function listChallenges(db: Db, viewerId: string, now: Date): Promi
   return toChallengeDtos(db, viewerId, [...open, ...closed], now);
 }
 
-export { scoreOf as domainScoreOf };

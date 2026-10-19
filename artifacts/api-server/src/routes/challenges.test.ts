@@ -362,12 +362,15 @@ test("concurrent double resolution applies the result exactly once", { skip }, a
   const r2 = await create(x, y.name);
   assert.equal((await respond(y, r2.body.id, "accept")).status, 200);
   const e2 = addDays(D0, 5);
+  await bump(x.id, "MIND", 6);
   await Promise.all([rollTo(x, addDays(D0, 4)), rollTo(y, addDays(D0, 4))]);
   await Promise.all([rollTo(x, e2), rollTo(y, e2), resolveNamedChallenges(db!, after2h(e2))]);
   await resolveNamedChallenges(db!, after2h(addDays(e2, 1)));
   assert.equal((await row(r2.body.id)).status, "resolved");
   const forTwo = async (u: P) => (await challengeEvents(u.id)).filter((e) => e.refId === r2.body.id).length;
-  assert.ok((await forTwo(x)) + (await forTwo(y)) <= 2);
+  assert.equal(await forTwo(x), 1);
+  assert.equal(await forTwo(y), 1);
+  assert.equal((await row(r2.body.id)).winnerId, x.id);
   assert.equal((await noticesOf(x.id, "challenge_result")).length, 2);
 });
 
@@ -488,4 +491,81 @@ test("a shame quest that was completed, or whose owner left the clan, notifies n
   await db!.delete(clanMembers).where(eq(clanMembers.userId, u.id));
   await rollTo(u, D0);
   assert.equal((await noticesOf(m1.id, "shame")).length, 0);
+});
+
+// --- fix round 1 ----------------------------------------------------------------------------------------
+
+test("start values come from each player's own snapshot of the day before the window, even if the challenger had an unrolled day", { skip }, async () => {
+  const { x, y } = await pair();
+  // x has unrolled days before the window: onboarded 3 days earlier, never rolled, with a daily quest that expired on D0-1.
+  await db!.update(profiles).set({ onboardedAt: at(addDays(D0, -3), "09:00") }).where(eq(profiles.userId, x.id));
+  await db!.update(userDayState).set({ lastRolledDate: null, nextRolloverAt: endOfLocalDay(addDays(D0, -3), TZ) }).where(eq(userDayState.userId, x.id));
+  await db!.delete(dailySnapshots).where(eq(dailySnapshots.userId, x.id));
+  await mkQuest(x.id, "Missed", endOfLocalDay(addDays(D0, -1), TZ));
+  await setScore(x.id, "DISCIPLINE", 50);
+  clock = at(D0);
+  const before = await scoreOf(x.id, "DISCIPLINE");
+  const res = await create(x, y.name, { domain: "DISCIPLINE" });
+  const acc = await respond(y, res.body.id, "accept");
+  assert.equal(acc.status, 200, JSON.stringify(acc.body));
+  let r = await row(res.body.id);
+  assert.equal(r.challengerStart, null, "x has unrolled days: its start waits for its own snapshot");
+  assert.equal(r.opponentStart, await scoreOf(y.id, "DISCIPLINE"), "y has nothing to roll: its live score is the start");
+
+  await rollTo(x, END);
+  await rollTo(y, END);
+  r = await row(res.body.id);
+  assert.equal(r.status, "resolved");
+  const [snap] = await db!.select().from(dailySnapshots).where(and(eq(dailySnapshots.userId, x.id), eq(dailySnapshots.localDate, addDays(D0, -1))));
+  const expected = Math.round((snap!.scores as Record<string, number>).DISCIPLINE! * 100) / 100;
+  assert.equal(r.challengerStart, expected);
+  assert.ok(expected < before, "the missed quest's penalty is in the snapshot, not in a live capture");
+});
+
+test("result score events for the rollover holder are dated with the date being rolled", { skip }, async () => {
+  const { x, y } = await pair();
+  const id = await active(x, y);
+  await bump(x.id, "MIND", 6);
+  await rollTo(y, END);
+  // x catches up over several days in one pass: the result lands while END is being rolled.
+  await ensureRolledOver(db!, x.id, after2h(addDays(END, 4)));
+  assert.equal((await row(id)).status, "resolved");
+  const ex = await challengeEvents(x.id);
+  assert.equal(ex.length, 1);
+  assert.equal(ex[0]!.localDate, END);
+});
+
+test("accept after the challenger unfollowed -> 409 not_pending and the challenge is voided", { skip }, async () => {
+  const { x, y } = await pair();
+  clock = at(D0);
+  const res = await create(x, y.name);
+  await db!.delete(follows).where(eq(follows.followerId, x.id));
+  const acc = await respond(y, res.body.id, "accept");
+  assert.equal(acc.status, 409);
+  assert.equal(acc.body.code, "not_pending");
+  assert.match(acc.body.error, /withdrawn/i);
+  assert.equal((await row(res.body.id)).status, "void");
+});
+
+test("the job rotates: an attempted challenge goes to the back, so a stuck one cannot starve the rest", { skip }, async () => {
+  const x = await mk("xena_1");
+  const ys = [await mk("ya_1", { identity: "public" }), await mk("yb_1", { identity: "public" })];
+  for (const y of ys) await follow(x, y);
+  clock = at(D0);
+  const ids: string[] = [];
+  for (const y of ys) {
+    const r = await create(x, y.name);
+    assert.equal((await respond(y, r.body.id, "accept")).status, 200);
+    ids.push(r.body.id);
+  }
+  const now = after2h(END);
+  const seen: string[] = [];
+  const stuckFirst = async (_db: unknown, id: string) => {
+    seen.push(id);
+    return id === ids[0] ? ("deferred" as const) : ("resolved" as const);
+  };
+  await resolveNamedChallenges(db!, now, 1, { resolve: stuckFirst as never });
+  await resolveNamedChallenges(db!, now, 1, { resolve: stuckFirst as never });
+  assert.deepEqual([...seen].sort(), [...ids].sort(), "both challenges were attempted within two limit-1 passes");
+  assert.ok((await row(ids[0]!)).lastAttemptAt);
 });

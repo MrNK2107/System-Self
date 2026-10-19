@@ -1,5 +1,12 @@
 // Server notices -> one modal at a time. Pure, no React Native imports.
-import { NoticeSchema, type Notice, type NoticeKind } from "@workspace/contracts";
+import {
+  CHALLENGE_LOSS_DELTA,
+  CHALLENGE_RESPOND_HOURS,
+  CHALLENGE_WIN_DELTA,
+  NoticeSchema,
+  type Notice,
+  type NoticeKind,
+} from "@workspace/contracts";
 import type { Domain, MilestoneTier, PendingAchievement, PendingMilestone, QuestType, Rank, StreakBreakData } from "./types";
 
 /** The order modals are shown in. Every kind the server writes appears exactly once. */
@@ -230,7 +237,7 @@ export function noticeView(group: NoticeGroup): NoticeView {
         tone: "alert",
         label: "CHALLENGE RECEIVED",
         title: `${p.handle} challenged you.`,
-        body: `${p.domain} // ${p.days} days. Highest domain gain wins: winner +3.0 DISCIPLINE, loser -1.5. Answer within 48 hours or it is ignored. Logged.`,
+        body: `${p.domain} // ${p.days} days. Highest domain gain wins: winner +${CHALLENGE_WIN_DELTA.toFixed(1)} DISCIPLINE, loser ${CHALLENGE_LOSS_DELTA.toFixed(1)}. Answer within ${CHALLENGE_RESPOND_HOURS} hours or it is ignored. Logged.`,
       };
     }
     case "challenge_result": {
@@ -243,7 +250,10 @@ export function noticeView(group: NoticeGroup): NoticeView {
     case "shame": {
       const lines = group.notices.flatMap((n) => (n.kind === "shame" ? [shameLine(n.payload)] : []));
       if (lines.length === 1) return { modal: "system", tone: "alert", label: "SHAME MODE", title: lines[0]!, body: "They put it on the record. It stays there." };
-      return { modal: "system", tone: "alert", label: "SHAME MODE", title: `${lines.length} CLANMATES FAILED`, body: lines.join("\n") };
+      // Count distinct clanmates (one clanmate can fail several quests in the same batch).
+      const handles = new Set(group.notices.flatMap((n) => (n.kind === "shame" ? [n.payload.handle] : [])));
+      const title = handles.size === 1 ? `${lines.length} FAILURES BY ${[...handles][0]}` : `${handles.size} CLANMATES FAILED`;
+      return { modal: "system", tone: "alert", label: "SHAME MODE", title, body: lines.join("\n") };
     }
     case "quest_failed":
       return {
