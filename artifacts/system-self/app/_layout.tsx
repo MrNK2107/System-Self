@@ -44,6 +44,7 @@ function RootLayoutNav() {
       <Stack.Screen name="settings" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="floor/[routineId]" />
+      <Stack.Screen name="dungeon/briefing" />
       <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
     </Stack>
   );

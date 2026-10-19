@@ -116,7 +116,22 @@ export const bodyPartScores = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.bodyPart] })],
 );
 
+export const gymCrowdReports = pgTable(
+  "gym_crowd_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: userIdCol(),
+    sessionId: uuid("session_id").references(() => workoutSessions.id, { onDelete: "set null" }),
+    level: text("level").notNull(), // quiet | normal | packed
+    weekday: integer("weekday").notNull(), // 0 (SUN) .. 6 (SAT), user-local
+    hour: integer("hour").notNull(), // 0..23, user-local
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("gym_crowd_reports_user_idx").on(t.userId)],
+);
+
 export type Exercise = typeof exercises.$inferSelect;
 export type WorkoutPlan = typeof workoutPlans.$inferSelect;
 export type WorkoutSession = typeof workoutSessions.$inferSelect;
 export type PerformedSet = typeof performedSets.$inferSelect;
+export type GymCrowdReport = typeof gymCrowdReports.$inferSelect;

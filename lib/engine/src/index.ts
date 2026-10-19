@@ -9,3 +9,4 @@ export * from "./debrief";
 export * from "./gym";
 export * from "./chains";
 export * from "./floor";
+export * from "./dungeon";

@@ -312,8 +312,7 @@ export default function Dashboard() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.slotBtn, { borderColor: colors.primary + "80", backgroundColor: colors.primary + "18" }]}
-                // P4-T3: open the dungeon briefing here once it exists; until then GO NOW opens the gym tab.
-                onPress={() => router.push("/(tabs)/gym")}
+                onPress={() => router.push("/dungeon/briefing")}
                 accessibilityRole="button"
                 accessibilityLabel="Go now"
                 activeOpacity={0.7}

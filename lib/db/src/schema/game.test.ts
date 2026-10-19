@@ -53,7 +53,7 @@ test("seeded exercises exist after migrate and after resetDb, and match engine D
   if (!db) return t.skip("TEST_DATABASE_URL not set");
   await resetDb(db);
   const rows = await db.select().from(exercises).where(isNull(exercises.userId)).orderBy(asc(exercises.id));
-  assert.equal(rows.length, 8);
+  assert.equal(rows.length, 20);
   const norm = (r: { id: string; name: string; primaryBodyPart: string; secondaryBodyParts: unknown; isBig5: boolean }) => ({
     id: r.id,
     name: r.name,
@@ -76,9 +76,9 @@ test("migration seed INSERT itself produces the engine DEFAULT_EXERCISES", async
     .flatMap((f) => readFileSync(path.join(dir, f), "utf8").split("--> statement-breakpoint"))
     .map((chunk) => chunk.trim())
     .filter((chunk) => chunk.includes('INSERT INTO "exercises"'));
-  assert.equal(insertStmts.length, 1);
+  assert.equal(insertStmts.length, 2);
   await db.execute(sql`DELETE FROM exercises`);
-  await db.execute(sql.raw(insertStmts[0]!));
+  for (const stmt of insertStmts) await db.execute(sql.raw(stmt));
   const rows = await db.select().from(exercises).where(isNull(exercises.userId)).orderBy(asc(exercises.id));
   const expected = [...DEFAULT_EXERCISES].sort((a, b) => a.id.localeCompare(b.id));
   assert.deepEqual(

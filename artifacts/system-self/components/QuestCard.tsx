@@ -13,6 +13,8 @@ interface QuestCardProps {
   onRefuse?: (quest: Quest) => void;
   /** Opens the slot picker (shown for active BODY quests only). */
   onSlot?: (quest: Quest) => void;
+  /** Opens today's dungeon briefing (shown for active BODY quests). */
+  onBriefing?: (quest: Quest) => void;
   /** The weekly refusal allowance is used up (server 409 refusal_limit). */
   refuseDisabled?: boolean;
   /** A request for this quest is in flight. */
@@ -25,7 +27,7 @@ const TYPE_LABELS: Record<string, string> = {
   arc: "ARC",
 };
 
-export function QuestCard({ quest, onComplete, onRefuse, onSlot, refuseDisabled = false, busy = false }: QuestCardProps) {
+export function QuestCard({ quest, onComplete, onRefuse, onSlot, onBriefing, refuseDisabled = false, busy = false }: QuestCardProps) {
   const colors = useColors();
   const domainColor = DOMAIN_COLORS[quest.domain] ?? colors.primary;
   const isActive = quest.status === "active";
@@ -92,6 +94,20 @@ export function QuestCard({ quest, onComplete, onRefuse, onSlot, refuseDisabled 
           <Text style={[styles.slotText, { color: slotLabel(quest) ? domainColor : colors.mutedForeground }]}>
             {slotLabel(quest) ? `LOCKED ${slotLabel(quest)}` : "LOCK THE SLOT"}
           </Text>
+        </TouchableOpacity>
+      )}
+
+      {isActive && quest.domain === "BODY" && onBriefing && (
+        <TouchableOpacity
+          onPress={() => onBriefing(quest)}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel="Briefing"
+          style={[styles.slotRow, { borderColor: colors.border, opacity: busy ? 0.5 : 1 }]}
+          activeOpacity={0.7}
+        >
+          <Feather name="map" size={12} color={domainColor} />
+          <Text style={[styles.slotText, { color: domainColor }]}>BRIEFING</Text>
         </TouchableOpacity>
       )}
 

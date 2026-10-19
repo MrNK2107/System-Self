@@ -474,6 +474,66 @@ export const SessionCompleteResponseSchema = z.object({
   notices: z.array(NoticeSchema),
 });
 
+// --- dungeon briefing and scout reports -------------------------------------
+
+export const BriefingQuerySchema = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine(
+      (d) => {
+        const t = Date.parse(`${d}T00:00:00Z`);
+        return !Number.isNaN(t) && new Date(t).toISOString().startsWith(d);
+      },
+      { message: "Invalid date" },
+    )
+    .optional(),
+});
+
+export const BriefingBlockSchema = z.object({
+  exerciseId: z.string(),
+  name: z.string(),
+  sets: z.number().int(),
+  repRange: z.string(),
+  restSec: z.number().int(),
+  howTo: z.string(),
+  fallbacks: z.array(z.object({ exerciseId: z.string(), name: z.string() })),
+});
+
+export const BriefingResponseSchema = z.object({
+  date: z.string(),
+  source: z.enum(["plan", "beginner"]),
+  blocks: z.array(BriefingBlockSchema),
+  estimatedMinutes: z.number().int(),
+});
+export type GymBriefing = z.infer<typeof BriefingResponseSchema>;
+
+export const CrowdLevelSchema = z.enum(["quiet", "normal", "packed"]);
+
+export const CrowdReportRequestSchema = z.object({
+  level: CrowdLevelSchema,
+  sessionId: z.string().uuid().optional(),
+  clientId: ClientIdSchema.optional(),
+});
+
+export const CrowdReportResponseSchema = z.object({
+  ok: z.literal(true),
+  weekday: z.number().int().min(0).max(6),
+  hour: z.number().int().min(0).max(23),
+});
+
+export const QuietHoursResponseSchema = z.object({
+  suggestions: z.array(
+    z.object({
+      weekday: z.number().int().min(0).max(6),
+      hour: z.number().int().min(0).max(23),
+      quietShare: z.number().min(0).max(1),
+    }),
+  ),
+  needed: z.number().int().min(0),
+});
+export type QuietHours = z.infer<typeof QuietHoursResponseSchema>;
+
 // --- quest generation, messages, debriefs, recaps --------------------------
 
 export const QuestGenerateResponseSchema = z.object({

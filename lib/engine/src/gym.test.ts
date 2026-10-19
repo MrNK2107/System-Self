@@ -11,7 +11,7 @@ test("default plan and exercises exactly as in the app", () => {
   assert.equal(DEFAULT_PLAN.name, "Starter Strength");
   assert.equal(DEFAULT_PLAN.goal, "Consistency and progressive overload");
   assert.deepEqual(DEFAULT_PLAN.days.map((d) => d.weekday), ["MON", "WED", "FRI"]);
-  assert.equal(DEFAULT_EXERCISES.length, 8);
+  assert.equal(DEFAULT_EXERCISES.length, 20);
   assert.deepEqual(mon[2], { exerciseId: "ex_row", sets: 3, repRange: "6-10", restSec: 90 });
 });
 

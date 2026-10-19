@@ -1,5 +1,5 @@
 // Lock the Slot: pick an exact start (15-minute chips) and a length; the window stays on one day, at most 4 h.
-// Quiet-hour suggestions (P4 Task 3) render above the chips when a caller passes any; none until then.
+// Quiet-hour suggestions (from the user's own scout reports) render above the chips; none render when empty.
 import React, { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,8 +11,10 @@ interface Props {
   questTitle: string;
   /** The slot already locked, if any (preselects it and shows CLEAR). */
   current?: { slotStart: string; slotEnd: string } | null;
-  /** Quiet-hour start times, e.g. ["06:00"]. Empty or missing renders nothing. */
-  suggestions?: string[];
+  /** Quiet-hour chips, e.g. { label: "TUE 07:00", start: "07:00" }. Empty or missing renders nothing. */
+  suggestions?: { label: string; start: string }[];
+  /** Scout reports still needed before suggestions appear (shown as a hint while > 0). */
+  hint?: string | null;
   busy: boolean;
   onCancel: () => void;
   onConfirm: (slot: { slotStart: string; slotEnd: string }) => void;
@@ -27,7 +29,7 @@ function durationLabel(m: number): string {
   return m % 60 === 0 ? `${m / 60} H` : `${Math.floor(m / 60)} H ${m % 60}`;
 }
 
-export function SlotPicker({ visible, questTitle, current, suggestions, busy, onCancel, onConfirm, onClear }: Props) {
+export function SlotPicker({ visible, questTitle, current, suggestions, hint, busy, onCancel, onConfirm, onClear }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [start, setStart] = useState(DEFAULT_START);
@@ -67,11 +69,19 @@ export function SlotPicker({ visible, questTitle, current, suggestions, busy, on
             <View style={styles.chipWrap}>
               <Text style={[styles.sub, { color: colors.mutedForeground }]}>QUIET HOURS</Text>
               {suggestions.map((s) => (
-                <Pressable key={s} style={[styles.chip, chip(s === start)]} onPress={() => setStart(s)} accessibilityRole="button">
-                  <Text style={[styles.chipText, { color: colors.foreground }]}>{s}</Text>
+                <Pressable
+                  key={s.label}
+                  style={[styles.chip, chip(s.start === start)]}
+                  onPress={() => setStart(s.start)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Quiet hour ${s.label}`}
+                >
+                  <Text style={[styles.chipText, { color: colors.foreground }]}>{s.label}</Text>
                 </Pressable>
               ))}
             </View>
+          ) : hint ? (
+            <Text style={[styles.note, { color: colors.mutedForeground }]}>{hint}</Text>
           ) : null}
           <Text style={[styles.sub, { color: colors.mutedForeground }]}>START</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>

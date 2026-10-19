@@ -47,6 +47,11 @@ export function localDate(at: Date, timeZone: string): string {
   return `${pad(p.year, 4)}-${pad(p.month)}-${pad(p.day)}`;
 }
 
+/** Local hour of day (0-23) of an instant in an IANA timezone. */
+export function localHour(at: Date, timeZone: string): number {
+  return parts(at, timeZone).hour;
+}
+
 export function addDays(date: string, n: number): string {
   return fmtUtc(parseDate(date) + n * DAY_MS);
 }

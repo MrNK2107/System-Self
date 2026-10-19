@@ -44,3 +44,8 @@ export async function invalidateGame(client: Invalidator, userId: string | null)
   ];
   await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));
 }
+
+/** GET /api/gym/briefing (the date is "today" for the user, or an explicit YYYY-MM-DD). */
+export const dungeonBriefingKey = (userId: string | null, date: string) => ["dungeon-briefing", userId, date] as const;
+/** GET /api/gym/quiet-hours. */
+export const quietHoursKey = (userId: string | null) => ["quiet-hours", userId] as const;

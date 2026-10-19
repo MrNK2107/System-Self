@@ -1,11 +1,18 @@
 import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { CrowdReportSheet } from "@/components/CrowdReportSheet";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { useGym } from "@/features/gym/context/GymContext";
 import { PlanEditor } from "@/features/gym/components/PlanEditor";
+import { api } from "@/lib/api/client";
+import { getOutbox } from "@/lib/api/outbox";
+import { submitCrowdReport, type CrowdLevel } from "@/lib/game/dungeon";
+import { quietHoursKey } from "@/lib/game/keys";
 import type { PlanDraft } from "@/lib/game/gym";
 import { planBlocksFor } from "@/lib/game/gym";
 
@@ -52,6 +59,11 @@ export default function GymScreen() {
   const [editorError, setEditorError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
+  // The session just completed, while the scout-report sheet is offered for it.
+  const [crowdFor, setCrowdFor] = useState<string | null>(null);
+  const [crowdBusy, setCrowdBusy] = useState(false);
+  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { user } = useAuth();
   const timeZone = user?.timezone;
@@ -91,6 +103,7 @@ export default function GymScreen() {
     try {
       const r = await completeWorkoutSession(activeSessionId);
       if (r.ok) {
+        setCrowdFor(r.value.session.id);
         setMessage(
           r.value.points > 0
             ? `Session recorded. BODY +${r.value.points.toFixed(1)}.`
@@ -103,6 +116,26 @@ export default function GymScreen() {
       }
     } finally {
       setWorking(false);
+    }
+  };
+
+  const chooseCrowd = async (level: CrowdLevel | null) => {
+    const sessionId = crowdFor;
+    if (!sessionId || crowdBusy) return;
+    if (level === null) {
+      setCrowdFor(null);
+      return;
+    }
+    setCrowdBusy(true);
+    try {
+      const r = await submitCrowdReport(api, getOutbox(), level, sessionId, `crowd-${sessionId}`);
+      if (r.ok) void queryClient.invalidateQueries({ queryKey: quietHoursKey(user?.id ?? null) });
+      else setMessage("Scout report not sent. Sync pending.");
+    } catch {
+      setMessage("Scout report not sent. Try again later.");
+    } finally {
+      setCrowdBusy(false);
+      setCrowdFor(null);
     }
   };
 
@@ -217,6 +250,9 @@ export default function GymScreen() {
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.rowBetween}>
               <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Today Workout</Text>
+              <TouchableOpacity onPress={() => router.push("/dungeon/briefing")} accessibilityRole="button" accessibilityLabel="Briefing">
+                <Text style={{ color: colors.primary, letterSpacing: 1, fontSize: 11 }}>BRIEFING</Text>
+              </TouchableOpacity>
               {!activeSession ? (
                 <TouchableOpacity onPress={() => void startSession()} disabled={working || restoring}>
                   <Text style={{ color: colors.primary, opacity: working || restoring ? 0.5 : 1 }}>
@@ -382,6 +418,7 @@ export default function GymScreen() {
           </View>
         )}
       </ScrollView>
+      <CrowdReportSheet visible={crowdFor !== null} busy={crowdBusy} onChoose={(l) => void chooseCrowd(l)} />
     </View>
   );
 }

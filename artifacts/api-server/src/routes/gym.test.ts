@@ -71,7 +71,7 @@ test("first GET creates the default plan", { skip }, async () => {
   assert.equal(plan.isActive, true);
   assert.equal(res.body.activePlanId, plan.id);
   assert.deepEqual(plan.days.map((d: { weekday: string }) => d.weekday), ["MON", "WED", "FRI"]);
-  assert.equal(res.body.exercises.length, 8);
+  assert.equal(res.body.exercises.length, 20);
   assert.deepEqual(res.body.recentSessions, []);
   assert.deepEqual(res.body.personalRecords, []);
   const again = await request(a).get("/api/gym").set(auth(token));

@@ -21,6 +21,8 @@ import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
 import { QuestCard } from "@/components/QuestCard";
 import { SlotPicker } from "@/components/SlotPicker";
 import { FloorQuestCard } from "@/components/FloorQuestCard";
+import { useQuietHours } from "@/hooks/useDungeon";
+import { quietChips, quietHint } from "@/lib/game/dungeon";
 import { shadowTallyLine } from "@/lib/game/adherence";
 import type { RefuseOutcome } from "@/context/AppContext";
 import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
@@ -129,6 +131,8 @@ export default function QuestsScreen() {
   const [refuseBusy, setRefuseBusy] = useState(false);
   const [slotting, setSlotting] = useState<Quest | null>(null);
   const [slotBusy, setSlotBusy] = useState(false);
+  const quiet = useQuietHours(slotting !== null);
+  const openBriefing = () => router.push("/dungeon/briefing");
   // The floor routine offered right after a BODY quest was refused (cleared when dismissed or started).
   const [floorOffer, setFloorOffer] = useState<RefuseOutcome | null>(null);
   // The 409 refusal_limit marker belongs to one account and one ISO week.
@@ -463,7 +467,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeDailies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} onBriefing={openBriefing} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
                 ))}
                 {refusalLimit && (
                   <Text style={[styles.refusalNote, { color: colors.destructive }]}>{REFUSAL_RULE}</Text>
@@ -481,7 +485,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeWeeklies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} onBriefing={openBriefing} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
                 ))}
               </View>
             )}
@@ -625,6 +629,8 @@ export default function QuestsScreen() {
         visible={slotting !== null}
         questTitle={slotting?.title ?? ""}
         current={slotting?.slotStart && slotting.slotEnd ? { slotStart: slotting.slotStart, slotEnd: slotting.slotEnd } : null}
+        suggestions={quiet.data ? quietChips(quiet.data.suggestions) : undefined}
+        hint={quietHint(quiet.data)}
         busy={slotBusy}
         onCancel={() => setSlotting(null)}
         onConfirm={(slot) => void saveSlot(slot)}

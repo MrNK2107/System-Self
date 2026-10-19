@@ -3,6 +3,7 @@ import { and, asc, count, eq, ne, sql } from "drizzle-orm";
 import {
   bodyPartScores,
   exercises,
+  gymCrowdReports,
   logs,
   performedSets,
   personalRecords,
@@ -11,8 +12,20 @@ import {
   workoutSessions,
   type Db,
 } from "@workspace/db";
-import { computeGymPoints, localDate } from "@workspace/engine";
 import {
+  EXERCISE_FALLBACKS,
+  EXERCISE_HOWTO,
+  briefingBlocks,
+  computeGymPoints,
+  estimatedMinutes,
+  localDate,
+  localHour,
+  quietHours,
+  type CrowdLevel,
+} from "@workspace/engine";
+import {
+  BriefingQuerySchema,
+  CrowdReportRequestSchema,
   PlanCreateRequestSchema,
   PlanPatchRequestSchema,
   SessionCompleteRequestSchema,
@@ -89,6 +102,68 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
       };
     });
     res.json(body);
+  });
+
+  /** Today's dungeon: the active plan's blocks for that weekday, or the beginner day, with fallbacks and how-to. */
+  router.get("/gym/briefing", async (req, res) => {
+    const query = BriefingQuerySchema.parse(req.query);
+    const userId = req.user!.id;
+    const body = await withUserLock(db, userId, async (tx) => {
+      await ensureDefaultPlan(tx, userId);
+      const date = query.date ?? localDate(clock(), await userTimezone(tx, userId));
+      const [active] = await tx
+        .select()
+        .from(workoutPlans)
+        .where(and(eq(workoutPlans.userId, userId), eq(workoutPlans.isActive, true)))
+        .limit(1);
+      const { source, blocks } = briefingBlocks(active?.days ?? [], weekdayOf(date));
+      const rows = await tx.select().from(exercises).where(visibleExercises(userId));
+      const nameOf = new Map(rows.map((e) => [e.id, e.name]));
+      return {
+        date,
+        source,
+        blocks: blocks.map((b) => ({
+          exerciseId: b.exerciseId,
+          name: nameOf.get(b.exerciseId) ?? b.exerciseId,
+          sets: b.sets,
+          repRange: b.repRange,
+          restSec: b.restSec,
+          howTo: EXERCISE_HOWTO[b.exerciseId] ?? "",
+          fallbacks: (EXERCISE_FALLBACKS[b.exerciseId] ?? []).map((id) => ({ exerciseId: id, name: nameOf.get(id) ?? id })),
+        })),
+        estimatedMinutes: estimatedMinutes(blocks),
+      };
+    });
+    res.json(body);
+  });
+
+  /** Scout report: how crowded the gym was. Weekday and hour are the user's local ones at report time. */
+  router.post("/gym/crowd", async (req, res) => {
+    const body = CrowdReportRequestSchema.parse(req.body ?? {});
+    const userId = req.user!.id;
+    await withIdempotency(db, req, res, "POST /gym/crowd", async (tx) => {
+      const now = clock();
+      const tz = await userTimezone(tx, userId);
+      const weekday = new Date(`${localDate(now, tz)}T00:00:00Z`).getUTCDay();
+      const hour = localHour(now, tz);
+      let sessionId: string | null = null;
+      if (body.sessionId) {
+        const session = await ownSession(tx, userId, body.sessionId);
+        if (!session) return notFound("Session");
+        sessionId = session.id;
+      }
+      await tx.insert(gymCrowdReports).values({ userId, sessionId, level: body.level, weekday, hour });
+      return { status: 201, body: { ok: true, weekday, hour } };
+    }, { preferClientId: true });
+  });
+
+  router.get("/gym/quiet-hours", async (req, res) => {
+    const userId = req.user!.id;
+    const rows = await db
+      .select({ weekday: gymCrowdReports.weekday, hour: gymCrowdReports.hour, level: gymCrowdReports.level })
+      .from(gymCrowdReports)
+      .where(eq(gymCrowdReports.userId, userId));
+    res.json(quietHours(rows.map((r) => ({ ...r, level: r.level as CrowdLevel }))));
   });
 
   router.post("/gym/plans", async (req, res) => {
