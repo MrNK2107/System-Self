@@ -29,3 +29,23 @@ test("the feature list does not promise anything that scores", () => {
   assert.ok(PRO_FEATURES.length >= 12);
   assert.ok(!PRO_FEATURES.some((f) => /S-rank|score boost|multiplier/i.test(f)));
 });
+
+import { POLL_DELAYS_MS, pollUntilPro } from "./core";
+
+const st = (tier: "free" | "pro") => ({ tier, expiresAt: null, source: null });
+
+test("pollUntilPro stops at the first pro answer and sleeps with backoff", async () => {
+  const slept: number[] = [];
+  let n = 0;
+  const r = await pollUntilPro(async () => st(++n === 3 ? "pro" : "free"), async (ms) => void slept.push(ms));
+  assert.equal(r, "pro");
+  assert.deepEqual(slept, [1000, 2000]);
+});
+
+test("pollUntilPro times out after the full schedule (about 30 s) and survives fetch errors", async () => {
+  const slept: number[] = [];
+  const r = await pollUntilPro(async () => { throw new Error("offline"); }, async (ms) => void slept.push(ms));
+  assert.equal(r, "pending");
+  assert.deepEqual(slept, [...POLL_DELAYS_MS]);
+  assert.equal(slept.reduce((a, b) => a + b, 0), 29000);
+});

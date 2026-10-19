@@ -1,6 +1,6 @@
 // Account deletion. Rows owned by the user cascade with it; what other players kept about them is scrubbed here.
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
-import { notices, profiles, userReports, users } from "@workspace/db";
+import { billingEvents, notices, profiles, userReports, users } from "@workspace/db";
 import { FORMER_OPERATOR_HANDLE } from "@workspace/contracts";
 import type { Tx } from "./user-lock";
 
@@ -36,5 +36,7 @@ export async function deleteAccount(tx: Tx, userId: string): Promise<void> {
     .update(userReports)
     .set({ subjectHandle: me.username })
     .where(and(eq(userReports.subjectId, userId), isNull(userReports.subjectHandle)));
+  // Keep each billing event's id and type (replay protection); drop the payload, which carries the user's ids.
+  await tx.update(billingEvents).set({ payload: {} }).where(eq(billingEvents.userId, userId));
   await tx.delete(users).where(eq(users.id, userId));
 }

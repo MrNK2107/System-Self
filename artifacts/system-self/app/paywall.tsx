@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { useColors } from "@/hooks/useColors";
+import { api } from "@/lib/api/client";
 import { useGameUserId } from "@/hooks/useGameState";
 import { useBillingStatusQuery } from "@/hooks/usePro";
 import { PRO_LOCK_LABEL } from "@/lib/api/pro";
@@ -14,6 +15,8 @@ import {
   PRO_FEATURES,
   STORE_ONLY_LINE,
   billingStatusKey,
+  fetchBillingStatus,
+  pollUntilPro,
   type Plan,
   type PlanId,
 } from "@/lib/billing/core";
@@ -45,7 +48,24 @@ export default function PaywallScreen() {
     };
   }, [userId]);
 
-  const refresh = useCallback(() => qc.invalidateQueries({ queryKey: billingStatusKey(userId) }), [qc, userId]);
+  // The webhook grants PRO, so after a purchase or restore poll the server (about 29 s) until it says pro.
+  const confirm = useCallback(async () => {
+    setMessage({ text: "Purchase received. The System is confirming your access.", tone: "info" });
+    const result = await pollUntilPro(
+      async () => {
+        const status = await fetchBillingStatus(api);
+        qc.setQueryData(billingStatusKey(userId), status);
+        return status;
+      },
+      (ms) => new Promise((r) => setTimeout(r, ms)),
+    );
+    await qc.invalidateQueries({ queryKey: billingStatusKey(userId) });
+    setMessage(
+      result === "pro"
+        ? { text: "Access confirmed. PRO is active.", tone: "info" }
+        : { text: "Confirmation is pending. PRO will appear shortly.", tone: "info" },
+    );
+  }, [qc, userId]);
 
   const plans: readonly Plan[] = store.state === "ready" ? store.plans : FALLBACK_PLANS;
   const isPro = billing?.tier === "pro";
@@ -56,8 +76,7 @@ export default function PaywallScreen() {
     setMessage(null);
     const result = await purchasePlan(userId, store.packages[selected]);
     if (result === "purchased") {
-      await refresh();
-      setMessage({ text: "Purchase received. The System is confirming your access.", tone: "info" });
+      await confirm();
     } else if (result === "failed") {
       setMessage({ text: "The purchase did not complete. You were not charged by the System.", tone: "error" });
     }
@@ -70,8 +89,7 @@ export default function PaywallScreen() {
     setMessage(null);
     const result = await restorePurchases(userId);
     if (result === "restored") {
-      await refresh();
-      setMessage({ text: "Restore complete. The System is confirming your access.", tone: "info" });
+      await confirm();
     } else {
       setMessage({ text: "Nothing could be restored right now.", tone: "error" });
     }
@@ -126,10 +144,10 @@ export default function PaywallScreen() {
       <AuthLink label={busy === "restore" ? "RESTORING..." : "RESTORE PURCHASES"} onPress={() => void (busy === null && restore())} />
 
       <View style={s.legal}>
-        <Text style={[s.legalText, { color: colors.mutedForeground }]} onPress={() => router.push("/legal/terms")}>
+        <Text accessibilityRole="link" style={[s.legalText, { color: colors.mutedForeground }]} onPress={() => router.push("/legal/terms")}>
           TERMS
         </Text>
-        <Text style={[s.legalText, { color: colors.mutedForeground }]} onPress={() => router.push("/legal/privacy")}>
+        <Text accessibilityRole="link" style={[s.legalText, { color: colors.mutedForeground }]} onPress={() => router.push("/legal/privacy")}>
           PRIVACY
         </Text>
       </View>

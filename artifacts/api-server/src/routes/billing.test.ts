@@ -48,7 +48,7 @@ test("webhook is closed without a configured secret or a valid bearer", { skip }
   assert.equal((await post(app(null), body)).status, 503);
   assert.equal((await post(app(), body, {})).status, 401);
   assert.equal((await post(app(), body, { Authorization: "Bearer nope" })).status, 401);
-  assert.equal((await post(app(), body, { Authorization: SECRET })).status, 401);
+  assert.equal((await post(app(), body, { Authorization: "Basic abc" })).status, 401);
   assert.equal(await row(id), undefined);
   assert.equal((await db!.select().from(billingEvents)).length, 0);
 });
@@ -151,4 +151,68 @@ test("unknown event types are ignored with 200; malformed payloads are 400", { s
   assert.equal(await row(id), undefined);
   assert.equal((await post(a, { nope: true })).status, 400);
   assert.equal((await post(a, "garbage")).status, 400);
+});
+
+import { grantEntitlement } from "../services/entitlements";
+
+test("an active admin grant is never downgraded or re-sourced by webhook events", { skip }, async () => {
+  const a = app();
+  const { id } = await setup(a);
+  await grantEntitlement(db!, id, "pro", null, NOW);
+  await post(a, ev("x", "EXPIRATION", id, "2026-03-10T07:00:00Z", "2026-03-10T07:00:00Z"));
+  let r = (await row(id))!;
+  assert.equal(r.tier, "pro");
+  assert.equal(r.source, "admin");
+  await post(a, ev("buy", "INITIAL_PURCHASE", id, "2026-03-10T07:30:00Z", "2026-04-10T07:00:00Z"));
+  r = (await row(id))!;
+  assert.equal(r.source, "admin");
+  assert.equal(r.expiresAt, null);
+  assert.equal(r.productId, null);
+  assert.equal((await db!.select().from(billingEvents)).length, 2, "still recorded");
+});
+
+test("once the admin grant has expired, webhook events apply", { skip }, async () => {
+  const a = app();
+  const { id } = await setup(a);
+  await grantEntitlement(db!, id, "pro", new Date("2026-03-01T00:00:00Z"), new Date("2026-02-01T00:00:00Z"));
+  await post(a, ev("r", "RENEWAL", id, "2026-03-10T07:00:00Z", "2026-04-10T07:00:00Z"));
+  const r = (await row(id))!;
+  assert.equal(r.source, "revenuecat");
+  assert.equal(r.tier, "pro");
+});
+
+test("grantEntitlement clears the revenuecat bookkeeping", { skip }, async () => {
+  const a = app();
+  const { id } = await setup(a);
+  await post(a, ev("buy", "INITIAL_PURCHASE", id, "2026-03-10T07:00:00Z", "2026-04-10T07:00:00Z"));
+  await grantEntitlement(db!, id, "pro", null, NOW);
+  const r = (await row(id))!;
+  assert.equal(r.latestEventAt, null);
+  assert.equal(r.productId, null);
+  assert.equal(r.periodType, null);
+});
+
+test("raw secret header is accepted; SUBSCRIPTION_EXTENDED and NON_RENEWING_PURCHASE grant", { skip }, async () => {
+  const a = app();
+  const { id } = await setup(a);
+  const raw = { Authorization: SECRET };
+  assert.equal((await post(a, ev("n1", "NON_RENEWING_PURCHASE", id, "2026-03-10T07:00:00Z", "2026-04-10T07:00:00Z"), raw)).status, 200);
+  assert.equal((await row(id))!.tier, "pro");
+  assert.equal((await post(a, ev("n2", "SUBSCRIPTION_EXTENDED", id, "2026-03-11T07:00:00Z", "2026-05-10T07:00:00Z"), raw)).status, 200);
+  assert.equal((await row(id))!.expiresAt!.toISOString(), "2026-05-10T07:00:00.000Z");
+  const { id: id2 } = await setup(a, { email: "b@example.com", username: "bob_1" });
+  await post(a, ev("n3", "NON_RENEWING_PURCHASE", id2, "2026-03-10T07:00:00Z"), raw);
+  assert.equal(await row(id2), undefined, "no expiry: not granted");
+});
+
+test("deleting an account blanks its billing_events payloads but keeps id and type", { skip }, async () => {
+  const a = app();
+  const { id, token } = await setup(a);
+  await post(a, ev("keep", "INITIAL_PURCHASE", id, "2026-03-10T07:00:00Z", "2026-04-10T07:00:00Z"));
+  const del = await request(a).delete("/api/auth/account").set(auth(token)).send({ password: "correct horse battery" });
+  assert.equal(del.status, 204);
+  const [e] = await db!.select().from(billingEvents).where(eq(billingEvents.id, "keep"));
+  assert.deepEqual(e!.payload, {});
+  assert.equal(e!.type, "INITIAL_PURCHASE");
+  assert.equal(e!.userId, null);
 });

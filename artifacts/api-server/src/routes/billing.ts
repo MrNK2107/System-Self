@@ -32,8 +32,10 @@ export function billingRoutes(
       return;
     }
     const header = req.get("authorization") ?? "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-    if (!token || !secretsMatch(token, secret)) {
+    // RevenueCat sends the configured value verbatim, so both `Bearer <secret>` and the raw `<secret>` are accepted.
+    const token = header.startsWith("Bearer ") ? header.slice(7) : header;
+    if (!token || !(secretsMatch(token, secret) || secretsMatch(header, secret))) {
+      req.log.warn({ event: "revenuecat_auth_failed", hasHeader: header !== "", bearerScheme: header.startsWith("Bearer ") }, "billing_webhook_unauthorized");
       res.status(401).json({ error: "Unauthorized" });
       return;
     }

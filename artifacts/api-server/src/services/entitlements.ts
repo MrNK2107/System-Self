@@ -6,6 +6,7 @@ import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { billingEvents, entitlements, users, type Db } from "@workspace/db";
+import { logger } from "../lib/logger";
 import { PRO_REQUIRED_CODE, type BillingStatus } from "@workspace/contracts";
 
 /** True when the user holds a `pro` row that has not expired at `now` (the expiry instant itself is expired). */
@@ -29,8 +30,8 @@ export async function grantEntitlement(
 ) {
   const [row] = await db
     .insert(entitlements)
-    .values({ userId, tier, source: "admin", expiresAt, updatedAt: now })
-    .onConflictDoUpdate({ target: entitlements.userId, set: { tier, source: "admin", expiresAt, updatedAt: now } })
+    .values({ userId, tier, source: "admin", expiresAt, productId: null, periodType: null, latestEventAt: null, updatedAt: now })
+    .onConflictDoUpdate({ target: entitlements.userId, set: { tier, source: "admin", expiresAt, productId: null, periodType: null, latestEventAt: null, updatedAt: now } })
     .returning();
   return row!;
 }
@@ -83,10 +84,10 @@ export const RevenueCatWebhookSchema = z.object({
 });
 export type RevenueCatEvent = z.infer<typeof RevenueCatWebhookSchema>["event"];
 
-const GRANTING = new Set(["INITIAL_PURCHASE", "RENEWAL", "PRODUCT_CHANGE", "UNCANCELLATION"]);
+const GRANTING = new Set(["INITIAL_PURCHASE", "RENEWAL", "PRODUCT_CHANGE", "UNCANCELLATION", "SUBSCRIPTION_EXTENDED", "NON_RENEWING_PURCHASE"]);
 const KEEPING = new Set(["CANCELLATION", "BILLING_ISSUE"]);
 
-export type RevenueCatOutcome = "replay" | "unknown_user" | "ignored_type" | "stale" | "applied";
+export type RevenueCatOutcome = "replay" | "unknown_user" | "ignored_type" | "stale" | "ignored_admin" | "applied";
 
 /**
  * Applies one webhook event inside a transaction. Idempotent by event id (billing_events). Order-safe: an event older
@@ -114,8 +115,17 @@ export async function applyRevenueCatEvent(db: Db, event: RevenueCatEvent, paylo
     if (row?.latestEventAt && eventAt.getTime() < row.latestEventAt.getTime()) return "stale";
     const expiry = event.expiration_at_ms != null ? new Date(event.expiration_at_ms) : null;
 
+    // An unexpired admin grant wins: the event stays recorded and stamps the ordering, but never changes the row.
+    if (row && row.source === "admin" && row.tier === "pro" && (row.expiresAt === null || row.expiresAt.getTime() > now.getTime())) {
+      await tx.update(entitlements).set({ latestEventAt: eventAt }).where(eq(entitlements.userId, userId));
+      return "ignored_admin";
+    }
+
     if (granting) {
-      if (!expiry) return "ignored_type"; // a grant without an expiry would never lapse
+      if (!expiry) {
+        logger.warn({ event: "revenuecat_grant_without_expiry", userId, eventId: event.id, type: event.type }, "billing_grant_without_expiry");
+        return "ignored_type"; // a grant without an expiry would never lapse
+      }
       await tx
         .insert(entitlements)
         .values({ userId, tier: "pro", source: "revenuecat", expiresAt: expiry, productId: event.product_id ?? null, periodType: event.period_type ?? null, latestEventAt: eventAt, updatedAt: now })

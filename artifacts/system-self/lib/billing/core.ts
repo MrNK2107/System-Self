@@ -76,3 +76,23 @@ export const PRO_FEATURES: readonly string[] = [
   "Priority rival matching.",
   "Custom domains beyond three.",
 ];
+
+/** Gaps between status checks after a purchase or restore: 1+2+3+5+8+10 = 29 s, then give up (the webhook may be late). */
+export const POLL_DELAYS_MS = [1000, 2000, 3000, 5000, 8000, 10000] as const;
+
+/** Polls the server until it reports pro; "pending" when the schedule runs out. Fetch errors count as "not yet". */
+export async function pollUntilPro(
+  fetchStatus: () => Promise<BillingStatus>,
+  sleep: (ms: number) => Promise<void>,
+  delays: readonly number[] = POLL_DELAYS_MS,
+): Promise<"pro" | "pending"> {
+  for (let i = 0; i <= delays.length; i++) {
+    try {
+      if ((await fetchStatus()).tier === "pro") return "pro";
+    } catch {
+      // keep polling
+    }
+    if (i < delays.length) await sleep(delays[i]!);
+  }
+  return "pending";
+}
