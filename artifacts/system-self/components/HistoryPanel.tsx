@@ -163,7 +163,7 @@ export function RankFreezeCard() {
         <Text style={[s.note, { color: colors.mutedForeground }]}>Available from {view.availableFrom}.</Text>
       ) : !open ? (
         <>
-          <Text style={[s.note, { color: colors.mutedForeground }]}>Pause decay and demotion for 7 days, once a month. Promotion is not paused.</Text>
+          <Text style={[s.note, { color: colors.mutedForeground }]}>Pause decay, demotion and promotion for 7 days, once a month. The rank holds still. You do not.</Text>
           <TouchableOpacity onPress={() => setOpen(true)} accessibilityRole="button" style={[s.outline, { borderColor: colors.primary }]}>
             <Text style={[s.outlineText, { color: colors.primary }]}>FREEZE RANK</Text>
           </TouchableOpacity>
