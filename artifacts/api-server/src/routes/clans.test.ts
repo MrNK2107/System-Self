@@ -1,7 +1,7 @@
 import test, { after, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { clanDispatches, clanMembers, clans, domainScores, jobRuns, logs, profiles, quests, users } from "@workspace/db";
 import { RANKED_DOMAINS, addDays, localDate, type RankedDomain } from "@workspace/engine";
@@ -17,6 +17,7 @@ import { app, assertContract, assertStoredNoticesMatchContract, auth, db, setup,
 import { grantEntitlement } from "../services/entitlements";
 import { hiddenAndTrajectory } from "../services/state";
 import { flagDeadWeight, recomputeClanScores, runSocialJobs } from "../jobs/social";
+import { computeClanScores } from "../services/clans";
 import { loadProjectionSubjects, projectUser } from "../services/projection";
 
 after(async () => {
@@ -93,7 +94,19 @@ async function holdClanRow(clanId: string) {
   await isLocked;
   return { release: async () => (release(), await done) };
 }
-const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/**
+ * Resolves once `n` backends of this database are blocked on a lock (the requests queued behind holdClanRow), so
+ * request order never depends on timing. Bounded: fails the test instead of hanging.
+ */
+async function waitForLockWaiters(n: number, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const res = await db!.execute(sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`);
+    if ((res.rows[0] as { n: number }).n >= n) return;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${n} backend(s) blocked on a lock`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
 
 const join = (u: U, clanId: string) => request(a()).post(`/api/clans/${clanId}/join`).set(auth(u.token)).send({});
 const mine = async (u: U): Promise<MyClanResponse> => {
@@ -394,6 +407,22 @@ test("a fresh joiner with no logs is not dead weight (flag job and remove use th
   assert.deepEqual(await flagDeadWeight(db!, now), { flagged: 1, cleared: 0 });
 });
 
+test("a forbidden log is not clan activity: dead weight flags and the active count ignore it", { skip }, async () => {
+  const now = new Date("2026-10-19T00:31:00Z");
+  clock = now;
+  const l = await mk("lead_1");
+  await makePro(l);
+  const c = await create(l);
+  await ageMembership(l.id);
+  await addLog(l.id, "2026-10-18");
+  const u = await mk("mem_1");
+  assert.equal((await join(u, c.id)).status, 204);
+  await ageMembership(u.id);
+  await db!.insert(logs).values({ userId: u.id, clientId: "forbidden-window", domain: "BODY", logType: "x", forbidden: true, occurredAt: new Date("2026-10-18T06:00:00Z"), localDate: "2026-10-18" });
+  assert.equal((await computeClanScores(db!, [await clanRow(c.id)], now)).get(c.id)!.activeMemberCount, 1);
+  assert.deepEqual(await flagDeadWeight(db!, now), { flagged: 1, cleared: 0 });
+});
+
 test("a transfer racing the heir's leave never leaves the clan without a leader", { skip }, async () => {
   clock = new Date();
   const l = await mk("lead_1");
@@ -403,9 +432,9 @@ test("a transfer racing the heir's leave never leaves the clan without a leader"
   assert.equal((await join(b, c.id)).status, 204);
   const hold = await holdClanRow(c.id);
   const transfer = request(a()).post("/api/clans/leader").set(auth(l.token)).send({ userId: b.id }).then((r) => r);
-  await pause(250);
+  await waitForLockWaiters(1);
   const leave = request(a()).post("/api/clans/leave").set(auth(b.token)).send({}).then((r) => r);
-  await pause(250);
+  await waitForLockWaiters(2);
   await hold.release();
   const [t, lv] = await Promise.all([transfer, leave]);
   assert.equal(t.status, 204);
@@ -427,9 +456,9 @@ test("a leave racing a removal answers not_in_clan and posts no LEFT dispatch", 
   await db!.update(clanMembers).set({ flaggedAt: new Date() }).where(eq(clanMembers.userId, u.id));
   const hold = await holdClanRow(c.id);
   const remove = request(a()).post(`/api/clans/members/${u.id}/remove`).set(auth(l.token)).send({}).then((r) => r);
-  await pause(250);
+  await waitForLockWaiters(1);
   const leave = request(a()).post("/api/clans/leave").set(auth(u.token)).send({}).then((r) => r);
-  await pause(250);
+  await waitForLockWaiters(2);
   await hold.release();
   const [rm, lv] = await Promise.all([remove, leave]);
   assert.equal(rm.status, 204);

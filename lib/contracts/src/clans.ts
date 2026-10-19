@@ -106,11 +106,48 @@ export const ClanDispatchSchema = z.object({
 });
 export type ClanDispatch = z.infer<typeof ClanDispatchSchema>;
 
-/** GET /api/clans/mine. `clan` is null (and the lists empty) when the viewer has no clan. `raid` arrives with raids (Task 5). */
+export const RaidTypeSchema = z.enum(["domain", "discipline", "body", "score"]);
+export type RaidType = z.infer<typeof RaidTypeSchema>;
+
+/**
+ * One clan in the viewer's raid group. Clan-level only: the metric is the clan's total (mind logs, body logs and
+ * sessions, quest completion %, summed hidden-score movement); no member's contribution is ever shown.
+ */
+export const RaidStandingSchema = z.object({
+  clanId: z.string().uuid(),
+  name: z.string(),
+  tag: z.string(),
+  clanRank: z.number().int().min(1).nullable(),
+  isMine: z.boolean(),
+  metricValue: z.number(),
+  position: z.number().int().min(1),
+});
+export type RaidStanding = z.infer<typeof RaidStandingSchema>;
+
+/** The viewer's clan's raid this week: live standings until the raid resolves (Sunday 23:59 UTC). */
+export const RaidSummarySchema = z.object({
+  weekKey: z.string(),
+  week: z.number().int(),
+  type: RaidTypeSchema,
+  startsAt: z.string(),
+  endsAt: z.string(),
+  resolved: z.boolean(),
+  /** Best first; clans tied on a metric share a position. */
+  standings: z.array(RaidStandingSchema),
+  myPosition: z.number().int().min(1),
+  myValue: z.number(),
+});
+export type RaidSummary = z.infer<typeof RaidSummarySchema>;
+
+/** GET /api/clans/raid. `raid` is null without a clan or when the clan has no raid (forming, or no rival clan). */
+export const RaidResponseSchema = z.object({ raid: RaidSummarySchema.nullable() });
+export type RaidResponse = z.infer<typeof RaidResponseSchema>;
+
+/** GET /api/clans/mine. `clan` is null (and the lists empty) when the viewer has no clan. */
 export const MyClanResponseSchema = z.object({
   clan: ClanSchema.nullable(),
   members: z.array(ClanMemberSchema),
   dispatches: z.array(ClanDispatchSchema),
-  raid: z.null(),
+  raid: RaidSummarySchema.nullable(),
 });
 export type MyClanResponse = z.infer<typeof MyClanResponseSchema>;

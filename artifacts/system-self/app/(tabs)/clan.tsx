@@ -9,7 +9,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ClanLeaderboardItem, MyClanResponse } from "@workspace/contracts";
 import { ScreenStatus } from "@/components/ScreenStatus";
 import { useColors } from "@/hooks/useColors";
-import { useClanActions, useClanLeaderboardQuery, useMyClanQuery } from "@/hooks/useClan";
+import { useClanActions, useClanLeaderboardQuery, useMyClanQuery, useRaidQuery } from "@/hooks/useClan";
+import { RAID_TYPE_RULE, raidMetricLabel, raidPositionLine, raidTimeLeft, raidTitle, raidValueLabel } from "@/lib/clan/raid";
 import {
   SYNC_PENDING_MESSAGE,
   clanLabel,
@@ -46,6 +47,46 @@ function Board({ items, mine }: { items: ClanLeaderboardItem[]; mine?: string })
           <Text style={[s.mono, { color: colors.foreground }]}>{scoreLabel(c.clanScore)}</Text>
         </View>
       ))}
+    </View>
+  );
+}
+
+/** This week's raid: type, standings (clan totals only), your clan's metric and the time left. Polled while focused. */
+function RaidCard() {
+  const colors = useColors();
+  const q = useRaidQuery(true);
+  const raid = q.data;
+  if (!raid) {
+    return (
+      <Section label="WEEKLY RAID">
+        <Text style={[s.muted, { color: colors.mutedForeground }]}>
+          {q.isError ? "The raid record is out of reach." : "No raid this week. A raid needs a rival clan of similar rank."}
+        </Text>
+      </Section>
+    );
+  }
+  return (
+    <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.primary + "40" }]}>
+      <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>WEEKLY RAID</Text>
+      <Text style={[s.clanName, { color: colors.foreground }]}>{raidTitle(raid)}</Text>
+      <Text style={[s.muted, { color: colors.mutedForeground }]}>{RAID_TYPE_RULE[raid.type]}</Text>
+      <Text style={[s.status, { color: colors.primary }]}>
+        {raid.resolved ? "CLOSED" : raidTimeLeft(raid.endsAt, new Date()).toUpperCase()} · {raidPositionLine(raid)}
+      </Text>
+      <View style={s.list}>
+        {raid.standings.map((c) => (
+          <View key={c.clanId} style={[s.boardRow, { borderColor: c.isMine ? colors.primary + "60" : colors.border }]}>
+            <Text style={[s.pos, { color: c.position === 1 ? "#D4B483" : colors.mutedForeground }]}>#{c.position}</Text>
+            <Text style={[s.boardName, { color: c.isMine ? colors.primary : colors.foreground }]} numberOfLines={1}>
+              {clanLabel(c)}
+            </Text>
+            <Text style={[s.mono, { color: colors.foreground }]}>{raidValueLabel(raid.type, c.metricValue)}</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={[s.statLabel, { color: colors.mutedForeground }]}>
+        {raidMetricLabel(raid.type).toUpperCase()} · YOUR CLAN {raidValueLabel(raid.type, raid.myValue)}
+      </Text>
     </View>
   );
 }
@@ -114,6 +155,8 @@ function MyClan({ data, onError }: { data: MyClanResponse; onError: (m: string |
           <Feather name="share-2" size={12} color={colors.primary} />
         </TouchableOpacity>
       </View>
+
+      <RaidCard />
 
       <TouchableOpacity
         onPress={() => router.push("/clan/members")}

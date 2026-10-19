@@ -17,6 +17,7 @@ export const NOTICE_ORDER: readonly NoticeKind[] = [
   "gym_unlocked",
   "rival_challenge_result",
   "rival_passed",
+  "raid_result",
 ];
 
 /** Sent as `?kinds=` / `?noticeKinds=` with every notice read: the server returns and pages only kinds this build renders. */
@@ -200,6 +201,16 @@ export function noticeView(group: NoticeGroup): NoticeView {
     case "rival_challenge_result": {
       const { challengeId: _id, ...result } = first.payload;
       return { modal: "challenge_result", result: { ...result, domain: result.domain as Domain } };
+    }
+    case "raid_result": {
+      const p = first.payload;
+      return {
+        modal: "system",
+        tone: p.won ? "info" : "alert",
+        label: "RAID RESULT",
+        title: `WEEK ${p.week}: POSITION ${p.position} OF ${p.count}`,
+        body: p.line,
+      };
     }
     case "quest_failed":
       return {

@@ -71,6 +71,18 @@ test("NoticeSchema is a union by kind with the exact payload the server writes f
       rivalStart: 30,
       rivalEnd: 31,
     },
+    raid_result: {
+      weekKey: "2026-W43",
+      week: 43,
+      type: "body",
+      position: 1,
+      count: 3,
+      won: true,
+      value: 14,
+      rivalValue: 9,
+      bonus: 16,
+      line: "RAID RESULT — WEEK 43. Your clan ranked 1 of 3. Body sessions: 14. Rival clan: 9. Gap: 5.",
+    },
   };
   for (const kind of NOTICE_KINDS) {
     assert.equal(NoticeSchema.parse({ ...base, kind, payload: payloads[kind] }).kind, kind);

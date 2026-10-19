@@ -7,7 +7,8 @@ import { useScreenFocused } from "@/hooks/useSocial";
 import { api } from "@/lib/api/client";
 import { getOutbox } from "@/lib/api/outbox";
 import { newClientId, type MutationResult } from "@/lib/game/actions";
-import { clanLeaderboardKey, clanRootKeys, clanSearchKey, myClanKey } from "@/lib/clan/keys";
+import { clanLeaderboardKey, clanRootKeys, clanSearchKey, myClanKey, raidKey } from "@/lib/clan/keys";
+import { fetchRaid } from "@/lib/clan/raid";
 import {
   createClan,
   fetchClanLeaderboard,
@@ -29,6 +30,18 @@ export function useMyClanQuery() {
     queryKey: myClanKey(userId),
     queryFn: () => fetchMyClan(api),
     enabled: !!userId,
+    refetchInterval: socialRefetchInterval(focused),
+  });
+}
+
+/** The clan's raid this week, polled while a clan screen is focused. Only enabled with a clan. */
+export function useRaidQuery(enabled: boolean) {
+  const userId = useGameUserId();
+  const focused = useScreenFocused();
+  return useQuery({
+    queryKey: raidKey(userId),
+    queryFn: () => fetchRaid(api),
+    enabled: !!userId && enabled,
     refetchInterval: socialRefetchInterval(focused),
   });
 }

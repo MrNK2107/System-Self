@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, date, index, integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, index, integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { users } from "./users";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
@@ -79,6 +79,36 @@ export const clanDispatches = pgTable(
   (t) => [index("clan_dispatches_clan_created_idx").on(t.clanId, t.createdAt.desc())],
 );
 
+/**
+ * One clan's entry in a weekly raid (PRD 15). Written at the start of the week (`resolvedAt` null, `metricValue`
+ * 0), settled at Sunday 23:59 UTC with the metric, the position in the group and the winner flag. `weekKey` is the
+ * ISO week `YYYY-Www`; `groupId` ties the 2-4 clans that face each other. A clan raids once a week.
+ */
+export const clanRaids = pgTable(
+  "clan_raids",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    weekKey: text("week_key").notNull(),
+    type: text("type").notNull(),
+    groupId: uuid("group_id").notNull(),
+    clanId: uuid("clan_id")
+      .notNull()
+      .references(() => clans.id, { onDelete: "cascade" }),
+    metricValue: real("metric_value").notNull().default(0),
+    position: integer("position"),
+    winner: boolean("winner").notNull().default(false),
+    createdAt: ts("created_at").defaultNow().notNull(),
+    resolvedAt: ts("resolved_at"),
+  },
+  (t) => [
+    uniqueIndex("clan_raids_week_clan_uq").on(t.weekKey, t.clanId),
+    index("clan_raids_group_idx").on(t.groupId),
+    index("clan_raids_unresolved_idx").on(t.weekKey).where(sql`${t.resolvedAt} is null`),
+    check("clan_raids_type_valid", sql`${t.type} in ('domain', 'discipline', 'body', 'score')`),
+    check("clan_raids_week_key_valid", sql`${t.weekKey} ~ '^[0-9]{4}-W[0-9]{2}$'`),
+  ],
+);
+
 /** The UTC date a daily job last completed (e.g. clan scores at 00:30 UTC). */
 export const jobRuns = pgTable("job_runs", {
   job: text("job").primaryKey(),
@@ -87,4 +117,5 @@ export const jobRuns = pgTable("job_runs", {
 
 export type Clan = typeof clans.$inferSelect;
 export type ClanMember = typeof clanMembers.$inferSelect;
+export type ClanRaid = typeof clanRaids.$inferSelect;
 export type ClanDispatch = typeof clanDispatches.$inferSelect;

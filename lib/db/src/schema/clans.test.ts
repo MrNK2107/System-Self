@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "../testing";
 import { users } from "./users";
-import { clanMembers, clans } from "./clans";
+import { clanMembers, clanRaids, clans } from "./clans";
 
 after(() => closeTestDb());
 
@@ -50,4 +50,22 @@ test("clans: unique lower name and invite code, valid tag/status/description; on
   assert.equal((await db.select().from(clanMembers)).length, 1);
   await db.delete(clans).where(eq(clans.id, c!.id));
   assert.equal((await db.select().from(clanMembers)).length, 0);
+});
+
+test("clan_raids: one entry per clan per week, valid type and week key, deleted with the clan", async (t) => {
+  const db = getTestDb();
+  if (!db) return t.skip("TEST_DATABASE_URL not set");
+  await resetDb(db);
+  const [c] = await db.insert(clans).values({ name: "Iron", nameLower: "iron", tag: "IRON", inviteCode: "AAAA1111" }).returning();
+  const row = { weekKey: "2026-W43", type: "body", groupId: "6b1d0c7e-1111-4222-8333-444455556666", clanId: c!.id };
+  const [r] = await db.insert(clanRaids).values(row).returning();
+  assert.equal(r!.metricValue, 0);
+  assert.equal(r!.position, null);
+  assert.equal(r!.winner, false);
+  assert.equal(r!.resolvedAt, null);
+  await assert.rejects(db.insert(clanRaids).values(row), (e: any) => code(e) === "23505");
+  await assert.rejects(db.insert(clanRaids).values({ ...row, weekKey: "2026-W44", type: "mind" }), (e: any) => code(e) === "23514");
+  await assert.rejects(db.insert(clanRaids).values({ ...row, weekKey: "2026-43" }), (e: any) => code(e) === "23514");
+  await db.delete(clans).where(eq(clans.id, c!.id));
+  assert.equal((await db.select().from(clanRaids)).length, 0);
 });

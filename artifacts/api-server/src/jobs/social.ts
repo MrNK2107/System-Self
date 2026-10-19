@@ -5,6 +5,9 @@ import { clans, jobRuns, type Db } from "@workspace/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { assignClanRanks, computeClanScores, repairClans, updateDeadWeightFlags } from "../services/clans";
+import type { AiDeps } from "../lib/ai";
+import { dueRaidGroups, resolveRaidGroup, startRaidWeek } from "../services/raids";
+import { raidWeekOf } from "@workspace/engine";
 import { ensureAssignments, usersWithExpiredSlots } from "../services/rivals";
 import { withUserLock } from "../services/user-lock";
 
@@ -13,6 +16,8 @@ export const JOB_LOCK_NAMESPACE = 5501;
 export const RIVAL_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:rival-refresh" } as const;
 export const CLAN_SCORE_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:clan-scores" } as const;
 export const DEAD_WEIGHT_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:dead-weight" } as const;
+export const RAID_START_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:raid-start" } as const;
+export const RAID_RESOLVE_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:raid-resolve" } as const;
 /** Clans scored per batch (one hidden-score batch query per batch). */
 export const CLAN_SCORE_BATCH = 100;
 /** Daily clan jobs run from this UTC time of day (minutes after midnight): 00:30 UTC. */
@@ -130,17 +135,77 @@ export async function recomputeClanScores(
   }
 }
 
+/** A weekly job is due while its stored marker (the Monday date of the last week it completed) is before `weekStart`. */
+async function weeklyDue(db: Pick<Db, "select">, job: string, weekStart: Date): Promise<boolean> {
+  const [row] = await db.select().from(jobRuns).where(eq(jobRuns.job, job)).limit(1);
+  return !row || row.lastRunDate < utcDate(weekStart);
+}
+
+/**
+ * Weekly raid start (Monday 00:00 UTC onward, once per week): groups the active ranked clans by nearest rank and
+ * enters them in this week's raid. One set-based transaction, so it needs no time budget. Returns the clans
+ * entered, or "not_due" when this week already started.
+ */
+export async function startWeeklyRaids(db: Db, now: Date): Promise<number | "not_due"> {
+  const week = raidWeekOf(now);
+  if (!(await weeklyDue(db, "raid-start", week.start))) return "not_due";
+  const entered = await startRaidWeek(db, now);
+  await db.insert(jobRuns).values({ job: "raid-start", lastRunDate: utcDate(week.start) }).onConflictDoUpdate({ target: jobRuns.job, set: { lastRunDate: utcDate(week.start) } });
+  return entered;
+}
+
+/**
+ * Weekly raid resolution (from Sunday 23:59 UTC, once per week): settles every group of a closed week, one
+ * transaction per group, stopping once `budgetMs` is spent (after at least one group; the next tick resumes).
+ * The week is recorded once nothing is left. Returns the groups settled, or "not_due".
+ */
+export async function resolveWeeklyRaids(
+  db: Db,
+  now: Date,
+  opts: { budgetMs?: number; nowMs?: () => number; ai?: AiDeps } = {},
+): Promise<number | "not_due"> {
+  const current = raidWeekOf(now);
+  const closed = now.getTime() >= current.end.getTime() ? current : raidWeekOf(new Date(current.start.getTime() - 1));
+  if (!(await weeklyDue(db, "raid-resolve", closed.start))) return "not_due";
+  const budgetMs = opts.budgetMs ?? env.SOCIAL_JOB_BUDGET_MS;
+  const nowMs = opts.nowMs ?? Date.now;
+  const started = nowMs();
+  const groups = await dueRaidGroups(db, now);
+  let settled = 0;
+  for (const [i, groupId] of groups.entries()) {
+    try {
+      if (await resolveRaidGroup(db, groupId, now, opts.ai ?? {})) settled++;
+    } catch (err) {
+      logger.error({ err, groupId }, "Raid resolution failed");
+      return settled; // the group stays unsettled; the next tick retries it
+    }
+    if (nowMs() - started >= budgetMs && i < groups.length - 1) {
+      logger.info({ settled, pending: groups.length - i - 1 }, "Raid resolution stopped at its time budget");
+      return settled;
+    }
+  }
+  if ((await dueRaidGroups(db, now, 1)).length === 0) {
+    await db.insert(jobRuns).values({ job: "raid-resolve", lastRunDate: utcDate(closed.start) }).onConflictDoUpdate({ target: jobRuns.job, set: { lastRunDate: utcDate(closed.start) } });
+  }
+  return settled;
+}
+
 /** One pass of every social job. Cheap when nothing is due (an indexed query per job). */
 export async function runSocialJobs(
   db: Db,
   now: Date,
+  ai: AiDeps = {},
 ): Promise<{
+  raidResolve: number | "not_due" | "skipped";
+  raidStart: number | "not_due" | "skipped";
   rivalRefresh: number | "skipped";
   deadWeight: { flagged: number; cleared: number } | "not_due" | "skipped";
   clanScores: number | "not_due" | "skipped";
 }> {
+  const raidResolve = await withJobLock(db, RAID_RESOLVE_JOB_LOCK, () => resolveWeeklyRaids(db, now, { ai }));
+  const raidStart = await withJobLock(db, RAID_START_JOB_LOCK, () => startWeeklyRaids(db, now));
   const rivalRefresh = await withJobLock(db, RIVAL_JOB_LOCK, () => refreshExpiredRivals(db, now));
   const deadWeight = await withJobLock(db, DEAD_WEIGHT_JOB_LOCK, () => flagDeadWeight(db, now));
   const clanScores = await withJobLock(db, CLAN_SCORE_JOB_LOCK, () => recomputeClanScores(db, now));
-  return { rivalRefresh, deadWeight, clanScores };
+  return { raidResolve, raidStart, rivalRefresh, deadWeight, clanScores };
 }

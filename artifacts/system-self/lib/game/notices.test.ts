@@ -50,6 +50,7 @@ test("NOTICE_ORDER covers every server notice kind exactly once", () => {
     "gym_unlocked",
     "rival_challenge_result",
     "rival_passed",
+    "raid_result",
   ]);
   // The kinds filter sent with every notice read is exactly this list.
   assert.equal(NOTICE_KINDS_PARAM, NOTICE_ORDER.join(","));
@@ -257,5 +258,20 @@ test("a single ghost rival_passed notice carries the SIM tag", () => {
     label: "RIVAL PRESSURE",
     title: "RIVAL // OAK-1 [SIM] passed your BODY score.",
     body: "The order changed overnight. It is logged.",
+  });
+});
+
+test("raid_result renders as a SYSTEM modal with the dispatch line", () => {
+  const line = "RAID RESULT - WEEK 44. Your clan ranked 2 of 3. Mind logs: 9. Rival clan: 12. Gap: 3.";
+  const payload = { weekKey: "2026-W44", week: 44, type: "domain", position: 2, count: 3, won: false, value: 9, rivalValue: 12, bonus: 0, line };
+  const notice = { id: id(80), kind: "raid_result", payload, createdAt: at() };
+  const parsed = parseNotices([notice]);
+  assert.equal(parsed.skipped, 0);
+  assert.deepEqual(noticeView({ kind: "raid_result", notices: parsed.notices }), {
+    modal: "system",
+    tone: "alert",
+    label: "RAID RESULT",
+    title: "WEEK 44: POSITION 2 OF 3",
+    body: line,
   });
 });

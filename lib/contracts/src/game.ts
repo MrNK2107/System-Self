@@ -95,6 +95,7 @@ export const NOTICE_KINDS = [
   "gym_unlocked",
   "rival_passed",
   "rival_challenge_result",
+  "raid_result",
 ] as const;
 export const NoticeKindSchema = z.enum(NOTICE_KINDS);
 export type NoticeKind = z.infer<typeof NoticeKindSchema>;
@@ -138,6 +139,19 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
     rivalStart: z.number(),
     rivalEnd: z.number(),
   }),
+  /** A weekly clan raid resolved. Clan-level numbers only; `line` is the dispatch text (AI-rewritten or the template). */
+  raid_result: z.object({
+    weekKey: z.string(),
+    week: z.number().int(),
+    type: z.enum(["domain", "discipline", "body", "score"]),
+    position: z.number().int().min(1),
+    count: z.number().int().min(2),
+    won: z.boolean(),
+    value: z.number(),
+    rivalValue: z.number(),
+    bonus: z.number(),
+    line: z.string(),
+  }),
 } as const satisfies Record<NoticeKind, z.ZodTypeAny>;
 
 const noticeOf = <K extends NoticeKind>(kind: K) =>
@@ -157,6 +171,7 @@ export const NoticeSchema = z.discriminatedUnion("kind", [
   noticeOf("gym_unlocked"),
   noticeOf("rival_passed"),
   noticeOf("rival_challenge_result"),
+  noticeOf("raid_result"),
 ]);
 export type Notice = z.infer<typeof NoticeSchema>;
 export type NoticePayload<K extends NoticeKind> = z.infer<(typeof NOTICE_PAYLOAD_SCHEMAS)[K]>;

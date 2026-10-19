@@ -9,8 +9,10 @@ import {
   ClanLeaderRequestSchema,
   ClanSearchQuerySchema,
   type MyClanResponse,
+  type RaidResponse,
 } from "@workspace/contracts";
 import { z } from "zod";
+import { raidSummaryFor } from "../services/raids";
 import { requirePro } from "../services/entitlements";
 import { withIdempotency, type HandlerResult } from "../services/idempotency";
 import {
@@ -145,6 +147,13 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
     res.json({ items: await toLeaderboardItems(db, rows) });
   });
 
+  /** The viewer's clan's raid this week: live clan-level standings (null without a clan or a raid). */
+  router.get("/clans/raid", async (req, res) => {
+    const m = await membershipOf(db, req.user!.id);
+    const body: RaidResponse = { raid: m ? await raidSummaryFor(db, m.clanId, clock()) : null };
+    res.json(body);
+  });
+
   /** The viewer's clan with its members (clanmate projection), the last 10 dispatches and the current raid. */
   router.get("/clans/mine", async (req, res) => {
     const me = req.user!.id;
@@ -158,7 +167,7 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
       clan: await toClanDto(db, clan, m.role as "leader" | "member"),
       members: await clanMembersView(db, clan.id, me, now),
       dispatches: await recentDispatches(db, clan.id),
-      raid: null,
+      raid: await raidSummaryFor(db, clan.id, now),
     };
     res.json(body);
   });
