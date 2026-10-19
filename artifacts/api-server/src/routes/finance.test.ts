@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { dailySnapshots, domainScores, financeWeeks, financialGoals, logs, profiles, scoreEvents, userDayState } from "@workspace/db";
+import { dailySnapshots, financeWeeks, financialGoals, idempotencyKeys, logs, profiles, scoreEvents, userDayState, users } from "@workspace/db";
 import { EXPENSE_CATEGORIES, RANKED_DOMAINS, addDays, endOfLocalDay } from "@workspace/engine";
 import {
   EXPENSE_CATEGORY_VALUES,
@@ -19,6 +19,8 @@ import { rolloverDate } from "../services/rollover";
 import { withUserLock } from "../services/user-lock";
 import { getOrBuildDebrief } from "../services/debrief";
 import { buildMessagePrompt, type PromptContext } from "../services/ai-context";
+import { activeSql, loggedTodaySql } from "../services/clans";
+import { recentlyLoggedSql } from "../services/rivals";
 
 after(async () => {
   await closeTestDb();
@@ -156,7 +158,7 @@ test("no WEALTH log that week: no evaluation (recurring auto-logs alone do not c
   assert.equal(rec.status, 201);
   await setLastRolled(id, addDays(MON, -1));
   await rollRange(id, MON, SUN);
-  assert.equal((await db!.select().from(logs).where(sql`${logs.data}->>'recurring' = 'true'`)).length, 1);
+  assert.equal((await db!.select().from(logs).where(eq(logs.system, true))).length, 1);
   assert.deepEqual(await financeDeltas(id), []);
   assert.equal((await db!.select().from(financeWeeks)).length, 0);
 });
@@ -177,7 +179,8 @@ test("recurring income posts once per month on its day, as an unscored, non-acti
   assert.equal(posted[0]!.clientId, `recurring:${rec.id}:2026-01`);
   assert.equal(posted[0]!.domain, "WEALTH");
   assert.equal(posted[0]!.logType, "income");
-  assert.deepEqual(posted[0]!.data, { amount: 50000, category: "salary", note: "Salary", recurring: true });
+  assert.deepEqual(posted[0]!.data, { amount: 50000, category: "salary", note: "Salary" });
+  assert.equal(posted[0]!.system, true);
   // Never scored, never activity: decay and streaks run exactly as for a user with no logs at all.
   const ref = await db!.select().from(scoreEvents).where(eq(scoreEvents.refId, posted[0]!.id));
   assert.equal(ref.length, 0);
@@ -304,6 +307,10 @@ test("goals: contribute records a scored saving log; saved >= target achieves th
   const reopen = await request(a).patch(`/api/finance/goals/${goal.id}`).set(auth(token)).send({ status: "active" });
   assert.equal(reopen.status, 409);
   assert.equal(reopen.body.code, "goal_achieved");
+  const retarget = await request(a).patch(`/api/finance/goals/${goal.id}`).set(auth(token)).send({ targetAmount: 900 });
+  assert.equal(retarget.status, 409);
+  assert.equal(retarget.body.code, "goal_achieved");
+  assert.equal((await request(a).patch(`/api/finance/goals/${goal.id}`).set(auth(token)).send({ title: "Fund I" })).status, 200, "a title edit stays allowed");
   assert.equal((await request(a).post(`/api/finance/goals/${goal.id}/contribute`).set(auth(other.token)).send({ amount: 1 })).status, 404);
   assert.equal((await request(a).patch(`/api/finance/goals/${goal.id}`).set(auth(other.token)).send({ title: "Mine" })).status, 404);
   assert.equal((await request(a).post("/api/finance/goals/not-a-uuid/contribute").set(auth(token)).send({ amount: 1 })).status, 404);
@@ -324,7 +331,7 @@ test("goals: contribute records a scored saving log; saved >= target achieves th
 
   const summary = assertContract(FinanceSummarySchema, (await request(a).get("/api/finance/summary").set(auth(token))).body);
   assert.deepEqual(summary.goals.map((g) => [g.title, g.status, g.savedAmount]), [
-    ["Emergency fund", "achieved", 500],
+    ["Fund I", "achieved", 500],
     ["Car", "achieved", 400],
   ]);
   const goalsInDb = await db!.select().from(financialGoals).where(eq(financialGoals.userId, other.id));
@@ -373,4 +380,80 @@ test("finance data never reaches a social payload", { skip }, async () => {
   }
   const search = await request(a).get("/api/social/search?q=owner").set(auth(viewer.token));
   assert.ok(!JSON.stringify(search.body).includes("EUR"));
+});
+
+test("system logs are never activity (decay, clans, rivals); a user-posted data.recurring marker changes nothing", { skip }, async () => {
+  const a = app();
+  const forged = await onboardAtD0({ email: "forge@example.com", username: "forge_1" });
+  const plain = await onboardAtD0({ email: "plain@example.com", username: "plain_1" });
+  const sys = await onboardAtD0({ email: "sys@example.com", username: "sys_1" });
+  const day = "2026-01-03";
+  const mk = (userId: string, data: Record<string, unknown>, system = false, date = day) =>
+    db!.insert(logs).values({ userId, clientId: `x-${seq++}`, domain: "WEALTH", logType: "generic", data, system, occurredAt: at(date), localDate: date });
+  await mk(forged.id, { recurring: true });
+  await mk(plain.id, {});
+  await mk(sys.id, { amount: 1 }, true);
+  for (const u of [forged, plain, sys]) await rollRange(u.id, D0, "2026-01-08");
+  for (const d of RANKED_DOMAINS) {
+    assert.equal((await score(forged.id, d)).score, (await score(plain.id, d)).score, `a forged marker still prevents decay (${d})`);
+  }
+  assert.ok((await score(sys.id, "BODY")).score < (await score(plain.id, "BODY")).score, "a system log does not prevent decay");
+
+  // Clans: a member whose only log is a system log is inactive (dead weight) and has not logged today.
+  const now = at("2026-01-04", "12:00");
+  await mk(sys.id, { amount: 1 }, true, "2026-01-04");
+  // Table-qualified references, as the helpers require (a bare "id" would resolve against `logs l`).
+  const [uid, utz] = [sql.raw(`"users"."id"`), sql.raw(`"users"."timezone"`)];
+  const probe = async (userId: string) => {
+    const [r] = await db!
+      .select({ active: activeSql(uid, utz, now), today: loggedTodaySql(uid, utz, now), recent: recentlyLoggedSql(uid, at(D0)) })
+      .from(users)
+      .where(eq(users.id, userId));
+    return r!;
+  };
+  assert.deepEqual(await probe(sys.id), { active: false, today: false, recent: false });
+  assert.deepEqual(await probe(forged.id), { active: true, today: false, recent: true });
+
+  // The route never lets a client set the flag.
+  const user = await setup(a, { email: "route@example.com", username: "route_1" });
+  const res = await request(a)
+    .post("/api/logs")
+    .set(auth(user.token))
+    .send({ clientId: "forge-1", domain: "WEALTH", logType: "generic", data: { recurring: true }, system: true });
+  assert.equal(res.status, 201);
+  const [row] = await db!.select().from(logs).where(eq(logs.clientId, "forge-1"));
+  assert.equal(row!.system, false);
+});
+
+test("an early nightly debrief does not lose the week's verdict: the next debrief quotes it, once", { skip }, async () => {
+  const { token, id } = await onboardAtD0();
+  await db!.update(profiles).set({ nightlyTime: "00:30" }).where(eq(profiles.userId, id));
+  await putBudgets(token, [{ category: "food", monthlyLimit: 3100 }]);
+  await wealthLog(id, MON, "income", { amount: 1000, category: "salary" });
+  await wealthLog(id, "2026-01-06", "expense", { amount: 900, category: "food" });
+  const text = async (date: string) => {
+    const out = await getOrBuildDebrief(db!, id, at(date, "01:00"), {});
+    assert.equal(out.kind, "ready");
+    return out.kind === "ready" ? out.row.text! : "";
+  };
+  // Monday 01:00: Sunday is still inside its rollover grace window, so the week has not been evaluated.
+  assert.ok(!(await text("2026-01-12")).includes("discretionary"));
+  assert.ok((await text("2026-01-13")).endsWith("Your WEALTH score rose 1.0 points. The math is not complicated."));
+  assert.ok(!(await text("2026-01-14")).includes("discretionary"), "quoted once");
+  const [week] = await db!.select().from(financeWeeks).where(eq(financeWeeks.userId, id));
+  assert.ok(week!.quotedAt);
+});
+
+test("contribute: a clientId reused after its idempotency record expired is 409 duplicate_client_id, never a 500", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const goal = assertContract(GoalResponseSchema, (await request(a).post("/api/finance/goals").set(auth(token)).send({ title: "Fund", targetAmount: 1000 })).body).goal;
+  const send = () => request(a).post(`/api/finance/goals/${goal.id}/contribute`).set(auth(token)).set("Idempotency-Key", "same").send({ amount: 100 });
+  assert.equal((await send()).status, 201);
+  await db!.delete(idempotencyKeys).where(eq(idempotencyKeys.userId, id));
+  const again = await send();
+  assert.equal(again.status, 409);
+  assert.equal(again.body.code, "duplicate_client_id");
+  const [g] = await db!.select().from(financialGoals).where(eq(financialGoals.id, goal.id));
+  assert.equal(g!.savedAmount, 100);
 });

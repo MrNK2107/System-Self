@@ -198,6 +198,8 @@ export interface DebriefFacts {
   verdict: string;
   /** On the first day of a new ISO week: the closed finance week's verdict line (services/finance), else absent. */
   financeVerdict?: string | null;
+  /** The ISO week `financeVerdict` belongs to (marked quoted once the debrief is stored). */
+  financeWeekKey?: string | null;
 }
 
 export interface MessageExtras {

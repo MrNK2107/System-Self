@@ -12,7 +12,8 @@ import { countHomeSession } from "../services/comeback";
 const RETROACTIVE_LIMIT_MS = 48 * 3600_000;
 const FUTURE_TOLERANCE_MS = 5 * 60_000;
 
-function toLogDto(l: typeof logs.$inferSelect) {
+/** A stored log as the API returns it (also used by routes that record logs of their own, e.g. finance). */
+export function toLogDto(l: typeof logs.$inferSelect) {
   return {
     id: l.id,
     clientId: l.clientId,

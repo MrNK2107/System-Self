@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lt, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt, lte } from "drizzle-orm";
 import { budgets, financeWeeks, financialGoals, logs, profiles, recurringIncome, users } from "@workspace/db";
 import {
   DEFAULT_SAVINGS_TARGET,
@@ -23,6 +23,10 @@ import type { Tx } from "./user-lock";
 
 type Reader = Pick<Tx, "select">;
 
+// Catch-up limit: both rollover hooks below run only for dates rolled one by one. When a user has been away for more
+// than MAX_CATCH_UP_DAYS (services/rollover), rollOverDue collapses the older dates into a single decay step: no
+// recurring income is posted and no weekly evaluation runs for them. Only the last 30 dates are rolled individually.
+
 
 /** First day of the month after a `YYYY-MM` month, as `YYYY-MM-DD`. */
 export function nextMonthStart(month: string): string {
@@ -43,7 +47,7 @@ export async function loadBudgets(tx: Reader, userId: string) {
 
 /**
  * Rollover hook: on a local date whose day of month matches an active recurring income, posts it as an `income` log
- * (`data.recurring = true`). The clientId `recurring:<id>:<YYYY-MM>` makes it once per month however often the date is
+ * with `system = true`. The clientId `recurring:<id>:<YYYY-MM>` makes it once per month however often the date is
  * rolled. System-generated: no score, not activity.
  */
 export async function postRecurringIncome(tx: Tx, userId: string, date: string, tz: string, now: Date): Promise<void> {
@@ -61,7 +65,8 @@ export async function postRecurringIncome(tx: Tx, userId: string, date: string, 
         clientId: `recurring:${r.id}:${monthOf(date)}`,
         domain: "WEALTH",
         logType: "income",
-        data: { amount: r.amount, category: "salary", note: r.label, recurring: true },
+        data: { amount: r.amount, category: "salary", note: r.label },
+        system: true,
         occurredAt: localTimeToInstant(date, 0, 0, tz),
         localDate: date,
         createdAt: now,
@@ -128,23 +133,32 @@ export async function evaluateFinanceWeek(tx: Tx, userId: string, date: string, 
 }
 
 /**
- * The finance verdict line for the nightly debrief of `today`: only on the first day of a new ISO week, for the week
- * that closed yesterday, when it was evaluated and a discretionary budget is set. Null otherwise.
+ * The finance verdict for the nightly debrief of `today`: the most recent week evaluated before `today`, if no debrief
+ * has quoted it yet (quotedAt) and a discretionary budget is set. An older unquoted week behind a newer one is never
+ * dug up. The debrief that stores the line marks the week quoted (markVerdictQuoted), so a nightlyTime that falls
+ * before the week's rollover only delays the line to the next debrief. Null when there is nothing to quote.
  */
-export async function financeVerdictFor(tx: Reader, userId: string, today: string): Promise<string | null> {
-  const closed = addDays(today, -1);
-  if (!isLastDayOfIsoWeek(closed)) return null;
+export async function financeVerdictFor(tx: Reader, userId: string, today: string): Promise<{ line: string; weekKey: string } | null> {
   const [row] = await tx
     .select({ week: financeWeeks, currency: profiles.currency })
     .from(financeWeeks)
     .innerJoin(profiles, eq(profiles.userId, financeWeeks.userId))
-    .where(and(eq(financeWeeks.userId, userId), eq(financeWeeks.weekKey, isoWeekKey(closed))))
+    .where(and(eq(financeWeeks.userId, userId), lt(financeWeeks.evaluatedOn, today)))
+    .orderBy(desc(financeWeeks.evaluatedOn))
     .limit(1);
-  if (!row || row.week.discretionaryBudget === null) return null;
-  return financeVerdictLine(
+  if (!row || row.week.quotedAt !== null || row.week.discretionaryBudget === null) return null;
+  const line = financeVerdictLine(
     { discretionary: row.week.discretionary, budget: row.week.discretionaryBudget, delta: row.week.delta },
     (n) => formatMoney(n, row.currency),
   );
+  return { line, weekKey: row.week.weekKey };
+}
+
+export async function markVerdictQuoted(tx: Pick<Tx, "update">, userId: string, weekKey: string, now: Date): Promise<void> {
+  await tx
+    .update(financeWeeks)
+    .set({ quotedAt: now })
+    .where(and(eq(financeWeeks.userId, userId), eq(financeWeeks.weekKey, weekKey), isNull(financeWeeks.quotedAt)));
 }
 
 export function toGoalDto(g: typeof financialGoals.$inferSelect): FinancialGoal {

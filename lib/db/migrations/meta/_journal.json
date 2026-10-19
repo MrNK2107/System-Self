@@ -197,6 +197,13 @@
       "when": 1792394539573,
       "tag": "0027_fixed_crusher_hogan",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792396513940,
+      "tag": "0028_far_hawkeye",
+      "breakpoints": true
     }
   ]
 }

@@ -335,7 +335,9 @@ test("rival challenge: one open per rival, resolves at the rollover after endDat
   const again = await request(a()).post(`/api/rivals/${rival.assignmentId}/challenge`).set(auth(u.token)).send({ domain: "BODY" });
   assert.equal(again.status, 409);
   assert.equal(again.body.code, "challenge_open");
-  // another rival can be challenged at the same time
+  // another rival can be challenged at the same time. Its ghost is pinned to a rising trajectory (it was made with
+  // Math.random): the ghost gains every day while the user's BODY does not, so that challenge is a deterministic loss.
+  await setGhostScores((await ghostOf(body.rivals[1]!.assignmentId)).id, flat(10), "up");
   const other = await request(a()).post(`/api/rivals/${body.rivals[1]!.assignmentId}/challenge`).set(auth(u.token)).send({ domain: "BODY" });
   assert.equal(other.status, 201);
   // unknown / foreign assignment and bad domain
@@ -365,6 +367,7 @@ test("rival challenge: one open per rival, resolves at the rollover after endDat
   const after = await getRivals(u.token);
   assert.equal(after.record.wins + after.record.losses + after.record.draws, 2);
   assert.equal(after.record.wins, 1);
+  assert.equal(after.record.losses, 1, "the pinned rising ghost wins its BODY challenge");
   const listed = after.challenges.find((c) => c.id === ch.id)!;
   assert.equal(listed.outcome, "win");
   assert.equal(listed.acknowledged, false);

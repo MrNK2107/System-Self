@@ -4,7 +4,7 @@
  * simulations, cold start). Ghost drift, rival pressure and rival-challenge resolution run in the user's
  * rollover (rivalRollover). The hidden score is only used here to match; it never leaves the server.
  */
-import { and, asc, count, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
 import {
   blocks,
   clanMembers,
@@ -280,6 +280,11 @@ export async function ensureAssignments(tx: Tx, userId: string, now: Date, opts:
  * (`excluded`: blocks, clanmates, the duo partner, follows either way), not already one of the user's rivals,
  * hidden score within MATCH_WINDOW (preferred) or WIDE_MATCH_WINDOW.
  */
+/** SQL: the user in `userIdCol` has a log of their own (not a system log) at or after `since`: a rival candidate is active. */
+export function recentlyLoggedSql(userIdCol: unknown, since: Date): SQL<boolean> {
+  return sql<boolean>`exists (select 1 from ${logs} l where l.user_id = ${userIdCol} and l.occurred_at >= ${since} and not l.system)`;
+}
+
 async function matchCandidates(
   tx: Tx,
   userId: string,
@@ -307,7 +312,7 @@ async function matchCandidates(
         eq(profiles.rank, rank),
         ne(users.id, userId),
         exclude.size > 0 ? notInArray(users.id, [...exclude]) : undefined,
-        sql`exists (select 1 from ${logs} l where l.user_id = ${users.id} and l.occurred_at >= ${since})`,
+        recentlyLoggedSql(users.id, since),
       ),
     )
     .orderBy(asc(snapshotGap), asc(users.id))

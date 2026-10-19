@@ -71,7 +71,7 @@ export async function adherenceMetrics(db: Db, now: Date, days: number): Promise
     .from(comebacks)
     .where(and(gte(comebacks.startedOn, windowStart), lte(comebacks.startedOn, cutoff)));
 
-  const activeUsers = sql`select user_id from ${logs} where local_date >= ${windowStart}::date and ${notSystemLog}`;
+  const activeUsers = sql`select user_id from ${logs} where local_date >= ${windowStart}::date and not system`;
   const [active] = await db.select({ n: countDistinct(logs.userId) }).from(logs).where(and(gte(logs.localDate, windowStart), notSystemLog));
   const [deferrals] = await db
     .select({ n: count() })

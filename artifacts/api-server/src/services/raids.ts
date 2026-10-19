@@ -70,7 +70,7 @@ export async function raidMetricsDetailed(
     const domainFilter = type === "domain" ? sql`l.domain = 'MIND'` : sql`l.domain = 'BODY'`;
     const logsQ = await db.execute(sql`
       select m.clan_id, count(*)::int as n from clan_members m join logs l on l.user_id = m.user_id
-      where ${inClan} and ${domainFilter} and not l.forbidden and ${inSpan("l.occurred_at")}
+      where ${inClan} and ${domainFilter} and not l.forbidden and not l.system and ${inSpan("l.occurred_at")}
       group by m.clan_id`);
     for (const r of logsQ.rows as { clan_id: string; n: number }[]) out.set(r.clan_id, { value: Number(r.n), contributors: null });
   } else if (type === "discipline") {

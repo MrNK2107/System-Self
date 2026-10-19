@@ -96,6 +96,8 @@ export const financeWeeks = pgTable(
     discretionaryBudget: doublePrecision("discretionary_budget"),
     /** The WEALTH change actually applied (after clamping). */
     delta: real("delta").notNull().default(0),
+    /** When a nightly debrief quoted this week's verdict line (each week is quoted at most once). */
+    quotedAt: ts("quoted_at"),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.weekKey] })],

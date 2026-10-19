@@ -38,12 +38,13 @@ const localToday = (tzCol: unknown, now: Date) => sql`((${now.toISOString()}::ti
 /**
  * SQL: the user in `userIdCol` (timezone in `tzCol`) logged in the activity window: the CLAN_INACTIVE_DAYS full
  * local days ending yesterday (today - 5 .. today - 1; today does not count). The single definition of clan
- * activity, used by the clan score, the dead-weight rule, raids, the roster and the routes. A forbidden log is not activity.
+ * activity, used by the clan score, the dead-weight rule, raids, the roster and the routes. A forbidden log is not activity,
+ * nor is a system log (recurring income the server posts).
  * Pass table-qualified references (a bare column name would resolve against `logs` inside the subquery).
  */
 export function activeSql(userIdCol: unknown, tzCol: unknown, now: Date): SQL<boolean> {
   const today = localToday(tzCol, now);
-  return sql<boolean>`exists (select 1 from ${logs} l where l.user_id = ${userIdCol} and l.local_date >= ${today} - ${CLAN_INACTIVE_DAYS}::int and l.local_date < ${today} and not l.forbidden)`;
+  return sql<boolean>`exists (select 1 from ${logs} l where l.user_id = ${userIdCol} and l.local_date >= ${today} - ${CLAN_INACTIVE_DAYS}::int and l.local_date < ${today} and not l.forbidden and not l.system)`;
 }
 
 /**
@@ -165,9 +166,9 @@ export async function blockedWithMember(db: Reader, userId: string, clanId: stri
   return !!row;
 }
 
-/** SQL: the user logged today (local), a non-forbidden log. */
+/** SQL: the user logged today (local), a non-forbidden, non-system log. */
 export function loggedTodaySql(userIdCol: unknown, tzCol: unknown, now: Date): SQL<boolean> {
-  return sql<boolean>`exists (select 1 from ${logs} l where l.user_id = ${userIdCol} and l.local_date = ${localToday(tzCol, now)} and not l.forbidden)`;
+  return sql<boolean>`exists (select 1 from ${logs} l where l.user_id = ${userIdCol} and l.local_date = ${localToday(tzCol, now)} and not l.forbidden and not l.system)`;
 }
 
 /**

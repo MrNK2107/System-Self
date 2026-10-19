@@ -1,9 +1,12 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "../testing";
 import { users } from "./users";
-import { profiles } from "./game";
+import { logs, profiles } from "./game";
 import { budgets, financeWeeks, financialGoals, netWorthSnapshots, recurringIncome } from "./finance";
 
 after(() => closeTestDb());
@@ -65,4 +68,22 @@ test("finance: profile defaults, keys, checks and cascade on user delete", async
   for (const table of [budgets, recurringIncome, financialGoals, netWorthSnapshots, financeWeeks]) {
     assert.equal((await db.select().from(table)).length, 0);
   }
+});
+
+test("logs.system defaults to false; the migration backfills earlier recurring auto-logs", async (t) => {
+  const db = getTestDb();
+  if (!db) return t.skip("TEST_DATABASE_URL not set");
+  await resetDb(db);
+  const a = await mkUser(db, "sy");
+  const [row] = await db
+    .insert(logs)
+    .values({ userId: a, clientId: "c1", domain: "WEALTH", logType: "generic", data: { recurring: true }, occurredAt: new Date(), localDate: "2026-01-01" })
+    .returning();
+  assert.equal(row!.system, false, "a data marker never makes a log a system log");
+  const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../migrations");
+  const sqlText = readdirSync(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .map((f) => readFileSync(path.join(dir, f), "utf8"))
+    .join("\n");
+  assert.match(sqlText, /UPDATE "logs" SET "system" = true WHERE "client_id" LIKE 'recurring:%';/);
 });

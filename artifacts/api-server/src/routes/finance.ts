@@ -20,6 +20,7 @@ import { applyActivityChanges } from "../services/activity";
 import { loadBudgets, monthTotals, settleGoal, toGoalDto, userTimezone } from "../services/finance";
 import { readKey, withIdempotency } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
+import { toLogDto } from "./logs";
 import type { Tx } from "../services/user-lock";
 
 // Finance (PRD 19). Private to the owner: nothing here feeds a social projection. None of these routes score except
@@ -37,22 +38,6 @@ const toRecurringDto = (r: typeof recurringIncome.$inferSelect): RecurringIncome
   dayOfMonth: r.dayOfMonth,
   active: r.active,
 });
-
-function toLogDto(l: typeof logs.$inferSelect) {
-  return {
-    id: l.id,
-    clientId: l.clientId,
-    domain: l.domain as "WEALTH",
-    logType: l.logType,
-    data: l.data as Record<string, unknown>,
-    freeText: l.freeText,
-    forbidden: l.forbidden,
-    occurredAt: l.occurredAt.toISOString(),
-    localDate: l.localDate,
-    isRetroactive: l.isRetroactive,
-    createdAt: l.createdAt.toISOString(),
-  };
-}
 
 const sortedBudgets = (rows: { category: string; monthlyLimit: number }[]) =>
   [...rows]
@@ -156,7 +141,8 @@ export function financeRoutes(db: Db, clock: () => Date = () => new Date()): IRo
         .where(and(eq(financialGoals.id, id), eq(financialGoals.userId, userId)))
         .limit(1);
       if (!current) return NOT_FOUND;
-      if (current.status === "achieved" && patch.status !== undefined) {
+      // An achieved goal keeps its target and status; only the title and deadline stay editable.
+      if (current.status === "achieved" && (patch.status !== undefined || patch.targetAmount !== undefined)) {
         return { status: 409, body: { error: "The goal is already achieved", code: "goal_achieved" } };
       }
       const [updated] = await tx.update(financialGoals).set(patch).where(eq(financialGoals.id, id)).returning();
@@ -188,11 +174,19 @@ export function financeRoutes(db: Db, clock: () => Date = () => new Date()): IRo
       const today = localDate(now, await userTimezone(tx, userId));
       await rollOverDue(tx, userId, now, { before: today });
       const data = { amount: body.amount, goalId: goal.id };
+      const clientId = `goal:${goal.id}:${key ?? randomUUID()}`;
+      // The key's idempotency record may have been pruned while its log remains: refuse instead of a unique-index 500.
+      const [dup] = await tx
+        .select({ id: logs.id })
+        .from(logs)
+        .where(and(eq(logs.userId, userId), eq(logs.clientId, clientId)))
+        .limit(1);
+      if (dup) return { status: 409, body: { error: "This contribution was already recorded", code: "duplicate_client_id" } };
       const [log] = await tx
         .insert(logs)
         .values({
           userId,
-          clientId: `goal:${goal.id}:${key ?? randomUUID()}`,
+          clientId,
           domain: "WEALTH",
           logType: "saving",
           data,

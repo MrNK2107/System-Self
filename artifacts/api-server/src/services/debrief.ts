@@ -3,7 +3,7 @@ import { dailySnapshots, debriefs, domainScores, profiles, quests, users, type D
 import { RANKED_DOMAINS, debriefVerdict, localDate, localTimeToInstant, type RankedDomain } from "@workspace/engine";
 import type { AiDeps } from "../lib/ai";
 import { buildUserContext, generateMessage, type DebriefFacts, type PromptContext } from "./ai-context";
-import { financeVerdictFor } from "./finance";
+import { financeVerdictFor, markVerdictQuoted } from "./finance";
 import { rollOverDue } from "./rollover";
 import { withUserLock } from "./user-lock";
 
@@ -44,7 +44,8 @@ export async function computeDebriefFacts(tx: Pick<Db, "select">, userId: string
   const questCompleted = resolved.filter((q) => q.status === "complete").length;
   const questTotal = resolved.length;
   const verdict = debriefVerdict(deltas, questTotal > 0 ? questCompleted / questTotal : 0);
-  return { deltas, questCompleted, questTotal, verdict, financeVerdict: await financeVerdictFor(tx, userId, today) };
+  const finance = await financeVerdictFor(tx, userId, today);
+  return { deltas, questCompleted, questTotal, verdict, financeVerdict: finance?.line ?? null, financeWeekKey: finance?.weekKey ?? null };
 }
 
 export function templateDebriefText(ctx: PromptContext, facts: DebriefFacts): string {
@@ -94,7 +95,7 @@ export async function getOrBuildDebrief(db: Db, userId: string, now: Date, ai: A
   const { today, ctx, facts } = step1;
   const generated = await generateMessage("nightly_debrief", ctx, ai, { debrief: facts }, templateDebriefText(ctx, facts));
   const row = await withUserLock(db, userId, async (tx) => {
-    await tx
+    const inserted = await tx
       .insert(debriefs)
       .values({
         userId,
@@ -106,7 +107,10 @@ export async function getOrBuildDebrief(db: Db, userId: string, now: Date, ai: A
         text: generated.message,
         model: generated.model,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ localDate: debriefs.localDate });
+    // The debrief that stores the finance verdict marks that week quoted, so no later debrief repeats it.
+    if (inserted.length > 0 && facts.financeWeekKey) await markVerdictQuoted(tx, userId, facts.financeWeekKey, now);
     const [stored] = await tx
       .select()
       .from(debriefs)

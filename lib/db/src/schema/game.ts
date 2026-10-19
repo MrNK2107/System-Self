@@ -105,6 +105,11 @@ export const logs = pgTable(
     occurredAt: ts("occurred_at").notNull(),
     localDate: date("local_date", { mode: "string" }).notNull(),
     isRetroactive: boolean("is_retroactive").notNull().default(false),
+    /**
+     * Written by the server on the user's behalf (recurring income). Never activity: decay, streaks, comebacks, clans,
+     * rivals and counts skip it. Only server code sets it; a client cannot.
+     */
+    system: boolean("system").notNull().default(false),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
   (t) => [
