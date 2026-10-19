@@ -1,10 +1,10 @@
 // React Query hooks over the game endpoints, plus a live view of the outbox.
 import { useQuery } from "@tanstack/react-query";
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api/client";
 import { getOutbox, type FailedOutboxItem, type OutboxItem } from "@/lib/api/outbox";
-import { fetchChains, fetchGameState, fetchLogs, fetchQuests } from "@/lib/game/actions";
+import { fetchChains, fetchGameState, fetchLogs, fetchQuests, validGameState } from "@/lib/game/actions";
 import { chainsKey, gameStateKey, logsKey, questsKey } from "@/lib/game/keys";
 
 /** The signed-in user's id, or null. Game queries run only while this is set. */
@@ -13,10 +13,24 @@ export function useGameUserId(): string | null {
   return status === "signed_in" ? (user?.id ?? null) : null;
 }
 
-/** GET /api/state. Task 3 seeds this key right after onboarding. */
+/**
+ * GET /api/state. Task 3 seeds this key right after onboarding. A restored cache entry is checked against the
+ * contract: a stale shape reads as no data and is refetched, so it can never reach a screen.
+ */
 export function useGameStateQuery() {
   const userId = useGameUserId();
-  return useQuery({ queryKey: gameStateKey(userId), queryFn: () => fetchGameState(api), enabled: !!userId });
+  const q = useQuery({
+    queryKey: gameStateKey(userId),
+    queryFn: () => fetchGameState(api),
+    enabled: !!userId,
+    select: validGameState,
+  });
+  const staleShape = q.isSuccess && q.data === undefined;
+  const { refetch, isFetching } = q;
+  useEffect(() => {
+    if (staleShape && !isFetching) void refetch();
+  }, [staleShape, isFetching, refetch]);
+  return q;
 }
 
 export function useLogsQuery() {

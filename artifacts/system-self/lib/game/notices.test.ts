@@ -47,7 +47,7 @@ test("NOTICE_ORDER covers every server notice kind exactly once", () => {
   ]);
 });
 
-test("parseNotices keeps known notices and reports the ids of unknown or malformed ones", () => {
+test("parseNotices keeps known notices and skips unknown or malformed ones without reporting ids to mark seen", () => {
   const raw = [
     ach(1),
     { id: id(2), kind: "future_kind", payload: { x: 1 }, createdAt: at() },
@@ -55,9 +55,12 @@ test("parseNotices keeps known notices and reports the ids of unknown or malform
     { kind: "achievement" }, // no id: cannot be marked seen, dropped
     "garbage",
   ];
-  const { notices, unknownIds } = parseNotices(raw);
-  assert.deepEqual(notices.map((n) => n.id), [id(1)]);
-  assert.deepEqual(unknownIds, [id(2), id(3)]);
+  const result = parseNotices(raw);
+  assert.deepEqual(result.notices.map((n) => n.id), [id(1)]);
+  // A newer client may understand them: they stay unseen on the server, nothing here marks them.
+  assert.deepEqual(Object.keys(result).sort(), ["notices", "skipped"]);
+  assert.equal(result.skipped, 4);
+  assert.equal(nextNoticeGroup(parseNotices([raw[1], raw[2]]).notices, new Set()), null);
 });
 
 test("nextNoticeGroup shows one notice at a time in kind order, oldest first within a kind", () => {

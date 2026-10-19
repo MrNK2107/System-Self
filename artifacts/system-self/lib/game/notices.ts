@@ -16,21 +16,17 @@ export const NOTICE_ORDER: readonly NoticeKind[] = [
 
 /**
  * Keeps the notices this build understands. Unknown kinds (from a newer server) and malformed payloads are
- * reported by id so the caller can mark them seen and skip them silently.
+ * skipped and only counted: they are never marked seen, so a newer client still shows them.
  */
-export function parseNotices(raw: readonly unknown[]): { notices: Notice[]; unknownIds: string[] } {
+export function parseNotices(raw: readonly unknown[]): { notices: Notice[]; skipped: number } {
   const notices: Notice[] = [];
-  const unknownIds: string[] = [];
+  let skipped = 0;
   for (const r of raw) {
     const parsed = NoticeSchema.safeParse(r);
-    if (parsed.success) {
-      notices.push(parsed.data);
-      continue;
-    }
-    const id = r && typeof r === "object" ? (r as { id?: unknown }).id : undefined;
-    if (typeof id === "string" && id) unknownIds.push(id);
+    if (parsed.success) notices.push(parsed.data);
+    else skipped += 1;
   }
-  return { notices, unknownIds };
+  return { notices, skipped };
 }
 
 /** Concatenates notice lists, keeping the first copy of each id. */

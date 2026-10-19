@@ -1,17 +1,12 @@
 // One-time removal of the old on-device game state (`@system_self:*`). Nothing shipped publicly, so nothing
 // is imported. Rivals, challenges and taunts stay local until P5 and keep their keys.
+import { RIVAL_STORAGE_KEYS } from "./rival-keys";
 
 export const LEGACY_PREFIX = "@system_self:";
 export const LEGACY_CLEANUP_MARKER = "system_self.legacy_cleanup.v1";
 
 /** Old keys that are still in use (rivals are simulated on the device until P5). */
-export const KEPT_LEGACY_KEYS: readonly string[] = [
-  "@system_self:rivals",
-  "@system_self:challenges",
-  "@system_self:challenge_record",
-  "@system_self:rival_taunts",
-  "@system_self:rivals_last_drift",
-];
+export const KEPT_LEGACY_KEYS: readonly string[] = RIVAL_STORAGE_KEYS;
 
 export interface CleanupStorage {
   getAllKeys(): Promise<readonly string[]>;

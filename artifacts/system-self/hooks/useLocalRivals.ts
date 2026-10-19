@@ -1,4 +1,6 @@
 // Rivals, challenges and taunts stay on the device until P5. They are compared against the server scores.
+// They belong to the signed-in user: sign-out / an account switch removes the keys (lib/api/user-scope.ts) and
+// this hook starts over from the defaults whenever the user id changes.
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
@@ -12,12 +14,9 @@ import type {
   RivalTaunt,
 } from "@/lib/game/types";
 
-export const RIVAL_KEYS = {
-  RIVALS: "@system_self:rivals",
-  CHALLENGES: "@system_self:challenges",
-  CHALLENGE_RECORD: "@system_self:challenge_record",
-  RIVAL_TAUNTS: "@system_self:rival_taunts",
-} as const;
+import { RIVAL_KEYS } from "@/lib/game/rival-keys";
+
+export { RIVAL_KEYS };
 
 const DEFAULT_RIVALS: Rival[] = [
   {
@@ -76,14 +75,22 @@ function parse<T>(raw: string | null, fallback: T): T {
   }
 }
 
-export function useLocalRivals(domainScores: DomainScore[]) {
+export function useLocalRivals(domainScores: DomainScore[], userId: string | null) {
   const [rivals, setRivals] = useState<Rival[]>(DEFAULT_RIVALS);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [challengeRecord, setChallengeRecord] = useState<ChallengeRecord>(DEFAULT_RECORD);
   const [rivalTaunts, setRivalTaunts] = useState<RivalTaunt[]>([]);
   const [loaded, setLoaded] = useState(false);
 
+  // A different account (or none) starts from the defaults, then loads what storage holds for it.
   useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
+    setRivals(DEFAULT_RIVALS);
+    setChallenges([]);
+    setChallengeRecord(DEFAULT_RECORD);
+    setRivalTaunts([]);
+    if (!userId) return;
     (async () => {
       try {
         const [r, c, rec, t] = await Promise.all([
@@ -92,6 +99,7 @@ export function useLocalRivals(domainScores: DomainScore[]) {
           AsyncStorage.getItem(RIVAL_KEYS.CHALLENGE_RECORD),
           AsyncStorage.getItem(RIVAL_KEYS.RIVAL_TAUNTS),
         ]);
+        if (cancelled) return;
         const resolved = resolveExpired(parse<Challenge[]>(c, []), parse(rec, DEFAULT_RECORD));
         setRivals(parse(r, DEFAULT_RIVALS));
         setChallenges(resolved.challenges);
@@ -104,10 +112,13 @@ export function useLocalRivals(domainScores: DomainScore[]) {
       } catch {
         // Keep the defaults.
       } finally {
-        setLoaded(true);
+        if (!cancelled) setLoaded(true);
       }
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   // Active challenges track the server score of their domain.
   useEffect(() => {

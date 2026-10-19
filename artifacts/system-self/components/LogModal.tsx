@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, getStreakMultiplier, getStreakTier, type Domain } from "@/context/AppContext";
 import { DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
-import { BASE_LOG_DELTAS, FORBIDDEN_DOMAIN_DELTA } from "@workspace/engine";
+import { BASE_LOG_DELTAS, FORBIDDEN_DISCIPLINE_DELTA, FORBIDDEN_DOMAIN_DELTA } from "@workspace/engine";
 
 interface LogModalProps {
   visible: boolean;
@@ -69,6 +69,9 @@ const LOG_CONFIGS: LogConfig[] = (Object.keys(LOG_TYPES) as Domain[]).map((domai
 
 // Preview only: the server applies the real delta.
 const BASE_DELTAS = BASE_LOG_DELTAS;
+// Display copy for the forbidden-log trade (the server applies it).
+const FORBIDDEN_GAIN = `+${FORBIDDEN_DOMAIN_DELTA}`;
+const FORBIDDEN_PENALTY = `−${Math.abs(FORBIDDEN_DISCIPLINE_DELTA)}`;
 
 const TIER_LABELS: Record<string, string> = {
   none: "NO STREAK", low: "BUILDING", mid: "ON STREAK",
@@ -229,7 +232,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                   {isForbidden ? "FORBIDDEN MODE ACTIVE" : "FORBIDDEN LOG"}
                 </Text>
                 <Text style={[styles.forbiddenSub, { color: colors.mutedForeground }]}>
-                  {isForbidden ? "+5 pts, −2 DISCIPLINE. Record is permanent." : "High-risk, high-gain transmission"}
+                  {isForbidden ? `${FORBIDDEN_GAIN} pts, ${FORBIDDEN_PENALTY} DISCIPLINE. Record is permanent.` : "High-risk, high-gain transmission"}
                 </Text>
               </View>
             </View>
@@ -248,7 +251,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
           {showForbiddenWarning && isForbidden && (
             <View style={styles.forbiddenWarning}>
               <Text style={styles.forbiddenWarningText}>
-                This entry is flagged as forbidden. It yields +5 pts to the selected domain but −2 to DISCIPLINE. The record cannot be deleted.
+                {`This entry is flagged as forbidden. It yields ${FORBIDDEN_GAIN} pts to the selected domain but ${FORBIDDEN_PENALTY} to DISCIPLINE. The record cannot be deleted.`}
               </Text>
             </View>
           )}
@@ -338,7 +341,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                   }
                 </Text>
                 <Text style={[styles.multiplierSub, { color: colors.mutedForeground }]}>
-                  {isForbidden ? "−2 DISCIPLINE penalty applied" : bonusGain > 0 ? `base ${baseDelta.toFixed(1)} pts  →  boosted` : ""}
+                  {isForbidden ? `${FORBIDDEN_PENALTY} DISCIPLINE penalty applied` : bonusGain > 0 ? `base ${baseDelta.toFixed(1)} pts  →  boosted` : ""}
                 </Text>
               </View>
             </View>
@@ -475,7 +478,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
           <View style={styles.submitDivider} />
           <Text style={styles.submitPts}>
             {isForbidden
-              ? "+5 pts / −2 DISC"
+              ? `${FORBIDDEN_GAIN} pts / ${FORBIDDEN_PENALTY} DISC`
               : `+${bonusDelta.toFixed(1)} pts${tier !== "none" && tier !== "low" ? `  ×${multiplier.toFixed(1)}` : ""}`
             }
           </Text>

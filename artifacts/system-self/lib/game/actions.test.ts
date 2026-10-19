@@ -15,6 +15,7 @@ import {
   refuseQuest,
   retryFailedEntries,
   startChain,
+  validGameState,
 } from "./actions";
 import { chainsKey, gameStateKey, invalidateGame, logsKey, noticesKey, questsKey } from "./keys";
 
@@ -260,4 +261,12 @@ test("invalidateGame invalidates state, quests and notices (plus logs and chains
   const keys: unknown[] = [];
   await invalidateGame({ invalidateQueries: async (f: { queryKey: readonly unknown[] }) => void keys.push(f.queryKey) }, "u1");
   assert.deepEqual(keys, [gameStateKey("u1"), questsKey("u1"), noticesKey("u1"), logsKey("u1"), chainsKey("u1")]);
+});
+
+test("validGameState passes a contract-valid cached state through unchanged and rejects a stale shape", () => {
+  assert.equal(validGameState(state), state);
+  const { tierProgress: _gone, ...stale } = state;
+  assert.equal(validGameState(stale), undefined);
+  assert.equal(validGameState({ ...state, scores: "nope" }), undefined);
+  assert.equal(validGameState(undefined), undefined);
 });

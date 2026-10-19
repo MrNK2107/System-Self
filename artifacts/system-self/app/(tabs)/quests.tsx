@@ -115,7 +115,7 @@ export default function QuestsScreen() {
   const {
     quests, completeQuest, refuseQuest, shadowSelf, getWeakestDomain,
     questChains, chainTemplates, startQuestChain, user, tierProgress,
-    loading, loadError, refresh, offline,
+    loading, loadError, questsLoadError, refresh, offline,
   } = useApp();
   const { generating, triggerGeneration } = useQuestScheduler();
 
@@ -217,7 +217,7 @@ export default function QuestsScreen() {
 
   const showGenerating = generating && totalActive === 0;
   const showLoading = loading && quests.length === 0;
-  const showError = !!loadError && quests.length === 0 && !loading;
+  const showError = (!!loadError || !!questsLoadError) && quests.length === 0 && !loading;
 
   // Shadow pressure
   const shadowGap = shadowSelf.gap;

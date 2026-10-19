@@ -17,6 +17,8 @@ import {
   planBlocksFor,
   startGymSession,
   toGymView,
+  toWorkoutPlan,
+  createPlanClientIds,
   validatePlanDraft,
   weekdayOf,
   type PlanDraft,
@@ -375,4 +377,47 @@ test("weekdayOf and planBlocksFor use the given timezone for the weekday", () =>
   const plan = { days: [{ weekday: "MON" as const, blocks: [{ exerciseId: "ex_squat", sets: 3, repRange: "5", restSec: 90 }] }] };
   assert.equal(planBlocksFor(plan, instant, "Asia/Kolkata").length, 1);
   assert.equal(planBlocksFor(plan, instant, "UTC").length, 0);
+});
+
+test("flushSetQueue keeps the set queued on 401, 408 and 429 (retried later, never dropped)", async () => {
+  for (const status of [401, 408, 429]) {
+    const { api, calls } = fakeApi(() => {
+      throw http(status);
+    });
+    const r = await flushSetQueue(api, [q(0), q(1)]);
+    assert.deepEqual(r.remaining.map((s) => s.key), ["k0", "k1"], `status ${status}`);
+    assert.equal(r.dropped.length, 0, `status ${status}`);
+    assert.equal(r.processed.size, 0, `status ${status}`);
+    assert.equal(calls.length, 1, `status ${status}`);
+  }
+});
+
+test("toWorkoutPlan maps the created plan from the POST response", () => {
+  const plan = toWorkoutPlan({
+    id: "p9",
+    name: "Push",
+    goal: "Custom split",
+    days: [{ weekday: "TUE", blocks: [{ exerciseId: "ex_bench", sets: 3, repRange: "8", restSec: 90 }] }],
+    isActive: true,
+    createdAt: "2026-10-19T00:00:00.000Z",
+  });
+  assert.equal(plan.id, "p9");
+  assert.equal(plan.name, "Push");
+  assert.deepEqual(plan.days, [
+    { id: "p9-TUE", planId: "p9", weekday: "TUE", blocks: [{ exerciseId: "ex_bench", sets: 3, repRange: "8", restSec: 90 }] },
+  ]);
+});
+
+test("planClientIds reuses one clientId for the same draft until it succeeds", () => {
+  let n = 0;
+  const ids = createPlanClientIds(() => `pc-${++n}`);
+  const draft: PlanDraft = { name: "A", days: [{ weekday: "MON", blocks: [{ exerciseId: "ex_squat", sets: 3, reps: 5 }] }] };
+  const first = ids.idFor(draft);
+  assert.equal(ids.idFor({ ...draft, name: " A " }), first, "same request after trimming");
+  assert.equal(ids.idFor(draft), first, "retry after a failure");
+  const edited: PlanDraft = { ...draft, name: "B" };
+  const second = ids.idFor(edited);
+  assert.notEqual(second, first, "an edited draft is a different request");
+  ids.succeeded();
+  assert.notEqual(ids.idFor(edited), second, "a new save after success gets a new id");
 });

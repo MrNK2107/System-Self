@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-query-persist-client";
 import { createOutbox, type KeyValueStorage } from "./outbox";
 import { activeKey } from "../game/gym";
-import { LAST_USER_KEY, createLocalDataManager } from "./user-scope";
+import { LAST_USER_KEY, createLocalDataManager, pendingLocalCount } from "./user-scope";
 
 function memoryStorage(): KeyValueStorage {
   const data = new Map<string, string>();
@@ -124,4 +124,47 @@ test("switching users drops the previous users gym session", async () => {
   await s.storage.setItem(activeKey("A"), "{}");
   await s.mgr.handleSignIn("B");
   assert.equal(await s.storage.getItem(activeKey("A")), null);
+});
+
+const RIVAL_KEYS = [
+  "@system_self:rivals",
+  "@system_self:challenges",
+  "@system_self:challenge_record",
+  "@system_self:rival_taunts",
+  "@system_self:rivals_last_drift",
+];
+
+test("clearLocalData removes the on-device rivals, challenges, record, taunts and drift date", async () => {
+  const s = setup("A");
+  for (const k of RIVAL_KEYS) await s.storage.setItem(k, "[]");
+  await s.mgr.clearLocalData("A");
+  for (const k of RIVAL_KEYS) assert.equal(await s.storage.getItem(k), null, k);
+});
+
+test("switching users drops the previous users rivals", async () => {
+  const s = setup("A");
+  await s.mgr.handleSignIn("A");
+  await s.storage.setItem("@system_self:rivals", "[]");
+  await s.mgr.handleSignIn("A");
+  assert.equal(await s.storage.getItem("@system_self:rivals"), "[]");
+  await s.mgr.handleSignIn("B");
+  assert.equal(await s.storage.getItem("@system_self:rivals"), null);
+});
+
+test("pendingLocalCount adds the users queued outbox entries and unsent gym sets", async () => {
+  const s = setup("A");
+  assert.equal(await pendingLocalCount({ outbox: s.outbox, storage: s.storage, userId: "A" }), 0);
+  await s.outbox.enqueue(entry("a1"));
+  await s.outbox.enqueue(entry("a2"));
+  const set = { exerciseId: "ex_squat", reps: 5, weight: 40, completed: true, setIndex: 0 };
+  await s.storage.setItem(
+    activeKey("A"),
+    JSON.stringify({ session: null, queue: [{ key: "k1", sessionId: "s1", set }], pendingStart: null }),
+  );
+  await s.storage.setItem(
+    activeKey("B"),
+    JSON.stringify({ session: null, queue: [{ key: "k9", sessionId: "s9", set }], pendingStart: null }),
+  );
+  assert.equal(await pendingLocalCount({ outbox: s.outbox, storage: s.storage, userId: "A" }), 3);
+  assert.equal(await pendingLocalCount({ outbox: s.outbox, storage: s.storage, userId: null }), 2);
 });

@@ -42,6 +42,14 @@ export function fetchGameState(api: ApiClient): Promise<LooseGameState> {
   return api.request("GET", "/api/state", { schema: LooseGameStateSchema });
 }
 
+/**
+ * The cached GameState if it still matches the contract (same object, so React Query keeps its identity);
+ * undefined for a shape left by an older build, which the caller then refetches instead of rendering.
+ */
+export function validGameState(data: unknown): LooseGameState | undefined {
+  return LooseGameStateSchema.safeParse(data).success ? (data as LooseGameState) : undefined;
+}
+
 /** The most recent logs, newest first. */
 export async function fetchLogs(api: ApiClient, limit = 100): Promise<GameLog[]> {
   const res = await api.request("GET", `/api/logs?limit=${limit}`, { schema: LogListResponseSchema });

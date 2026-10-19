@@ -20,6 +20,7 @@ import { api } from "@/lib/api/client";
 import { completionSummaryKey, debriefKey } from "@/lib/game/keys";
 import { fetchCompletionSummary, fetchDebriefToday } from "@/lib/game/messages";
 import { SystemMessage } from "@/components/SystemMessage";
+import { ScreenStatus } from "@/components/ScreenStatus";
 import { StreakCalendar } from "@/components/StreakCalendar";
 import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
 
@@ -33,6 +34,7 @@ export default function StatsScreen() {
     user, domainScores, shadowSelf, logs, quests, trajectory,
     tierProgress,
     achievements, milestones, getShadowPhase,
+    loading, loadError, refresh,
   } = useApp();
   const userId = useGameUserId();
   const [showAchievements, setShowAchievements] = useState(false);
@@ -125,7 +127,15 @@ export default function StatsScreen() {
     HUNTING: "#E05555", DOMINANT: "#9B0000",
   };
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <ScreenStatus
+        failed={!loading && !!loadError}
+        message="The System is out of reach. Check your connection."
+        onRetry={() => void refresh()}
+      />
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>

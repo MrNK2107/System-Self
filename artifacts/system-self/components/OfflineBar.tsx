@@ -11,7 +11,10 @@ export function OfflineBar() {
   const { offline, syncBlocked } = useApp();
   if (!offline && !syncBlocked) return null;
 
-  const parts = [offline ? "OFFLINE — CACHED" : null, syncBlocked ? "Sync pending. Reconnect to continue." : null].filter(Boolean);
+  // Held back while offline: reconnecting clears it. Held back while online: a queued log is stuck (5xx and
+  // the like) and the outbox keeps retrying it.
+  const syncLine = syncBlocked ? (offline ? "Sync pending. Reconnect to continue." : "Sync stalled. Retrying.") : null;
+  const parts = [offline ? "OFFLINE — CACHED" : null, syncLine].filter(Boolean);
 
   return (
     <View

@@ -11,6 +11,23 @@ import { debriefKey } from "@/lib/game/keys";
 import { ackDebrief, fetchDebriefToday, toDebriefData, type DebriefToday } from "@/lib/game/messages";
 
 const MAX_TIMER_MS = 24 * 60 * 60 * 1000;
+const FLUSH_WAIT_MS = 5_000;
+
+/** Flushes the outbox, waiting at most FLUSH_WAIT_MS; never throws. */
+async function flushBriefly(): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cap = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, FLUSH_WAIT_MS);
+  });
+  const flush = getOutbox()
+    .flush()
+    .then(() => undefined, () => undefined);
+  try {
+    await Promise.race([flush, cap]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function useNightlyDebrief(): {
   pendingDebrief: DebriefData | null;
@@ -23,7 +40,12 @@ export function useNightlyDebrief(): {
   const { shadowSelf } = useApp();
   const q = useQuery({
     queryKey: debriefKey(userId),
-    queryFn: () => fetchDebriefToday(api),
+    queryFn: async () => {
+      // Today's debrief is written from today's logs: send queued ones first. Best-effort: offline, a stuck
+      // queue or a slow link (capped wait) still loads whatever the server has.
+      await flushBriefly();
+      return fetchDebriefToday(api);
+    },
     enabled: !!userId,
     staleTime: 0,
     refetchOnMount: "always",

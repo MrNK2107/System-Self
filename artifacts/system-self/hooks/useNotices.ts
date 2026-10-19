@@ -43,14 +43,7 @@ export function useNotices(): { group: NoticeGroup | null; view: NoticeView | nu
     return error === null; // retried with the next dismissal or state refresh
   }, []);
 
-  // Kinds this build does not know: mark seen and skip, silently.
-  const unknownKey = [...fromState.unknownIds, ...fromMore.unknownIds].filter((id) => !acknowledged.has(id)).join(",");
-  useEffect(() => {
-    if (!unknownKey) return;
-    const ids = unknownKey.split(",");
-    setAcknowledged((prev) => new Set([...prev, ...ids]));
-    void sendSeen(ids);
-  }, [unknownKey, sendSeen]);
+  // Kinds this build does not know are skipped by parseNotices and left unseen for a newer client.
 
   // A fresh state means the server is reachable again: retry seen marks that failed earlier.
   useEffect(() => {

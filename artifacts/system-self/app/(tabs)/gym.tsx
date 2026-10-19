@@ -36,6 +36,7 @@ export default function GymScreen() {
     dismissRejectedSets,
     activeSessionId,
     restoredSession,
+    restoring,
     discardActiveSession,
     createWorkoutPlan,
     updateWorkoutPlan,
@@ -62,7 +63,7 @@ export default function GymScreen() {
   const activeSession = workoutSessions.find((s) => s.id === activeSessionId);
 
   const startSession = async () => {
-    if (working) return;
+    if (working || restoring) return;
     setWorking(true);
     setMessage(null);
     try {
@@ -217,8 +218,8 @@ export default function GymScreen() {
             <View style={styles.rowBetween}>
               <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Today Workout</Text>
               {!activeSession ? (
-                <TouchableOpacity onPress={() => void startSession()} disabled={working}>
-                  <Text style={{ color: colors.primary, opacity: working ? 0.5 : 1 }}>
+                <TouchableOpacity onPress={() => void startSession()} disabled={working || restoring}>
+                  <Text style={{ color: colors.primary, opacity: working || restoring ? 0.5 : 1 }}>
                     {todayBlocks.length === 0 ? "Start Free Session" : "Start Session"}
                   </Text>
                 </TouchableOpacity>

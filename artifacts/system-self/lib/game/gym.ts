@@ -128,6 +128,24 @@ export function buildPlanRequest(draft: PlanDraft, clientId?: string): PlanReque
   };
 }
 
+/**
+ * One clientId per plan request until it succeeds: a retry after a lost response reuses it so the server
+ * dedupes. A draft that changed is a different request and gets a new id.
+ */
+export function createPlanClientIds(mint: () => string) {
+  let current: { request: string; clientId: string } | null = null;
+  return {
+    idFor(draft: PlanDraft): string {
+      const request = JSON.stringify(buildPlanRequest(draft));
+      if (current?.request !== request) current = { request, clientId: mint() };
+      return current.clientId;
+    },
+    succeeded(): void {
+      current = null;
+    },
+  };
+}
+
 // --- reads and plan writes ----------------------------------------------------------
 
 export function fetchGym(api: ApiClient): Promise<GymData> {
@@ -217,10 +235,23 @@ export function newSetKey(sessionId: string): string {
   return `gym-set-${sessionId.slice(0, 8)}-${Date.now().toString(36)}-${rand()}`;
 }
 
+// Like the outbox: a lost session (401, refreshed on the next pass or after re-login), a timeout and rate
+// limiting are retried later, never dropped.
+const RETRY_LATER_STATUS = new Set([401, 408, 429]);
+
+/** True when a failed set send may succeed on a later pass: network, 5xx, 401, 408, 429. */
+export function isRetryableSetError(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return true;
+  if (e.kind === "network") return true;
+  if (e.kind !== "http") return false;
+  const status = e.status ?? 0;
+  return status >= 500 || RETRY_LATER_STATUS.has(status);
+}
+
 /**
- * Sends the queued sets in order. A network error or 5xx stops the flush and keeps that set and the rest for a
- * later pass. Any other failure (e.g. the session is already completed, or the set is invalid) can never
- * succeed, so the set is dropped and reported.
+ * Sends the queued sets in order. A network error, 5xx, 401, 408 or 429 stops the flush and keeps that set and
+ * the rest for a later pass. Any other failure (e.g. the session is already completed, or the set is invalid)
+ * can never succeed, so the set is dropped and reported.
  */
 export async function flushSetQueue(
   api: ApiClient,
@@ -237,8 +268,7 @@ export async function flushSetQueue(
         schema: SetSchema,
       });
     } catch (e) {
-      const retryable = !(e instanceof ApiError) || e.kind === "network" || (e.kind === "http" && (e.status ?? 0) >= 500);
-      if (retryable) return { remaining: queue.slice(i), dropped, processed };
+      if (isRetryableSetError(e)) return { remaining: queue.slice(i), dropped, processed };
       dropped.push(item);
     }
     processed.add(item.key);
@@ -247,9 +277,9 @@ export async function flushSetQueue(
 }
 
 export interface FlushResult {
-  /** The snapshot's sets that were not sent (stopped by a network error or 5xx). */
+  /** The snapshot's sets that were not sent (stopped by a retryable failure). */
   remaining: QueuedSet[];
-  /** Sets the server refused for good (4xx). */
+  /** Sets the server refused for good (4xx other than 401, 408, 429). */
   dropped: QueuedSet[];
   /** Keys of the sets that are done with: sent or dropped. */
   processed: ReadonlySet<string>;
@@ -349,6 +379,20 @@ export function toWorkoutSession(s: GymSession): WorkoutSession {
   };
 }
 
+export function toWorkoutPlan(p: GymPlan): WorkoutPlan {
+  return {
+    id: p.id,
+    name: p.name,
+    goal: p.goal,
+    days: p.days.map((d) => ({
+      id: `${p.id}-${d.weekday}`,
+      planId: p.id,
+      weekday: d.weekday,
+      blocks: d.blocks.map((b): WorkoutBlock => ({ ...b })),
+    })),
+  };
+}
+
 export function toGymView(data: GymData): GymView {
   const plans = [...data.plans].sort((a, b) => Number(b.isActive) - Number(a.isActive));
   const scores = new Map(data.bodyPartScores.map((s) => [s.bodyPart, s]));
@@ -360,17 +404,7 @@ export function toGymView(data: GymData): GymView {
       secondaryBodyParts: e.secondaryBodyParts.map(asBodyPart),
       isBig5: e.isBig5,
     })),
-    workoutPlans: plans.map((p) => ({
-      id: p.id,
-      name: p.name,
-      goal: p.goal,
-      days: p.days.map((d) => ({
-        id: `${p.id}-${d.weekday}`,
-        planId: p.id,
-        weekday: d.weekday,
-        blocks: d.blocks.map((b): WorkoutBlock => ({ ...b })),
-      })),
-    })),
+    workoutPlans: plans.map(toWorkoutPlan),
     activePlanId: data.activePlanId,
     workoutSessions: data.recentSessions.map(toWorkoutSession),
     personalRecords: data.personalRecords.map((r) => ({ ...r, metricType: "weight_1rm_proxy" as const })),

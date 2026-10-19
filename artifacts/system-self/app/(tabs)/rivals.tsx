@@ -30,8 +30,9 @@ import { ChallengeModal } from "@/components/ChallengeModal";
 import { ChallengeOutcomeModal } from "@/components/ChallengeOutcomeModal";
 import { RivalTauntCard } from "@/components/RivalTauntCard";
 import { useSystemAI } from "@/hooks/useSystemAI";
+import { RIVAL_KEYS } from "@/lib/game/rival-keys";
 
-const DRIFT_KEY = "@system_self:rivals_last_drift";
+const DRIFT_KEY = RIVAL_KEYS.LAST_DRIFT;
 const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
 const DOMAIN_COLORS: Record<Domain, string> = {
   BODY: "#E05555",

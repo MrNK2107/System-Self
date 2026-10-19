@@ -104,6 +104,8 @@ interface AppContextType {
   loading: boolean;
   /** No game state could be loaded (cached data is shown instead whenever there is any). */
   loadError: unknown;
+  /** No quest list could be loaded (GET /api/quests) and none is cached. */
+  questsLoadError: unknown;
   refresh: () => Promise<void>;
 
   getDomainScore: (domain: Domain) => number;
@@ -211,7 +213,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const trajectory: Trajectory = state?.trajectory ?? "stable";
   const tierProgress = state?.tierProgress ?? 0;
 
-  const rivalsState = useLocalRivals(domainScores);
+  const rivalsState = useLocalRivals(domainScores, userId);
 
   // Whenever a queued item leaves the outbox (sent or parked) the server state changed: refetch. Compared as a
   // set, so one item leaving while another arrives (same count) still refetches.
@@ -305,6 +307,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       milestones,
       loading: !state && !stateQ.isError,
       loadError: state ? null : stateQ.error,
+      questsLoadError: questsQ.data ? null : questsQ.error,
       refresh,
       getDomainScore,
       getWeakestDomain,
@@ -326,7 +329,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
-      state, stateQ.isError, stateQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
+      state, stateQ.isError, stateQ.error, questsQ.data, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
       getShadowPhase, addLog, completeQuest, refuseQuest, startQuestChain, generateQuests, syncBlocked, online,
       pendingCount, outboxSnap.failed.length, retryFailed, discardFailed, rivalsState,
     ],

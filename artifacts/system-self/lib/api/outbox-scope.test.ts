@@ -109,3 +109,17 @@ test("flushBeforeMutation picks up an item enqueued during an in-flight flush", 
   await inFlight;
   assert.deepEqual(sent, ["a", "b"]);
 });
+
+test("a rejected refresh (401 invalid_refresh) never counts as a poison attempt", async () => {
+  const outbox = createOutbox({
+    storage: memoryStorage(),
+    getUserId: async () => "u1",
+    send: async () => {
+      throw new ApiError({ kind: "http", status: 401, code: "invalid_refresh", message: "Invalid refresh token" });
+    },
+  });
+  await outbox.enqueue(entry("a"));
+  for (let n = 0; n < 10; n++) await outbox.flush();
+  assert.equal(outbox.pending().length, 1);
+  assert.equal(outbox.failed().length, 0);
+});

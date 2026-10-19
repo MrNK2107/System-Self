@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { activeKey } from "../game/gym";
+import { activeKey, loadActive } from "../game/gym";
+import { RIVAL_STORAGE_KEYS } from "../game/rival-keys";
 import type { KeyValueStorage, Outbox } from "./outbox";
 
 export const LAST_USER_KEY = "system_self.last_user_id";
@@ -9,7 +10,7 @@ interface ClientPersister {
 }
 
 /**
- * Local data (query cache + outbox) belongs to one user. This wipes it on explicit sign-out and when a
+ * Local data (query cache, outbox, gym session, on-device rivals) belongs to one user. This wipes it on explicit sign-out and when a
  * different user signs in on the same device. Mere session expiry for the same user keeps everything.
  */
 export function createLocalDataManager(deps: {
@@ -25,6 +26,7 @@ export function createLocalDataManager(deps: {
   async function clearLocalData(userId?: string): Promise<void> {
     const owner = userId ?? (await deps.storage.getItem(LAST_USER_KEY));
     if (owner) await deps.storage.removeItem(activeKey(owner));
+    for (const key of RIVAL_STORAGE_KEYS) await deps.storage.removeItem(key);
     deps.queryClient.clear();
     await deps.persister.removeClient();
     await deps.outbox.reset();
@@ -40,4 +42,18 @@ export function createLocalDataManager(deps: {
   }
 
   return { clearLocalData, handleSignIn };
+}
+
+/**
+ * Entries recorded on this device that the server does not have yet: the signed-in user's queued outbox
+ * items plus the unsent gym sets saved for `userId`. Signing out erases them.
+ */
+export async function pendingLocalCount(deps: {
+  outbox: Pick<Outbox, "ready" | "pending">;
+  storage: KeyValueStorage;
+  userId: string | null;
+}): Promise<number> {
+  await deps.outbox.ready();
+  const gymSets = deps.userId ? (await loadActive(deps.storage, deps.userId)).queue.length : 0;
+  return deps.outbox.pending().length + gymSets;
 }

@@ -1,15 +1,19 @@
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import React, { useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { AuthButton, AuthNotice, AuthShell } from "@/components/AuthShell";
+import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { Separator, SettingsCard, SettingsRow } from "@/components/SettingsParts";
 import { IDENTITY_OPTIONS } from "@/constants/identity";
 import { useAuth } from "@/context/AuthContext";
+import { useGym } from "@/features/gym/context/GymContext";
 import { useColors } from "@/hooks/useColors";
 import { useGameStateQuery } from "@/hooks/useGameState";
+import { getOutbox } from "@/lib/api/outbox";
+import { pendingLocalCount } from "@/lib/api/user-scope";
 import { applyProfile } from "@/lib/onboarding/actions";
 import { describeSettingsError, type IdentitySetting } from "@/lib/settings/actions";
 import { settingsActions } from "@/lib/settings/instance";
@@ -47,6 +51,7 @@ export default function SettingsScreen() {
   const colors = useColors();
   const queryClient = useQueryClient();
   const { user, signOut } = useAuth();
+  const { flushPendingSets } = useGym();
   const stateQ = useGameStateQuery();
   const profile = stateQ.data?.profile ?? null;
 
@@ -56,6 +61,8 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  // Entries still on this device after a last flush; set while the sign-out waits for confirmation.
+  const [unsent, setUnsent] = useState<number | null>(null);
 
   const toggle = (which: "schedule" | "identity") => {
     setError(null);
@@ -81,9 +88,8 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleSignOut = async () => {
-    if (signingOut) return;
-    setSigningOut(true);
+  const finishSignOut = async () => {
+    setUnsent(null);
     try {
       await signOut();
     } catch {
@@ -91,6 +97,29 @@ export default function SettingsScreen() {
     } finally {
       setSigningOut(false);
     }
+  };
+
+  // Signing out wipes the device: send what is queued first, and ask before erasing what could not be sent.
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    await getOutbox()
+      .flush()
+      .catch(() => undefined);
+    await flushPendingSets().catch(() => undefined);
+    const left = await pendingLocalCount({ outbox: getOutbox(), storage: AsyncStorage, userId: user?.id ?? null }).catch(() => 0);
+    if (left > 0) {
+      setUnsent(left);
+      setSigningOut(false);
+      return;
+    }
+    await finishSignOut();
+  };
+
+  const confirmSignOut = () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    void finishSignOut();
   };
 
   const unavailable = (
@@ -186,12 +215,23 @@ export default function SettingsScreen() {
       <SettingsCard>
         <SettingsRow icon="log-out" label="Sign out" trailing={null} busy={signingOut} onPress={() => void handleSignOut()} />
       </SettingsCard>
+
+      {unsent !== null ? (
+        <View style={s.confirm}>
+          <AuthNotice
+            message={`${unsent} ${unsent === 1 ? "entry has" : "entries have"} not reached the System. Signing out erases them.`}
+          />
+          <AuthButton label="SIGN OUT ANYWAY" loading={signingOut} onPress={confirmSignOut} />
+          <AuthLink label="CANCEL" onPress={() => setUnsent(null)} />
+        </View>
+      ) : null}
     </AuthShell>
   );
 }
 
 const s = StyleSheet.create({
   panel: { paddingBottom: 16, gap: 12 },
+  confirm: { gap: 12 },
   panelLabel: { fontSize: 9, letterSpacing: 2.5, fontWeight: "700" as const },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: { paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderRadius: 4 },

@@ -107,8 +107,8 @@ async function main() {
   step("state after log", { before: body0.score, after: body1.score, streak: body1.streak });
 
   // 4. Notices: first_log is among them; shown one group at a time in priority order, each marked seen after "dismissal".
-  const { notices, unknownIds } = parseNotices(s1.unseenNotices);
-  assert.equal(unknownIds.length, 0);
+  const { notices, skipped } = parseNotices(s1.unseenNotices);
+  assert.equal(skipped, 0);
   const firstLog = notices.find((n) => n.kind === "achievement" && n.payload.id === "first_log");
   assert.ok(firstLog, "first_log achievement notice present");
   const acknowledged = new Set<string>();

@@ -56,6 +56,8 @@ interface Persisted {
 
 // Retry later without counting against the item.
 const TRANSIENT_STATUS = new Set([401, 408, 429]);
+/** The code of POST /api/auth/refresh's 401, which the client rethrows for the request that needed it. */
+const REFRESH_REJECTED_CODE = "invalid_refresh";
 
 export function createOutbox(deps: {
   storage: KeyValueStorage;
@@ -139,8 +141,10 @@ export function createOutbox(deps: {
           continue;
         }
         const permanent4xx = e.status >= 400 && e.status < 500 && !TRANSIENT_STATUS.has(e.status);
-        // 5xx and a coded 401 can repeat forever on a bad item; park it after POISON_ATTEMPTS tries.
-        const countsAgainstItem = e.status >= 500 || (e.status === 401 && e.code !== undefined);
+        // 5xx and a coded 401 can repeat forever on a bad item; park it after POISON_ATTEMPTS tries. A rejected
+        // refresh (invalid_refresh) is about the session, not the item: the item waits for the next sign-in.
+        const countsAgainstItem =
+          e.status >= 500 || (e.status === 401 && e.code !== undefined && e.code !== REFRESH_REJECTED_CODE);
         if (countsAgainstItem) {
           const n = (attempts.get(head.clientId) ?? 0) + 1;
           attempts.set(head.clientId, n);

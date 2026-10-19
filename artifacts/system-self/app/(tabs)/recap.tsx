@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
   Animated,
   Platform,
   RefreshControl,
@@ -20,6 +19,7 @@ import { api } from "@/lib/api/client";
 import { weeklyDebriefKey, weeklyRecapKey } from "@/lib/game/keys";
 import { fetchWeeklyDebrief, fetchWeeklyRecap } from "@/lib/game/messages";
 import { SystemMessage } from "@/components/SystemMessage";
+import { ScreenStatus } from "@/components/ScreenStatus";
 import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
 
 function DeltaBar({ domain, delta, max }: { domain: Domain; delta: number; max: number }) {
@@ -52,7 +52,7 @@ const deltaStyles = StyleSheet.create({
 export default function RecapScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, shadowSelf, achievements, questChains, getShadowPhase } = useApp();
+  const { user, shadowSelf, achievements, questChains, getShadowPhase, loading, loadError, refresh } = useApp();
   const userId = useGameUserId();
 
   const recapQ = useQuery({ queryKey: weeklyRecapKey(userId), queryFn: () => fetchWeeklyRecap(api), enabled: !!userId });
@@ -76,25 +76,24 @@ export default function RecapScreen() {
     }
   };
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <ScreenStatus
+        failed={!loading && !!loadError}
+        message="The System is out of reach. Check your connection."
+        onRetry={() => void refresh()}
+      />
+    );
+  }
 
   const currentRecap = recapQ.data;
   if (!currentRecap) {
     return (
-      <View style={[styles.container, styles.stateCenter, { backgroundColor: colors.background }]}>
-        {recapQ.isError ? (
-          <>
-            <Text style={[styles.stateLine, { color: colors.mutedForeground }]}>
-              The weekly record is out of reach. Check your connection.
-            </Text>
-            <TouchableOpacity onPress={() => void recapQ.refetch()} accessibilityRole="button" style={styles.retryBtn}>
-              <Text style={[styles.retryText, { color: colors.primary }]}>RETRY</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <ActivityIndicator color={colors.primary} />
-        )}
-      </View>
+      <ScreenStatus
+        failed={recapQ.isError}
+        message="The weekly record is out of reach. Check your connection."
+        onRetry={() => void recapQ.refetch()}
+      />
     );
   }
   const aiVerdict = verdictQ.data?.debrief ?? "";
@@ -361,10 +360,6 @@ export default function RecapScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  stateCenter: { alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
-  stateLine: { fontSize: 13, lineHeight: 20, textAlign: "center" },
-  retryBtn: { paddingVertical: 8, paddingHorizontal: 16 },
-  retryText: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 3 },
   scroll: { paddingHorizontal: 20, gap: 12 },
 
   headerRow: {
