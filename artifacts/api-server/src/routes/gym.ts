@@ -34,8 +34,8 @@ import {
 } from "@workspace/contracts";
 import { withIdempotency, type HandlerResult } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
-import { applyChanges } from "../services/scoring";
-import { detectComeback, evaluateComeback } from "../services/comeback";
+import type { ApplyResult } from "../services/scoring";
+import { applyActivityChanges } from "../services/activity";
 import { withUserLock, type Tx } from "../services/user-lock";
 import {
   applyPersonalRecords,
@@ -355,10 +355,8 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
         .returning();
       if (!done) return { status: 409, body: { error: "Session already completed", code: "already_completed" } };
 
-      let results: Awaited<ReturnType<typeof applyChanges>>["results"] = [];
-      let notices: Awaited<ReturnType<typeof applyChanges>>["notices"] = [];
-      // Judged against the previous activity, before the log below moves lastActivityDate.
-      const comebackNotices = totalPoints > 0 ? await detectComeback(tx, userId, { activityDate: today, now }) : [];
+      let results: ApplyResult["results"] = [];
+      let notices: ApplyResult["notices"] = [];
       if (totalPoints > 0) {
         for (const [bodyPart, points] of Object.entries(byBodyPart)) {
           await tx
@@ -380,15 +378,14 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
           occurredAt: now,
           localDate: today,
         });
-        const applied = await applyChanges(
+        const applied = await applyActivityChanges(
           tx,
           userId,
           [{ domain: "BODY", delta: totalPoints, bonus: false, activity: true, reason: "gym", refId: session.id }],
           { localDate: today, now },
         );
         results = applied.results;
-        const marks = (await evaluateComeback(tx, userId, now)).notices;
-        notices = [...comebackNotices, ...applied.notices, ...marks];
+        notices = applied.notices;
       }
       await rollOverDue(tx, userId, now);
       return {

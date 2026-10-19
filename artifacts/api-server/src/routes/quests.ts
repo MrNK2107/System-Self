@@ -19,7 +19,7 @@ import { rollOverBeforeToday } from "../services/rollover";
 import { abandonChain, activeBoard, createQuests, hasActiveChain, slotStateOf, toQuestDto } from "../services/quests";
 import { track } from "../services/analytics";
 import { applyChanges, insertNotice } from "../services/scoring";
-import { detectComeback, evaluateComeback } from "../services/comeback";
+import { applyActivityChanges } from "../services/activity";
 import { withUserLock, type Tx } from "../services/user-lock";
 import {
   buildUserContext,
@@ -198,9 +198,6 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
       }
       const tz = (await userTimezone(tx, userId))!;
       const today = localDate(now, tz);
-      // Judged against the previous activity, before applyChanges moves lastActivityDate.
-      const comebackNotices = await detectComeback(tx, userId, { activityDate: today, now });
-
       const [done] = await tx
         .update(quests)
         .set({ status: "complete", resolvedAt: now, resolvedLocalDate: today })
@@ -208,7 +205,33 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
         .returning();
       if (!done) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
 
-      const applied = await applyChanges(
+      /** Advances the quest's chain: the next step, or the chain's completion notice. */
+      const advanceChain = async () => {
+        if (!quest.chainId) return [];
+        const [chain] = await tx.select().from(questChains).where(eq(questChains.id, quest.chainId)).limit(1);
+        if (!chain || chain.status !== "active") return [];
+        const nextStep = (quest.chainStep ?? chain.currentStep) + 1;
+        if (nextStep < chain.totalSteps) {
+          await tx.update(questChains).set({ currentStep: nextStep }).where(eq(questChains.id, chain.id));
+          await createQuests(tx, userId, [
+            {
+              ...chainStepQuest(chain.templateKey, nextStep),
+              expiresAt: new Date(now.getTime() + CHAIN_STEP_EXPIRY_MS),
+              chainId: chain.id,
+              chainStep: nextStep,
+              chainTotal: chain.totalSteps,
+            },
+          ]);
+          return [];
+        }
+        await tx
+          .update(questChains)
+          .set({ currentStep: chain.totalSteps, status: "complete", completedAt: now })
+          .where(eq(questChains.id, chain.id));
+        return [await insertNotice(tx, userId, "chain_complete", { name: chain.name, templateKey: chain.templateKey }, now)];
+      };
+
+      const applied = await applyActivityChanges(
         tx,
         userId,
         [
@@ -222,37 +245,9 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
           },
         ],
         { localDate: today, now },
+        { afterApply: advanceChain },
       );
-      const outNotices = [...comebackNotices, ...applied.notices];
-
-      if (quest.chainId) {
-        const [chain] = await tx.select().from(questChains).where(eq(questChains.id, quest.chainId)).limit(1);
-        if (chain && chain.status === "active") {
-          const nextStep = (quest.chainStep ?? chain.currentStep) + 1;
-          if (nextStep < chain.totalSteps) {
-            await tx.update(questChains).set({ currentStep: nextStep }).where(eq(questChains.id, chain.id));
-            await createQuests(tx, userId, [
-              {
-                ...chainStepQuest(chain.templateKey, nextStep),
-                expiresAt: new Date(now.getTime() + CHAIN_STEP_EXPIRY_MS),
-                chainId: chain.id,
-                chainStep: nextStep,
-                chainTotal: chain.totalSteps,
-              },
-            ]);
-          } else {
-            await tx
-              .update(questChains)
-              .set({ currentStep: chain.totalSteps, status: "complete", completedAt: now })
-              .where(eq(questChains.id, chain.id));
-            outNotices.push(
-              await insertNotice(tx, userId, "chain_complete", { name: chain.name, templateKey: chain.templateKey }, now),
-            );
-          }
-        }
-      }
-      outNotices.push(...(await evaluateComeback(tx, userId, now)).notices);
-      return { status: 200, body: { quest: toQuestDto(done!), results: applied.results, notices: outNotices } };
+      return { status: 200, body: { quest: toQuestDto(done), results: applied.results, notices: applied.notices } };
     });
   });
 

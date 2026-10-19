@@ -6,8 +6,8 @@ import { LogListQuerySchema, LogRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
 import { track } from "../services/analytics";
-import { applyChanges } from "../services/scoring";
-import { countHomeSession, detectComeback, evaluateComeback } from "../services/comeback";
+import { applyActivityChanges } from "../services/activity";
+import { countHomeSession } from "../services/comeback";
 
 const RETROACTIVE_LIMIT_MS = 48 * 3600_000;
 const FUTURE_TOLERANCE_MS = 5 * 60_000;
@@ -92,19 +92,17 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
         })
         .returning();
 
-      // Before applyChanges moves lastActivityDate: a comeback is judged against the previous activity.
-      const comebackNotices = await detectComeback(tx, userId, { activityDate: logDate, now });
       const changes = logChanges(body.domain, forbidden).map((c) => ({
         ...c,
         reason: forbidden ? ("forbidden" as const) : ("log" as const),
         refId: log!.id,
       }));
-      const { results, notices } = await applyChanges(tx, userId, changes, { localDate: logDate, now });
-      const homeNotices = await countHomeSession(tx, userId, { logType: body.logType, forbidden }, now);
-      const marks = (await evaluateComeback(tx, userId, now)).notices;
+      const { results, notices } = await applyActivityChanges(tx, userId, changes, { localDate: logDate, now }, {
+        afterApply: () => countHomeSession(tx, userId, { logType: body.logType, forbidden }, now),
+      });
       await rollOverDue(tx, userId, now);
       if (body.logType === "floor_session") await track(tx, userId, "floor_completed", { logId: log!.id });
-      return { status: 201, body: { log: toLogDto(log!), results, notices: [...comebackNotices, ...notices, ...homeNotices, ...marks] } };
+      return { status: 201, body: { log: toLogDto(log!), results, notices } };
     }, { preferClientId: true });
   });
 
