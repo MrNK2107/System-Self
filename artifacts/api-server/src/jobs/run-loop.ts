@@ -7,6 +7,7 @@ import { runSocialJobs } from "./social";
 import { prunePushLogs, runNotificationJobs } from "./notifications";
 import { createExpoTransport, type PushTransport } from "../services/push";
 import { env } from "../lib/env";
+import { jobDuration, rolloverUsers, timeJob } from "../lib/metrics";
 import { pruneBillingEvents } from "../services/entitlements";
 
 export const WORKER_BATCH_SIZE = 200;
@@ -28,6 +29,7 @@ export async function runWorkerTick(
 ): Promise<{ processed: number; claimed: number }> {
   const ids = await claimDueUsers(db, batchSize, now);
   let processed = 0;
+  const endRollover = jobDuration.startTimer({ job: "rollover" });
   for (const [i, userId] of ids.entries()) {
     if (signal?.aborted) {
       await db
@@ -39,21 +41,23 @@ export async function runWorkerTick(
     try {
       await ensureRolledOver(db, userId, now);
       processed++;
+      rolloverUsers.inc();
     } catch (err) {
       // The claim lease expires, so this user is retried by a later tick.
       logger.error({ err, userId }, "Rollover failed");
     }
   }
+  endRollover();
   if (!signal?.aborted) {
     try {
-      await runSocialJobs(db, now);
+      await timeJob("social", () => runSocialJobs(db, now));
     } catch (err) {
       logger.error({ err }, "Social jobs failed");
     }
   }
   if (!signal?.aborted) {
     try {
-      await runNotificationJobs(db, now, push);
+      await timeJob("notifications", () => runNotificationJobs(db, now, push));
     } catch (err) {
       logger.error({ err }, "Notification jobs failed");
     }

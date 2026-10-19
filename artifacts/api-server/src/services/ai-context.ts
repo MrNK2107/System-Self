@@ -1,6 +1,7 @@
 import { and, count, desc, eq, gt, gte, inArray, isNotNull } from "drizzle-orm";
 import { logs, quests, users, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, SEASON_PROMPT_LINE, addDays, lifeContext, type RankedDomain } from "@workspace/engine";
+import { aiFallbacks } from "../lib/metrics";
 import { generateOrTemplate, type AiDeps } from "../lib/ai";
 import { templateQuests, templateSystemMessage, type TemplateQuest } from "../lib/ai-fallback";
 import type { MessageType } from "@workspace/contracts";
@@ -501,14 +502,18 @@ export async function generateQuestCandidates(ctx: PromptContext, need: QuestNee
     attempts: result.attempts,
   };
   if (result.model === "template") return fallback;
+  const invalid = () => {
+    aiFallbacks.inc();
+    return fallback;
+  };
   try {
     const json = extractJsonObject(result.text);
-    if (!json) return fallback;
+    if (!json) return invalid();
     const parsed = generatedQuestsPayloadSchema.safeParse(JSON.parse(json));
-    if (!parsed.success) return fallback;
+    if (!parsed.success) return invalid();
     return { candidates: parsed.data.quests, model: result.model, promptVersion: QUESTS_PROMPT_VERSION, attempts: result.attempts };
   } catch {
-    return fallback;
+    return invalid();
   }
 }
 

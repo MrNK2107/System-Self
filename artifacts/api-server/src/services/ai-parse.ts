@@ -5,6 +5,7 @@
  */
 import { RankedDomainSchema, parseLogData, type LogProposalDto } from "@workspace/contracts";
 import { LOG_TYPES, PARSE_MAX_PROPOSALS, RANKED_DOMAINS, VOICE_MAX_SECONDS, parseFreeText } from "@workspace/engine";
+import { aiFallbacks } from "../lib/metrics";
 import { generateFromAudio, generateOrTemplate, type AiDeps, type AudioInput } from "../lib/ai";
 import { logger } from "../lib/logger";
 import { quoted } from "./ai-context";
@@ -106,6 +107,7 @@ export async function parseText(text: string, ai: AiDeps): Promise<LogProposalDt
   if (result.model !== "template") {
     const proposals = validateProposals(extractJson(result.text));
     if (proposals.length > 0) return proposals;
+    aiFallbacks.inc();
   }
   return keywordProposals(text);
 }

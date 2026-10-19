@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 import { apiBaseUrl } from "./config";
+import { newRequestId } from "./request-id";
 import { AuthResponseSchema, secureTokenStore, type Session, type TokenStore } from "./session";
 
 export type ApiErrorKind = "network" | "http" | "parse" | "storage";
@@ -98,7 +99,7 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
 
   // The timeout covers the whole exchange, including reading the body.
   async function send(method: string, path: string, opts: RequestOptions<unknown>, token: string | null): Promise<Reply> {
-    const headers: Record<string, string> = { Accept: "application/json" };
+    const headers: Record<string, string> = { Accept: "application/json", "x-request-id": newRequestId() };
     if (opts.binary) headers["Content-Type"] = opts.binary.contentType;
     else if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (token) headers.Authorization = `Bearer ${token}`;

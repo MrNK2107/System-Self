@@ -5,7 +5,11 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { db as defaultDb, type Db } from "@workspace/db";
 import { createRouter } from "./routes";
-import { logger } from "./lib/logger";
+import { logger as defaultLogger } from "./lib/logger";
+import type { Logger } from "pino";
+import { resolveRequestId } from "./lib/request-id";
+import { httpMetrics } from "./middlewares/http-metrics";
+import { metricsRoutes } from "./routes/metrics";
 import { env, resolveCorsOrigins } from "./lib/env";
 import type { AiDeps } from "./lib/ai";
 import { createMailer, type Mailer } from "./lib/mailer";
@@ -18,7 +22,7 @@ export const BILLING_WEBHOOK_PATH = "/api/billing/revenuecat";
 export const BILLING_WEBHOOK_RATE_LIMIT_MAX = 600;
 
 export function createApp(
-  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number; revenuecat?: RevenueCatClient | null } = {},
+  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number; revenuecat?: RevenueCatClient | null; metricsToken?: string | null; logger?: Logger } = {},
 ): Express {
   const db = deps.db === undefined ? defaultDb : deps.db;
   const mailer = deps.mailer ?? createMailer();
@@ -28,9 +32,15 @@ export function createApp(
   // Client IPs (and so rate-limit buckets) come from X-Forwarded-For only for trusted proxy hops.
   app.set("trust proxy", deps.trustProxy ?? env.TRUST_PROXY);
 
+  const metricsToken = deps.metricsToken === undefined ? (env.METRICS_TOKEN ?? null) : deps.metricsToken;
   app.use(
     pinoHttp({
-      logger,
+      logger: deps.logger ?? defaultLogger,
+      genReqId(req, res) {
+        const id = resolveRequestId(req.headers["x-request-id"]);
+        res.setHeader("x-request-id", id);
+        return id;
+      },
       serializers: {
         req(req) {
           return {
@@ -47,6 +57,8 @@ export function createApp(
       },
     }),
   );
+  app.use(httpMetrics);
+  if (metricsToken) app.use(metricsRoutes(metricsToken));
   app.disable("x-powered-by");
   app.use(helmet());
   app.use(

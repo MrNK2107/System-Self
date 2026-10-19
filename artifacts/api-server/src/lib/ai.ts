@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { env } from "./env";
 import { logger } from "./logger";
+import { aiCalls, aiFallbacks, type AiOutcome } from "./metrics";
 
 export interface AiCallOptions {
   systemInstruction: string;
@@ -29,6 +30,19 @@ function isRetryableError(error: unknown): boolean {
     msg.toLowerCase().includes("timeout") ||
     msg.toLowerCase().includes("unavailable")
   );
+}
+
+class EmptyModelResponse extends Error {
+  constructor() {
+    super("Empty model response");
+  }
+}
+
+function outcomeOf(error: unknown): AiOutcome {
+  if (error instanceof EmptyModelResponse) return "invalid";
+  const name = error instanceof Error ? error.name : "";
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return name === "AbortError" || name === "TimeoutError" || msg.includes("timeout") || msg.includes("timed out") ? "timeout" : "error";
 }
 
 export type ModelCaller = (model: string, options: AiCallOptions) => Promise<string>;
@@ -113,11 +127,13 @@ export async function generateWithFallback(
       try {
         const text = await call(model, options);
         if (!text) {
-          throw new Error("Empty model response");
+          throw new EmptyModelResponse();
         }
+        aiCalls.inc({ model, outcome: "ok" });
         return { text, model, attempts };
       } catch (error) {
         lastError = error;
+        aiCalls.inc({ model, outcome: outcomeOf(error) });
         const canRetry = retry < env.GEMINI_RETRY_COUNT && isRetryableError(error);
         if (!canRetry) {
           break;
@@ -140,8 +156,11 @@ export async function generateOrTemplate(
   call: ModelCaller = callModel,
 ): Promise<AiCallResult> {
   try {
-    return await generateWithFallback(options, call);
+    const result = await generateWithFallback(options, call);
+    if (result.model === "template") aiFallbacks.inc();
+    return result;
   } catch (error) {
+    aiFallbacks.inc();
     logger.warn({ err: error instanceof Error ? error.message : String(error) }, "AI generation failed; using template");
     return { text: "", model: "template", attempts: env.GEMINI_RETRY_COUNT + 1 };
   }

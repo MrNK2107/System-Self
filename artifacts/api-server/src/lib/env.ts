@@ -43,6 +43,8 @@ const envSchema = z.object({
   WORKER_TICK_MS: z.coerce.number().int().min(1000).default(60_000),
   /** Bearer token of /metrics (guarded against placeholders in production). */
   METRICS_TOKEN: z.string().min(1).optional(),
+  /** Port of the worker's own /metrics listener (needs METRICS_TOKEN). Unset: no listener. */
+  WORKER_METRICS_PORT: z.coerce.number().int().min(1).max(65535).optional(),
   /** Pause between readyz flipping to 503 and closing the listener. Default 5000 in production, else 0. */
   SHUTDOWN_DRAIN_MS: z.coerce.number().int().min(0).optional(),
   /** Bearer secret of POST /api/billing/revenuecat. Unset: the webhook answers 503 and accepts nothing. */
