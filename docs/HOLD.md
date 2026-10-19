@@ -65,3 +65,9 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 **Why I can't:** it needs an account in your name, and the DSN is a per-project credential.
 **Doing instead:** structured error logs plus metrics. The API and worker log every unhandled error as JSON through pino (request id, route, `err` with stack; secrets redacted), the 5xx rate is on `/metrics` (`http_request_duration_seconds_count{status=~"5.."}`), and a stalled worker shows up as a stale `worker_last_tick_timestamp_seconds` and an unhealthy container ([docs/RUNBOOK.md](RUNBOOK.md#stuck-worker-or-lease)). App crashes are only visible in the store consoles (App Store Connect, Play Console vitals) until a reporter is wired in.
 **Resolution:**
+
+## H-12 🟨 Publishing the code
+**Need:** your go-ahead to push `main` to GitHub (or open a PR from `feat/production-build`).
+**Why I can't:** pushing publishes the code to a shared remote; that's your call.
+**Doing instead:** all work is merged into the local `main` (fast-forward from `feat/production-build`; the full server suite passed 701/701 on that exact tree, plus engine 154, app 364, db 29). Nothing has been pushed. `git push origin main` publishes it, and CI (`.github/workflows/ci.yml`) then runs every check including the real-image docker smoke.
+**Resolution:**
