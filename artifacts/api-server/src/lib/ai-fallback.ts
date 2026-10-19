@@ -84,12 +84,21 @@ export interface TemplateQuest {
 }
 
 /** Template board candidates: 3 dailies (weakest domain first), then one weekly and one arc in the weakest domain. */
-export function templateQuests(ctx: { weakestDomain: string }): TemplateQuest[] {
+/** Home path: BODY template quests become bodyweight home sessions of under 25 minutes. */
+const HOME_QUESTS: Record<"daily" | "weekly" | "arc", { title: string; description: string }> = {
+  daily: { title: "Home session", description: "Do one bodyweight home session of under 25 minutes, no equipment, and log it." },
+  weekly: { title: "Four home sessions", description: "Log four separate bodyweight home sessions before the week closes." },
+  arc: { title: "Three week home session arc", description: "Do a bodyweight home session at least four days in each of the next three weeks." },
+};
+
+export function templateQuests(ctx: { weakestDomain: string; homePathActive?: boolean }): TemplateQuest[] {
   const first = DOMAIN_QUESTS[ctx.weakestDomain] ? ctx.weakestDomain : "DISCIPLINE";
   const domains = [first, ...DOMAIN_ORDER.filter((d) => d !== first)].slice(0, 3);
+  const pick = (domain: string, type: "daily" | "weekly" | "arc", base: { title: string; description: string }) =>
+    ctx.homePathActive && domain === "BODY" ? HOME_QUESTS[type] : base;
   return [
-    ...domains.map((domain) => ({ ...DOMAIN_QUESTS[domain]!, domain, type: "daily" as const })),
-    { ...WEEKLY_QUESTS[first]!, domain: first, type: "weekly" as const },
-    { ...ARC_QUESTS[first]!, domain: first, type: "arc" as const },
+    ...domains.map((domain) => ({ ...pick(domain, "daily", DOMAIN_QUESTS[domain]!), domain, type: "daily" as const })),
+    { ...pick(first, "weekly", WEEKLY_QUESTS[first]!), domain: first, type: "weekly" as const },
+    { ...pick(first, "arc", ARC_QUESTS[first]!), domain: first, type: "arc" as const },
   ];
 }

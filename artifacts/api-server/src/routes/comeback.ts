@@ -12,8 +12,8 @@ export function comebackRoutes(db: Db, clock: () => Date = () => new Date()): IR
    */
   router.get("/comeback", async (req, res) => {
     const userId = req.user!.id;
-    const body = await withUserLock(db, userId, (tx) => evaluateComeback(tx, userId, clock()));
-    res.json(body);
+    const { active, returnerCount } = await withUserLock(db, userId, (tx) => evaluateComeback(tx, userId, clock()));
+    res.json({ active, returnerCount });
   });
 
   return router;

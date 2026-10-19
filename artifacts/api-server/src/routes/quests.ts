@@ -19,6 +19,7 @@ import { rollOverBeforeToday } from "../services/rollover";
 import { abandonChain, activeBoard, createQuests, hasActiveChain, slotStateOf, toQuestDto } from "../services/quests";
 import { track } from "../services/analytics";
 import { applyChanges, insertNotice } from "../services/scoring";
+import { detectComeback, evaluateComeback } from "../services/comeback";
 import { withUserLock, type Tx } from "../services/user-lock";
 import {
   buildUserContext,
@@ -60,7 +61,7 @@ type GenerateStep1 =
   | { kind: "done"; result: HandlerResult }
   | { kind: "generate"; ctx: PromptContext; need: QuestNeed };
 
-export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
+export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => new Date()): IRouter {
   const router = Router();
 
   router.get("/quests", async (req, res) => {
@@ -138,7 +139,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
         .limit(1);
       if (batch) return boardResult(tx, userId, at, false);
       const need = await questNeed(tx, userId, await activeBoard(tx, userId, at));
-      const picked = pickQuests(generated.candidates, need, ctx.weakestDomain);
+      const picked = pickQuests(generated.candidates, need, ctx.weakestDomain, ctx.homePathActive);
       if (picked.length === 0) return boardResult(tx, userId, at, false);
 
       const [created] = await tx
@@ -184,7 +185,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
       return;
     }
     await withIdempotency(db, req, res, `POST /quests/${questId}/complete`, async (tx) => {
-      const now = new Date();
+      const now = clock();
       await rollOverBeforeToday(tx, userId, now); // roll every date before today before this write lands
       const [quest] = await tx
         .select()
@@ -197,6 +198,8 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
       }
       const tz = (await userTimezone(tx, userId))!;
       const today = localDate(now, tz);
+      // Judged against the previous activity, before applyChanges moves lastActivityDate.
+      const comebackNotices = await detectComeback(tx, userId, { activityDate: today, now });
 
       const [done] = await tx
         .update(quests)
@@ -220,7 +223,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
         ],
         { localDate: today, now },
       );
-      const outNotices = [...applied.notices];
+      const outNotices = [...comebackNotices, ...applied.notices];
 
       if (quest.chainId) {
         const [chain] = await tx.select().from(questChains).where(eq(questChains.id, quest.chainId)).limit(1);
@@ -248,6 +251,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
           }
         }
       }
+      outNotices.push(...(await evaluateComeback(tx, userId, now)).notices);
       return { status: 200, body: { quest: toQuestDto(done!), results: applied.results, notices: outNotices } };
     });
   });

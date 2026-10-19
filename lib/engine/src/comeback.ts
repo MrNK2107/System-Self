@@ -17,15 +17,20 @@ export const COMEBACK_CHECKLIST = [
 export type ComebackKey = (typeof COMEBACK_CHECKLIST)[number]["key"];
 
 /**
- * Whether a log on `today` is a return: the user was active before (on or after onboarding) and the
- * empty days in between number at least COMEBACK_MIN_GAP_DAYS. `gapDays` is that count of empty days.
+ * Whether activity on `today` is a return: the empty days since the last activity (or since the onboarding date
+ * for someone never active) number at least COMEBACK_MIN_GAP_DAYS. `gapDays` is that count of empty days.
  */
 export function isComeback(
   lastActivityDate: string | null,
   today: string,
   onboardedOn: string,
 ): { comeback: boolean; gapDays: number } {
-  if (lastActivityDate === null || lastActivityDate < onboardedOn) return { comeback: false, gapDays: 0 };
+  if (lastActivityDate === null) {
+    // Never active since onboarding: the gap runs from the onboarding date itself.
+    const gap = Math.max(0, daysBetween(onboardedOn, today));
+    return { comeback: gap >= COMEBACK_MIN_GAP_DAYS, gapDays: gap };
+  }
+  if (lastActivityDate < onboardedOn) return { comeback: false, gapDays: 0 };
   const gapDays = Math.max(0, daysBetween(lastActivityDate, today) - 1);
   return { comeback: gapDays >= COMEBACK_MIN_GAP_DAYS, gapDays };
 }

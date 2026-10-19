@@ -41,7 +41,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
     router.use(profileRoutes(db));
     router.use(stateRoutes(db));
     router.use(logsRoutes(db, deps.now));
-    router.use(questsRoutes(db, ai));
+    router.use(questsRoutes(db, ai, deps.now));
     router.use(chainsRoutes(db));
     router.use(noticesRoutes(db));
     router.use(messagesRoutes(db, ai));

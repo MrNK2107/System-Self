@@ -7,7 +7,7 @@ import { withIdempotency } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
 import { track } from "../services/analytics";
 import { applyChanges } from "../services/scoring";
-import { countHomeSession, detectComeback } from "../services/comeback";
+import { countHomeSession, detectComeback, evaluateComeback } from "../services/comeback";
 
 const RETROACTIVE_LIMIT_MS = 48 * 3600_000;
 const FUTURE_TOLERANCE_MS = 5 * 60_000;
@@ -93,17 +93,18 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
         .returning();
 
       // Before applyChanges moves lastActivityDate: a comeback is judged against the previous activity.
-      const comebackNotices = await detectComeback(tx, userId, { logDate, now });
+      const comebackNotices = await detectComeback(tx, userId, { activityDate: logDate, now });
       const changes = logChanges(body.domain, forbidden).map((c) => ({
         ...c,
         reason: forbidden ? ("forbidden" as const) : ("log" as const),
         refId: log!.id,
       }));
       const { results, notices } = await applyChanges(tx, userId, changes, { localDate: logDate, now });
-      const homeNotices = await countHomeSession(tx, userId, body.logType, now);
+      const homeNotices = await countHomeSession(tx, userId, { logType: body.logType, forbidden }, now);
+      const marks = (await evaluateComeback(tx, userId, now)).notices;
       await rollOverDue(tx, userId, now);
       if (body.logType === "floor_session") await track(tx, userId, "floor_completed", { logId: log!.id });
-      return { status: 201, body: { log: toLogDto(log!), results, notices: [...comebackNotices, ...notices, ...homeNotices] } };
+      return { status: 201, body: { log: toLogDto(log!), results, notices: [...comebackNotices, ...notices, ...homeNotices, ...marks] } };
     }, { preferClientId: true });
   });
 

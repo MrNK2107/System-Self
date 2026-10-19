@@ -18,7 +18,11 @@ test("checklist keys are fixed", () => {
 });
 
 test("isComeback: needs a prior activity date on or after onboarding and 5+ empty days", () => {
-  assert.deepEqual(isComeback(null, "2026-03-20", "2026-03-01"), { comeback: false, gapDays: 0 });
+  // Never active: judged from the onboarding date. The first log on or soon after onboarding is not a return.
+  assert.deepEqual(isComeback(null, "2026-03-01", "2026-03-01"), { comeback: false, gapDays: 0 });
+  assert.deepEqual(isComeback(null, "2026-03-05", "2026-03-01"), { comeback: false, gapDays: 4 });
+  assert.deepEqual(isComeback(null, "2026-03-06", "2026-03-01"), { comeback: true, gapDays: 5 });
+  assert.deepEqual(isComeback(null, "2026-03-20", "2026-03-01"), { comeback: true, gapDays: 19 });
   // last activity 03-10, today 03-16: empty days 03-11..03-15 = 5
   assert.deepEqual(isComeback("2026-03-10", "2026-03-16", "2026-03-01"), { comeback: true, gapDays: 5 });
   // only 4 empty days

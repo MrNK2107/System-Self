@@ -431,7 +431,7 @@ export async function generateQuestCandidates(ctx: PromptContext, need: QuestNee
     ai.call,
   );
   const fallback = {
-    candidates: templateQuests({ weakestDomain: ctx.weakestDomain }),
+    candidates: templateQuests({ weakestDomain: ctx.weakestDomain, homePathActive: ctx.homePathActive }),
     model: "template",
     promptVersion: QUESTS_PROMPT_VERSION,
     attempts: result.attempts,
@@ -449,8 +449,13 @@ export async function generateQuestCandidates(ctx: PromptContext, need: QuestNee
 }
 
 /** Picks `need` quests per type from the candidates, topping up any shortfall from distinct template quests. */
-export function pickQuests(candidates: TemplateQuest[], need: QuestNeed, weakestDomain: string): TemplateQuest[] {
-  const templates = templateQuests({ weakestDomain });
+export function pickQuests(
+  candidates: TemplateQuest[],
+  need: QuestNeed,
+  weakestDomain: string,
+  homePathActive = false,
+): TemplateQuest[] {
+  const templates = templateQuests({ weakestDomain, homePathActive });
   const picked: TemplateQuest[] = [];
   for (const type of ["daily", "weekly", "arc"] as const) {
     const wanted = need[type];

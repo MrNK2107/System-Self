@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { comebacks, notices, profiles, quests, scoreEvents, userDayState, workoutSessions } from "@workspace/db";
+import { logs, comebacks, notices, profiles, quests, scoreEvents, userDayState, workoutSessions } from "@workspace/db";
 import { addDays, localDate } from "@workspace/engine";
 import {
   ComebackResponseSchema,
@@ -16,6 +16,8 @@ import {
 import { createQuests } from "../services/quests";
 import { buildQuestPrompt, buildUserContext } from "../services/ai-context";
 import { insertNotice } from "../services/scoring";
+import { pickQuests } from "../services/ai-context";
+import { templateQuests } from "../lib/ai-fallback";
 import { TZ, app, assertContract, assertStoredNoticesMatchContract, auth, db, score, setup, skip } from "./game-test-helpers";
 
 after(async () => {
@@ -34,8 +36,8 @@ const TODAY = localDate(NOW, TZ);
 const clockApp = () => app({ now: () => NOW });
 
 /** Pins the user's history relative to NOW: onboarded 30 days ago, last active `lastActivity`, everything before today rolled. */
-async function seed(userId: string, lastActivity: string | null) {
-  await db!.update(profiles).set({ onboardedAt: new Date(NOW.getTime() - 30 * 86_400_000) }).where(eq(profiles.userId, userId));
+async function seed(userId: string, lastActivity: string | null, onboardedDaysAgo = 30) {
+  await db!.update(profiles).set({ onboardedAt: new Date(NOW.getTime() - onboardedDaysAgo * 86_400_000) }).where(eq(profiles.userId, userId));
   await db!
     .update(userDayState)
     .set({ lastActivityDate: lastActivity, lastRolledDate: addDays(TODAY, -1), nextRolloverAt: new Date(NOW.getTime() + 86_400_000) })
@@ -99,7 +101,7 @@ test("notices kinds filter pages only the requested kinds (hasMore ignores other
 test("first log after onboarding is not a comeback", { skip }, async () => {
   const a = clockApp();
   const { token, id } = await setup(a);
-  await seed(id, null);
+  await seed(id, null, 0);
   const res = await postLog(a, token, "first");
   assert.equal(res.status, 201);
   assertContract(LogResponseSchema, res.body);
@@ -332,4 +334,168 @@ test("gym session while home path active still scores (and a gym return after a 
   const [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
   assert.equal(p!.homePathActive, true); // gym logging neither blocks nor counts as a home session
   assert.equal(p!.homeSessions, 0);
+});
+
+async function mkDaily(userId: string, title = "Walk", domain = "BODY") {
+  return (
+    await createQuests(db!, userId, [
+      { type: "daily", title, description: "d", domain, expiresAt: new Date(NOW.getTime() + 3600_000) },
+    ])
+  )[0]!;
+}
+
+async function insertLog(userId: string, clientId: string, domain: string, localDateStr: string) {
+  await db!.insert(logs).values({ userId, clientId, domain, logType: "x", data: {}, occurredAt: NOW, localDate: localDateStr });
+}
+
+test("never active and onboarded 30 days ago: the first log is a comeback measured from onboarding", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, null, 30);
+  const res = await postLog(a, token, "late-first");
+  const n = res.body.notices.find((x: { kind: string }) => x.kind === "comeback");
+  assert.equal(n.payload.gapDays, 30);
+});
+
+test("quest completion after 6 empty days -> comeback notice (first) and row", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, addDays(TODAY, -7));
+  const q = await mkDaily(id);
+  const done = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
+  assert.equal(done.status, 200);
+  assert.equal(done.body.notices[0].kind, "comeback");
+  assert.equal(done.body.notices[0].payload.gapDays, 6);
+  const rows = await db!.select().from(comebacks).where(eq(comebacks.userId, id));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.startedOn, TODAY);
+});
+
+test("a backdated return starts today's comeback, judged from the activity's own date", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, addDays(TODAY, -8));
+  const res = await request(a)
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "bd", domain: "BODY", logType: "workout", occurredAt: new Date(NOW.getTime() - 30 * 3600_000).toISOString() });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.log.isRetroactive, true);
+  const n = res.body.notices.find((x: { kind: string }) => x.kind === "comeback");
+  assert.equal(n.payload.gapDays, 6); // last -8, activity on -1
+  const [row] = await db!.select().from(comebacks).where(eq(comebacks.userId, id));
+  assert.equal(row!.startedOn, TODAY);
+  const cb = await request(a).get("/api/comeback").set(auth(token));
+  assert.ok(cb.body.active, "active today");
+});
+
+test("the checklist window is two days: completes on day 2, expires after", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, addDays(TODAY, -1));
+  await db!.insert(comebacks).values({ userId: id, startedOn: addDays(TODAY, -1), gapDays: 6, checklist: [] });
+  await insertLog(id, "d1-body", "BODY", addDays(TODAY, -1)); // day 1
+  await postLog(a, token, "d2-mind", "MIND", "read"); // day 2: two domains across the window
+  const q = await mkDaily(id);
+  await resolveQuest(q.id);
+  const fin = await request(a).get("/api/comeback").set(auth(token));
+  assert.deepEqual(fin.body, { active: null, returnerCount: 1 });
+  // Started two days ago: out of the window, not active.
+  await db!.delete(comebacks);
+  await db!.insert(comebacks).values({ userId: id, startedOn: addDays(TODAY, -2), gapDays: 6, checklist: [] });
+  const old = await request(a).get("/api/comeback").set(auth(token));
+  assert.equal(old.body.active, null);
+});
+
+test("completion is evaluated at the end of a log, without GET, and the mark rides in its response", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, addDays(TODAY, -7));
+  await postLog(a, token, "e-body"); // starts the comeback
+  const q = await mkDaily(id);
+  await resolveQuest(q.id);
+  const last = await postLog(a, token, "e-mind", "MIND", "read");
+  const kinds = kindsOf(last.body);
+  assert.ok(kinds.includes("returner_mark"), kinds.join());
+  const mark = last.body.notices.find((x: { kind: string }) => x.kind === "returner_mark");
+  assert.deepEqual(mark.payload, { count: 1, line: "Returned ×1." });
+  assert.equal((await db!.select().from(profiles).where(eq(profiles.userId, id)))[0]!.returnerCount, 1);
+  const after = await request(a).get("/api/comeback").set(auth(token));
+  assert.deepEqual(after.body, { active: null, returnerCount: 1 });
+  assert.equal((await db!.select().from(notices).where(eq(notices.kind, "returner_mark"))).length, 1);
+});
+
+test("quest completion that finishes the checklist returns the mark; refused dailies do not block it", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, addDays(TODAY, -7));
+  await postLog(a, token, "q-body");
+  await postLog(a, token, "q-mind", "MIND", "read");
+  const refused = await mkDaily(id, "Skipped", "SOCIAL");
+  await db!
+    .update(quests)
+    .set({ status: "refused", resolvedAt: NOW, resolvedLocalDate: TODAY, refusalReason: "tired" })
+    .where(eq(quests.id, refused.id));
+  const q = await mkDaily(id);
+  const done = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
+  assert.equal(done.status, 200);
+  assert.ok(kindsOf(done.body).includes("returner_mark"));
+});
+
+test("an open daily blocks the quests item", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, addDays(TODAY, -7));
+  await postLog(a, token, "o-body");
+  await postLog(a, token, "o-mind", "MIND", "read");
+  const done = await mkDaily(id, "Done");
+  await resolveQuest(done.id);
+  await mkDaily(id, "Still open", "SOCIAL");
+  const cb = await request(a).get("/api/comeback").set(auth(token));
+  assert.equal(cb.body.active.checklist.find((c: { key: string }) => c.key === "quests_today").done, false);
+});
+
+test("offerHomePath is false when the home path is already active", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await request(a).post("/api/profile/home-path").set(auth(token)).send({ active: true });
+  await seed(id, addDays(TODAY, -20));
+  const res = await postLog(a, token, "on-path");
+  const n = res.body.notices.find((x: { kind: string }) => x.kind === "comeback");
+  assert.equal(n.payload.offerHomePath, false);
+});
+
+test("forbidden home_session logs do not count toward the unlock", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, null, 0);
+  await request(a).post("/api/profile/home-path").set(auth(token)).send({ active: true });
+  const r = await request(a)
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "fb", domain: "BODY", logType: "home_session", forbidden: true, occurredAt: NOW.toISOString() });
+  assert.equal(r.status, 201);
+  assert.equal((await db!.select().from(profiles).where(eq(profiles.userId, id)))[0]!.homeSessions, 0);
+});
+
+test("?kinds given twice is a 400, not a server error", { skip }, async () => {
+  const a = clockApp();
+  const { token } = await setup(a);
+  const res = await request(a).get("/api/notices?kinds=a&kinds=b").set(auth(token));
+  assert.equal(res.status, 400);
+  const st = await request(a).get("/api/state?noticeKinds=a&noticeKinds=b").set(auth(token));
+  assert.equal(st.status, 400);
+});
+
+test("template quests honour the home path: BODY quests become home sessions", () => {
+  const plain = templateQuests({ weakestDomain: "BODY" });
+  assert.ok(!plain.some((q) => /home session/i.test(q.title)));
+  const home = templateQuests({ weakestDomain: "BODY", homePathActive: true });
+  const body = home.filter((q) => q.domain === "BODY");
+  assert.ok(body.length >= 3);
+  assert.ok(body.every((q) => /home session/i.test(q.title)), body.map((q) => q.title).join());
+  assert.equal(home.filter((q) => q.domain !== "BODY").length, plain.filter((q) => q.domain !== "BODY").length);
+  const picked = pickQuests([], { daily: 3, weekly: 1, arc: 1 }, "MIND", true);
+  assert.ok(picked.filter((q) => q.domain === "BODY").every((q) => /home session/i.test(q.title)));
+  assert.ok(picked.some((q) => q.domain === "BODY"));
 });
