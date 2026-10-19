@@ -186,7 +186,7 @@ export function noticeView(group: NoticeGroup): NoticeView {
         modal: "system",
         tone: p.delta < 0 ? "alert" : "info",
         label: "PEER RATINGS",
-        title: `${p.average.toFixed(1)} AVERAGE · ${p.count} RATINGS`,
+        title: `${p.average.toFixed(1)} AVERAGE`,
         body: `Your clan rated the output. ${effect}`,
       };
     }

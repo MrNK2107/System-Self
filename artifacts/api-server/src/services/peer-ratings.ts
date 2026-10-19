@@ -51,7 +51,7 @@ export async function ratingsUsed(tx: Reader, userId: string, weekKey: string): 
 /**
  * Rollover hook for the last local date of an ISO week: the ratee's peer-rating week close. Ratings whose weekKey
  * (the rater's local ISO week) is this week count, whoever gave them and wherever the rater is now (a rater who left
- * the clan mid-week still counts). With at least PEER_MIN_RATINGS, SOCIAL moves by (average - 3) x 1.0 (reason
+ * the clan mid-week still counts). With at least PEER_MIN_RATINGS (4), SOCIAL moves by (average - 3) x 1.0 (reason
  * `peer_rating`, no bonus, not activity) and the ratee gets a `peer_rating_result` notice with aggregates only. The
  * peer_rating_weeks row (primary key user + ISO week) makes it exactly once per week. Must run inside withUserLock.
  */
@@ -82,6 +82,6 @@ export async function evaluatePeerRatingsWeek(tx: Tx, userId: string, date: stri
     .update(peerRatingWeeks)
     .set({ delta })
     .where(and(eq(peerRatingWeeks.userId, userId), eq(peerRatingWeeks.weekKey, weekKey)));
-  const notice = await insertNotice(tx, userId, "peer_rating_result", { weekKey, count: result.count, average: result.average, delta }, now);
+  const notice = await insertNotice(tx, userId, "peer_rating_result", { weekKey, average: result.average, delta }, now);
   return [...applied.notices, notice];
 }

@@ -129,7 +129,7 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
   /** A financial goal's saved amount reached its target (no score change). Amounts are in the profile currency. */
   goal_achieved: z.object({ goalId: z.string(), title: z.string(), targetAmount: z.number(), currency: z.string() }),
   /** A week of clan peer ratings closed with at least 3 ratings. Aggregates only: raters are never revealed. */
-  peer_rating_result: z.object({ weekKey: z.string(), count: z.number().int(), average: z.number(), delta: z.number() }),
+  peer_rating_result: z.object({ weekKey: z.string(), average: z.number(), delta: z.number() }),
   quest_failed: z.object({ questId: z.string(), title: z.string(), type: QuestTypeSchema, penalty: z.number() }),
   streak_break: z.object({
     domains: z.array(z.object({ domain: RankedDomainSchema, lostStreak: z.number().int() })),

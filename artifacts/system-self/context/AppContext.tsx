@@ -35,6 +35,7 @@ import {
   type LogInput,
   type MutationResult,
 } from "@/lib/game/actions";
+import { customDomainsKey } from "@/lib/custom/custom";
 import { invalidateGame } from "@/lib/game/keys";
 import { cancelSeason as cancelSeasonRequest, scheduleSeason as scheduleSeasonRequest } from "@/lib/game/life";
 import { pendingSetChanged, trackSentLogs } from "@/lib/game/pending";
@@ -228,7 +229,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const prevPendingSet = useRef<readonly OutboxItem[]>([]);
   useEffect(() => {
     // Outbox items are logs: activity.
-    if (pendingSetChanged(prevPendingSet.current, outboxSnap.pending)) void invalidateGame(queryClient, userId, { activity: true });
+    if (pendingSetChanged(prevPendingSet.current, outboxSnap.pending)) {
+      void invalidateGame(queryClient, userId, { activity: true });
+      // A queued custom log leaving the outbox moves that stat's score (never a ranked one).
+      void queryClient.invalidateQueries({ queryKey: customDomainsKey(userId) });
+    }
     if (outboxSnap.pending.length === 0) setSyncBlocked(false);
     prevPendingSet.current = outboxSnap.pending;
   }, [outboxSnap.pending, queryClient, userId]);

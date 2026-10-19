@@ -1,7 +1,8 @@
 import { eq, inArray } from "drizzle-orm";
 import { clanMembers, clans, domainScores, profiles, shadowSelves, users, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, localDate, type Rank, type RankedDomain } from "@workspace/engine";
-import type { PublicProfile } from "@workspace/contracts";
+import type { PublicCustomDomain, PublicProfile } from "@workspace/contracts";
+import { loadPublicCustomDomains } from "./custom-domains";
 import { toShadowState } from "./scoring";
 import { hiddenAndTrajectoryBatch } from "./state";
 
@@ -24,6 +25,8 @@ export interface ProjectionSubject {
   trajectory: "up" | "stable" | "down";
   shadowActive: boolean;
   clanTag?: string;
+  /** Public, unarchived custom domains: name and score only (never logs, notes or values). */
+  customDomains?: PublicCustomDomain[];
 }
 
 export interface ProjectOptions {
@@ -39,6 +42,7 @@ export interface ProjectOptions {
  *    for a rival only when the subject is `public` and the viewer has rivalReveal, else the rival codename.
  *  - scores (the five ranked domains): self, clanmate, rival. A follower sees rank, trajectory, shadowActive only (PRD 16).
  *  - clanTag: never shown to a rival (PRD 14); hidden for `anonymous` subjects except to clanmates (and to self).
+ * - customDomains (public ones, name + score only): self, clanmate, duo, follower; never a rival or a stranger.
  * Never includes a user id or the hidden score.
  */
 export function projectUser(subject: ProjectionSubject, relation: Relation, opts: ProjectOptions = {}): PublicProfile {
@@ -61,6 +65,9 @@ export function projectUser(subject: ProjectionSubject, relation: Relation, opts
   if (relation === "self" || relation === "clanmate" || relation === "rival") profile.scores = { ...subject.scores };
   if (subject.clanTag && relation !== "rival" && (subject.identitySetting !== "anonymous" || relation === "clanmate" || relation === "self")) {
     profile.clanTag = subject.clanTag;
+  }
+  if (subject.customDomains?.length && relation !== "rival" && relation !== "public") {
+    profile.customDomains = subject.customDomains.map((d) => ({ name: d.name, score: d.score }));
   }
   return profile;
 }
@@ -119,6 +126,7 @@ export async function loadProjectionSubjects(
     const m = scoresOf.get(s.userId);
     if (m && s.domain in m) m[s.domain as RankedDomain] = s.score;
   }
+  const customOf = await loadPublicCustomDomains(db, rows.map((r) => r.userId));
   const trends = await hiddenAndTrajectoryBatch(
     db,
     rows.map((r) => ({ userId: r.userId, today: localDate(now, r.timezone), scoreMap: scoresOf.get(r.userId)! })),
@@ -134,6 +142,7 @@ export async function loadProjectionSubjects(
       trajectory: trends.get(r.userId)!.trajectory,
       shadowActive: shadowActive.has(r.userId),
       ...(r.clanTag ? { clanTag: r.clanTag } : {}),
+      ...(customOf.has(r.userId) ? { customDomains: customOf.get(r.userId)! } : {}),
     });
   }
   return out;

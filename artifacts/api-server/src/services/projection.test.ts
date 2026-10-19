@@ -82,7 +82,7 @@ test("a follower sees rank, trajectory and shadowActive only (PRD 16)", () => {
 });
 
 test("no projection carries a user id, hidden score or a field outside PublicProfile", () => {
-  const allowed = new Set(["handle", "isCodename", "rank", "trajectory", "shadowActive", "scores", "clanTag"]);
+  const allowed = new Set(["handle", "isCodename", "rank", "trajectory", "shadowActive", "scores", "clanTag", "customDomains"]);
   const withExtras = { ...subject("public", "ORDR"), hidden: 55.5, email: "a@x.com" } as ProjectionSubject;
   for (const relation of RELATIONS) {
     const p = projectUser(withExtras, relation, { rivalCodename: "RIVAL // ASH-2" });
@@ -98,4 +98,21 @@ test("the projected scores are a copy", () => {
   const p = projectUser(s, "self");
   p.scores!.BODY = 99;
   assert.equal(s.scores.BODY, 41);
+});
+
+test("public custom domains (name + score only) reach self, clanmate, duo and follower, never a rival or a stranger", () => {
+  const withCustom = {
+    ...subject("public"),
+    customDomains: [{ name: "Cold Plunge", score: 61.5, extra: "note", id: "x" } as { name: string; score: number }],
+  };
+  for (const relation of RELATIONS) {
+    const p = projectUser(withCustom, relation, { rivalCodename: "RIVAL // ASH-2" });
+    PublicProfileSchema.parse(p);
+    if (relation === "rival" || relation === "public") {
+      assert.equal("customDomains" in p, false, relation);
+    } else {
+      assert.deepEqual(p.customDomains, [{ name: "Cold Plunge", score: 61.5 }], relation);
+    }
+  }
+  assert.equal("customDomains" in projectUser(subject("public"), "follower"), false, "none when the subject has no public ones");
 });

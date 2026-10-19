@@ -21,11 +21,14 @@ export function streakMultiplier(streak: number): number {
   return Math.min(2.0, 1.0 + streak * 0.1);
 }
 
-export function applyDelta(
-  s: DomainState,
+/** The part of a domain's state applyDelta moves; a custom domain has no ranked `domain` key. */
+export type StatState = Pick<DomainState, "score" | "streak" | "lastLogDate">;
+
+export function applyDelta<S extends StatState>(
+  s: S,
   delta: number,
   o: { bonus: boolean; activity: boolean; date: string },
-): { next: DomainState; actualDelta: number } {
+): { next: S; actualDelta: number } {
   const mult = o.bonus && delta > 0 ? streakMultiplier(s.streak) : 1;
   const raw = round1(delta * mult);
   const score = round1(Math.min(100, Math.max(0, s.score + raw)));
@@ -37,7 +40,7 @@ export function applyDelta(
     streak = lastLogDate !== null && lastLogDate === addDays(o.date, -1) ? streak + 1 : 1;
     lastLogDate = o.date;
   }
-  return { next: { domain: s.domain, score, streak, lastLogDate }, actualDelta };
+  return { next: { ...s, score, streak, lastLogDate }, actualDelta };
 }
 
 export function streakBreaks(

@@ -211,6 +211,13 @@
       "when": 1792398951704,
       "tag": "0029_odd_secret_warriors",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792399913257,
+      "tag": "0030_freezing_zuras",
+      "breakpoints": true
     }
   ]
 }

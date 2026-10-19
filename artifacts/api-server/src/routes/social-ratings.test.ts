@@ -211,24 +211,24 @@ test("GET mine names current clanmates by username and a former clanmate as FORM
   assert.deepEqual((await mine(stay)).body.given, [], "nobody can read who rated them");
 });
 
-test("week close: (average - 3) via peer_rating, once, only with 3 or more ratings, aggregates only in the notice", { skip }, async () => {
+test("week close: (average - 3) via peer_rating, once, only with 4 or more ratings, aggregates only in the notice", { skip }, async () => {
   const ratee = await mk("ratee");
-  const raters = [await mk("r1"), await mk("r2"), await mk("r3")];
+  const raters = [await mk("r1"), await mk("r2"), await mk("r3"), await mk("r4")];
   await clanOf([ratee, ...raters]);
   await pinToD0(ratee.id);
-  for (const [i, r] of raters.entries()) assert.equal((await rate(r, ratee.id, [5, 4, 4][i]!)).status, 200);
+  for (const [i, r] of raters.entries()) assert.equal((await rate(r, ratee.id, [5, 4, 5, 4][i]!)).status, 200);
 
   await roll(ratee.id, SUN);
   const events = await peerEvents(ratee.id);
   assert.equal(events.length, 1);
   assert.equal(events[0]!.domain, "SOCIAL");
   assert.equal(events[0]!.refId, "2026-W02");
-  assert.ok(Math.abs(events[0]!.delta - (13 / 3 - 3)) < 1e-4, String(events[0]!.delta));
+  assert.ok(Math.abs(events[0]!.delta - 1.5) < 1e-4, String(events[0]!.delta));
 
   const [note] = await peerNotices(ratee.id);
-  assert.deepEqual(note!.payload, { weekKey: "2026-W02", count: 3, average: 4.3, delta: 1.3 });
+  assert.deepEqual(note!.payload, { weekKey: "2026-W02", average: 4.5, delta: 1.5 });
   const [week] = await db!.select().from(peerRatingWeeks).where(eq(peerRatingWeeks.userId, ratee.id));
-  assert.equal(week!.ratingCount, 3);
+  assert.equal(week!.ratingCount, 4);
   assert.equal(week!.evaluatedOn, SUN);
 
   // Exactly once: the same week evaluated again (a re-roll, or a direct second call) changes nothing.
@@ -254,16 +254,15 @@ test("week close: (average - 3) via peer_rating, once, only with 3 or more ratin
   }
 });
 
-test("fewer than 3 ratings change nothing; an average of exactly 3 notifies with no score change", { skip }, async () => {
+test("fewer than 4 ratings change nothing; an average of exactly 3 notifies with no score change", { skip }, async () => {
   const two = await mk("two");
   const three = await mk("three");
-  const raters = [await mk("r1"), await mk("r2"), await mk("r3")];
+  const raters = [await mk("r1"), await mk("r2"), await mk("r3"), await mk("r4")];
   await clanOf([two, three, ...raters]);
   await pinToD0(two.id);
   await pinToD0(three.id);
-  await rate(raters[0]!, two.id, 5);
-  await rate(raters[1]!, two.id, 5);
-  for (const [i, r] of raters.entries()) await rate(r, three.id, [2, 3, 4][i]);
+  for (const r of raters.slice(0, 3)) await rate(r, two.id, 5); // three ratings is still below the threshold
+  for (const [i, r] of raters.entries()) await rate(r, three.id, [2, 3, 4, 3][i]);
 
   await roll(two.id, SUN);
   assert.equal((await peerEvents(two.id)).length, 0);
@@ -272,12 +271,12 @@ test("fewer than 3 ratings change nothing; an average of exactly 3 notifies with
   await roll(three.id, SUN);
   assert.equal((await peerEvents(three.id)).length, 0);
   const [note] = await peerNotices(three.id);
-  assert.deepEqual(note!.payload, { weekKey: "2026-W02", count: 3, average: 3, delta: 0 });
+  assert.deepEqual(note!.payload, { weekKey: "2026-W02", average: 3, delta: 0 });
 });
 
 test("only the closing week counts, and a rater who left the clan mid-week still counts", { skip }, async () => {
   const ratee = await mk("ratee");
-  const raters = [await mk("r1"), await mk("r2"), await mk("r3")];
+  const raters = [await mk("r1"), await mk("r2"), await mk("r3"), await mk("r5")];
   const extra = await mk("r4");
   const clan = await clanOf([ratee, ...raters, extra]);
   await pinToD0(ratee.id);
@@ -291,8 +290,8 @@ test("only the closing week counts, and a rater who left the clan mid-week still
 
   await roll(ratee.id, SUN);
   const [note] = await peerNotices(ratee.id);
-  assert.deepEqual(note!.payload, { weekKey: "2026-W02", count: 3, average: 5, delta: 2 });
-  assert.equal((await db!.select().from(peerRatings).where(eq(peerRatings.rateeId, ratee.id))).length, 4);
+  assert.deepEqual(note!.payload, { weekKey: "2026-W02", average: 5, delta: 2 });
+  assert.equal((await db!.select().from(peerRatings).where(eq(peerRatings.rateeId, ratee.id))).length, 5);
 });
 
 test("the week key is the rater's own local ISO week", { skip }, async () => {

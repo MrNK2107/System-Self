@@ -48,6 +48,7 @@ function RootLayoutNav() {
       <Stack.Screen name="challenges" />
       <Stack.Screen name="duo/index" />
       <Stack.Screen name="finance" />
+      <Stack.Screen name="custom" />
       <Stack.Screen name="recap" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="floor/[routineId]" />

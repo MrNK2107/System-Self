@@ -8,9 +8,7 @@ import { rollOverDue } from "../services/rollover";
 import { track } from "../services/analytics";
 import { applyActivityChanges } from "../services/activity";
 import { countHomeSession } from "../services/comeback";
-
-const RETROACTIVE_LIMIT_MS = 48 * 3600_000;
-const FUTURE_TOLERANCE_MS = 5 * 60_000;
+import { occurredAtError } from "../services/retroactive";
 
 /** A stored log as the API returns it (also used by routes that record logs of their own, e.g. finance). */
 export function toLogDto(l: typeof logs.$inferSelect) {
@@ -63,12 +61,8 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
     await withIdempotency(db, req, res, "POST /logs", async (tx) => {
       const now = clock();
       const occurredAt = body.occurredAt ? new Date(body.occurredAt) : now;
-      if (now.getTime() - occurredAt.getTime() > RETROACTIVE_LIMIT_MS) {
-        return { status: 422, body: { error: "Log is too old", code: "retroactive_limit" } };
-      }
-      if (occurredAt.getTime() - now.getTime() > FUTURE_TOLERANCE_MS) {
-        return { status: 422, body: { error: "Log is in the future", code: "future_occurred_at" } };
-      }
+      const tooOld = occurredAtError(now, occurredAt);
+      if (tooOld) return tooOld;
 
       const [user] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
       const [profile] = await tx.select({ id: profiles.userId }).from(profiles).where(eq(profiles.userId, userId));

@@ -13,6 +13,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { CustomLogSection } from "@/components/CustomLogSection";
 import { useColors } from "@/hooks/useColors";
 import { useApp, getStreakMultiplier, getStreakTier, type Domain } from "@/context/AppContext";
 import { ALL_DOMAINS, DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
@@ -517,6 +518,8 @@ export function LogModal({ visible, onClose }: LogModalProps) {
               numberOfLines={3}
             />
           </View>
+
+          <CustomLogSection onLogged={onClose} onNavigate={onClose} />
         </ScrollView>
 
         {submitError && (

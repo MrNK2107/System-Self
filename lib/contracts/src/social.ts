@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PublicCustomDomainSchema } from "./custom";
 import { RANKED_DOMAIN_VALUES, RankSchema, TrajectorySchema } from "./game";
 
 /** A handle as typed or linked by a client: a username (public users only) or a public codename. */
@@ -21,6 +22,8 @@ export const PublicProfileSchema = z.object({
   shadowActive: z.boolean(),
   scores: PublicScoresSchema.optional(),
   clanTag: z.string().optional(),
+  /** The subject's public custom domains (name + score only), for self, clanmates, duo and followers. */
+  customDomains: z.array(PublicCustomDomainSchema).optional(),
 });
 export type PublicProfile = z.infer<typeof PublicProfileSchema>;
 

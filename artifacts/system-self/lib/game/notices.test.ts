@@ -123,7 +123,7 @@ test("peer_rating_result renders as a SYSTEM modal after goal_achieved with the 
   const result = (delta: number, average: number) => ({
     id: id(67),
     kind: "peer_rating_result",
-    payload: { weekKey: "2026-W42", count: 4, average, delta },
+    payload: { weekKey: "2026-W42", average, delta },
     createdAt: at(),
   });
   const goal = { id: id(68), kind: "goal_achieved", payload: { goalId: id(69), title: "Fund", targetAmount: 100, currency: "INR" }, createdAt: at() };
@@ -134,14 +134,14 @@ test("peer_rating_result renders as a SYSTEM modal after goal_achieved with the 
     modal: "system",
     tone: "info",
     label: "PEER RATINGS",
-    title: "4.3 AVERAGE · 4 RATINGS",
+    title: "4.3 AVERAGE",
     body: "Your clan rated the output. SOCIAL +1.3.",
   });
   assert.deepEqual(noticeView({ kind: "peer_rating_result", notices: parseNotices([result(-1.5, 1.5)]).notices }), {
     modal: "system",
     tone: "alert",
     label: "PEER RATINGS",
-    title: "1.5 AVERAGE · 4 RATINGS",
+    title: "1.5 AVERAGE",
     body: "Your clan rated the output. SOCIAL -1.5. Raise it.",
   });
   assert.equal(

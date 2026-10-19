@@ -78,7 +78,7 @@ test("loadProjectionSubjects: the number of queries does not depend on the numbe
   const few = await count(ids.slice(0, 2));
   const many = await count(ids);
   assert.equal(many, few);
-  assert.ok(many <= 6, `expected a handful of queries, got ${many}`);
+  assert.ok(many <= 7, `expected a handful of queries, got ${many}`);
 });
 
 test("loadProjectionSubjects: carries the clan tag of clan members only", { skip }, async () => {

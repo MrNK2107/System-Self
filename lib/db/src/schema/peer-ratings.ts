@@ -34,7 +34,7 @@ export const peerRatings = pgTable(
 
 /**
  * The weekly peer-rating evaluation of a ratee, written once per (user, ISO week) when the rollover of the week's
- * last local date finds at least 3 ratings. The row is the once-guarantee; it holds aggregates only.
+ * last local date finds at least 4 ratings. The row is the once-guarantee; it holds aggregates only.
  */
 export const peerRatingWeeks = pgTable(
   "peer_rating_weeks",

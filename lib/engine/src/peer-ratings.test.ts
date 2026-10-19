@@ -4,21 +4,22 @@ import { PEER_MIN_RATINGS, PEER_RATINGS_PER_WEEK, PEER_TENURE_DAYS, peerRatingRe
 
 test("peer rating constants", () => {
   assert.equal(PEER_RATINGS_PER_WEEK, 5);
-  assert.equal(PEER_MIN_RATINGS, 3);
+  assert.equal(PEER_MIN_RATINGS, 4);
   assert.equal(PEER_TENURE_DAYS, 7);
 });
 
-test("fewer than 3 ratings: no result, no change", () => {
+test("fewer than 4 ratings: no result, no change", () => {
   assert.equal(peerRatingResult([]), null);
   assert.equal(peerRatingResult([5, 5]), null);
+  assert.equal(peerRatingResult([5, 5, 5]), null);
 });
 
-test("3 or more ratings: SOCIAL change is (average - 3) x 1.0, no bonus, not activity", () => {
-  assert.deepEqual(peerRatingResult([5, 4, 4]), {
-    count: 3,
-    average: 4.3,
-    delta: 1.3,
-    changes: [{ domain: "SOCIAL", delta: 13 / 3 - 3, bonus: false, activity: false }],
+test("4 or more ratings: SOCIAL change is (average - 3) x 1.0, no bonus, not activity", () => {
+  assert.deepEqual(peerRatingResult([5, 4, 5, 4]), {
+    count: 4,
+    average: 4.5,
+    delta: 1.5,
+    changes: [{ domain: "SOCIAL", delta: 1.5, bonus: false, activity: false }],
   });
   const low = peerRatingResult([1, 2, 1, 2]);
   assert.equal(low!.average, 1.5);
@@ -27,8 +28,8 @@ test("3 or more ratings: SOCIAL change is (average - 3) x 1.0, no bonus, not act
 });
 
 test("an average of exactly 3 notifies with delta 0 and changes nothing", () => {
-  const r = peerRatingResult([2, 3, 4]);
-  assert.deepEqual(r, { count: 3, average: 3, delta: 0, changes: [] });
+  const r = peerRatingResult([2, 3, 4, 3]);
+  assert.deepEqual(r, { count: 4, average: 3, delta: 0, changes: [] });
 });
 
 test("tenure: joined at least 7 days before now", () => {

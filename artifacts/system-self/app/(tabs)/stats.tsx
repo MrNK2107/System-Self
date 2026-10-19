@@ -329,6 +329,18 @@ export default function StatsScreen() {
           <Feather name="chevron-right" size={13} color={colors.mutedForeground} />
         </TouchableOpacity>
 
+        {/* Custom stats: your own numbers, each with its own score. Never part of rank. */}
+        <TouchableOpacity
+          style={[styles.card, styles.expandHeader, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => router.push("/custom")}
+          activeOpacity={0.7}
+          accessibilityRole="link"
+          accessibilityLabel="Open custom stats"
+        >
+          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>CUSTOM STATS</Text>
+          <Feather name="chevron-right" size={13} color={colors.mutedForeground} />
+        </TouchableOpacity>
+
         {/* Weekly recap (its own screen; it left the tab bar when the Clan tab arrived) */}
         <TouchableOpacity
           style={[styles.card, styles.expandHeader, { backgroundColor: colors.card, borderColor: colors.border }]}

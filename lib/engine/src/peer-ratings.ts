@@ -3,7 +3,7 @@ import type { ChangeSpec } from "./scoring";
 /** Clan peer ratings (PRD 8 SOCIAL, PRD 15): up to 5 clanmates per ISO week, 1-5, anonymous. */
 export const PEER_RATINGS_PER_WEEK = 5;
 /** A ratee needs this many ratings in a week for the week to move their SOCIAL score. */
-export const PEER_MIN_RATINGS = 3;
+export const PEER_MIN_RATINGS = 4;
 /** Rater and ratee must each have been in the clan this many days. */
 export const PEER_TENURE_DAYS = 7;
 
