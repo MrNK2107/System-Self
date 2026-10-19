@@ -20,7 +20,7 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 
 ## H-03 🟥 App store accounts and app identity
 **Need:** an Apple Developer account, a Google Play Console account, the final bundle ID and package name, and an Expo/EAS account.
-**Doing instead:** placeholder IDs `com.systemself.app` in `app.json`, and EAS build profiles (`eas.json`) ready to run once logged in. Expo Go keeps working for development. Public distribution has to go through EAS store builds; Expo Go is not a public distribution channel.
+**Doing instead:** placeholder IDs `com.systemself.app` (override with the `APP_ID` env var) in `artifacts/system-self/app.config.ts` on top of the static `app.json`; `eas.json` has `development`, `preview` and `production` profiles plus a `submit.production` stub with placeholder Apple IDs. `EAS_PROJECT_ID` and `GOOGLE_SERVICES_JSON` are injected from env at build time, never committed. Expo Go keeps working for development with no env set. Public distribution has to go through EAS store builds; Expo Go is not a public distribution channel. Full store checklist: [docs/RELEASE.md](RELEASE.md).
 **Resolution:**
 
 ## H-04 🟨 Payments (RevenueCat + store products)
