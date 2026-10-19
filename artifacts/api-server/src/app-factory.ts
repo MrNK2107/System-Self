@@ -161,12 +161,10 @@ export function createApp(
       legacyHeaders: false,
     }),
   );
-  // Parsed before the auth limiters, which key on the body's email.
-  app.use(skipVoice(express.json({ limit: JSON_BODY_LIMIT })));
   // Two limiters per auth surface (one set per surface, so abuse of one, e.g. failed logins, does not lock out the
-  // others): AUTH_IDENTITY_RATE_LIMIT_MAX per IP + normalised email (or, on the signed-in email/password routes, per
-  // IP + user), so one account is not brute-forced and one user behind a shared IP does not lock out the rest; and a
-  // looser AUTH_IP_RATE_LIMIT_MAX per IP, so one IP cannot spray many emails.
+  // others). First, before any body parsing, a looser AUTH_IP_RATE_LIMIT_MAX per IP: it bounds one IP spraying many
+  // emails, and it also counts requests the JSON parser rejects (malformed or oversized bodies), which would otherwise
+  // reach no auth limiter at all (the global limiter skips these routes).
   const authLimited = { error: "Too many attempts, try again later", code: "rate_limited" };
   for (const prefix of AUTH_PREFIXES) {
     app.use(
@@ -179,6 +177,15 @@ export function createApp(
         keyGenerator: (req) => `ip:${ipKey(req)}`,
         message: authLimited,
       }),
+    );
+  }
+  app.use(skipVoice(express.json({ limit: JSON_BODY_LIMIT })));
+  // Then, after parsing (it keys on the body's email), AUTH_IDENTITY_RATE_LIMIT_MAX per IP + normalised email (or, on
+  // the signed-in email/password routes, per IP + user): one account is not brute-forced, and one user behind a shared
+  // IP does not lock out the rest.
+  for (const prefix of AUTH_PREFIXES) {
+    app.use(
+      `/api/auth/${prefix}`,
       limiter({
         windowMs: AUTH_WINDOW_MS,
         max: AUTH_IDENTITY_RATE_LIMIT_MAX,

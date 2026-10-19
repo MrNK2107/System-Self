@@ -68,7 +68,7 @@
 - Forgot → reset: email, then the 6-digit code + new password.
 
 - [ ] **Step 1:** Implement the screens and context.
-- [ ] **Step 2:** Verify manually against a local API (`docker compose up -d postgres`, `pnpm --filter @workspace/db migrate`, `pnpm --filter @workspace/api-server dev`, `pnpm exec expo start --lan` or `--web` for a quick check): sign up → lands on onboarding; sign out → sign-in; wrong password shows the message; reset with the code from the API log works. Record the steps and results in the report.
+- [ ] **Step 2:** Verify manually against a local API (`docker compose up -d postgres`, `pnpm --filter @workspace/db migrate`, `pnpm --filter @workspace/api-server dev`, `pnpm exec expo start --go --lan` or `--web` for a quick check): sign up → lands on onboarding; sign out → sign-in; wrong password shows the message; reset with the code from the API log works. Record the steps and results in the report.
 - [ ] **Step 3:** Typecheck PASS. Commit `feat(app): accounts — sign up, sign in, reset, session gate`.
 
 ### Task 3: Onboarding on the server, profile updates

@@ -20,7 +20,7 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 
 ## H-03 🟥 App store accounts and app identity
 **Need:** an Apple Developer account, a Google Play Console account, the final bundle ID and package name, and an Expo/EAS account.
-**Doing instead:** placeholder IDs `com.systemself.app` (override with the `APP_ID` env var) in `artifacts/system-self/app.config.ts` on top of the static `app.json`; `eas.json` has `development`, `preview` and `production` profiles plus a `submit.production` stub with placeholder Apple IDs. `EAS_PROJECT_ID` and `GOOGLE_SERVICES_JSON` are injected from env at build time, never committed. Expo Go keeps working for development with no env set. Public distribution has to go through EAS store builds; Expo Go is not a public distribution channel. Full store checklist: [docs/RELEASE.md](RELEASE.md).
+**Doing instead:** placeholder IDs `com.systemself.app` (override with the `APP_ID` env var) in `artifacts/system-self/app.config.ts` on top of the static `app.json`; `eas.json` has `development`, `preview` and `production` profiles plus a `submit.production` stub with placeholder Apple IDs. `EAS_PROJECT_ID` and `GOOGLE_SERVICES_JSON` are injected from env at build time, never committed. Expo Go keeps working for development with no env set, started with `expo start --go` (`expo-dev-client` is installed for the `development` EAS profile, so without `--go` the dev server targets a dev client instead). Public distribution has to go through EAS store builds; Expo Go is not a public distribution channel. Full store checklist: [docs/RELEASE.md](RELEASE.md).
 **Resolution:**
 
 ## H-04 🟨 Payments (RevenueCat + store products)
@@ -57,7 +57,7 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 ## H-10 🟨 Hands-on device QA in Expo Go
 **Need:** someone to open the app in Expo Go on a real phone (iOS and Android) and walk through sign-up → onboarding → logging → quests → gym → settings, reporting anything that looks or behaves wrong.
 **Why I can't:** I can't operate a phone, and the browser automation tools failed to connect in this session.
-**Doing instead:** every screen is verified by typecheck, a full Android bundle export (`expo export`), unit tests, and node smoke scripts that drive the same API calls the screens make against a real local server. Run it yourself with: `docker compose up -d postgres`, migrate, `pnpm --filter @workspace/api-server dev` (and `dev:worker`), then, with `EXPO_PUBLIC_API_URL=http://<LAN IP>:3001`, `pnpm exec expo start --lan` in `artifacts/system-self` and scan the QR code. Step by step: [README.md](../README.md#dev-quick-start).
+**Doing instead:** every screen is verified by typecheck, a full Android bundle export (`expo export`), unit tests, and node smoke scripts that drive the same API calls the screens make against a real local server. Run it yourself with: `docker compose up -d postgres`, migrate, `pnpm --filter @workspace/api-server dev` (and `dev:worker`), then, with `EXPO_PUBLIC_API_URL=http://<LAN IP>:3001`, `pnpm exec expo start --go --lan` in `artifacts/system-self` and scan the QR code (`--go` is required: `expo-dev-client` is installed for EAS development builds, and without the flag the dev server serves a dev-client bundle that Expo Go cannot open). Step by step: [README.md](../README.md#dev-quick-start).
 **Resolution:**
 
 ## H-11 🟩 Crash/error reporting (Sentry or similar)

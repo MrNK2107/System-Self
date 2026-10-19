@@ -51,7 +51,7 @@ Run the app in Expo Go:
 ```sh
 cd artifacts/system-self
 export EXPO_PUBLIC_API_URL=http://<your-LAN-IP>:3001   # e.g. http://192.168.1.12:3001, not localhost
-pnpm exec expo start --lan                            # scan the QR code with Expo Go
+pnpm exec expo start --go --lan                       # scan the QR code with Expo Go (--go: expo-dev-client is installed)
 ```
 
 The phone must reach your machine's LAN IP on port 3001, so allow it through the firewall.

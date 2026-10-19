@@ -159,11 +159,14 @@ you want `/metrics`. `TRUST_PROXY=1` is preset for Render's proxy.
     otherwise. A missing, expired or forged token falls back to the IP, so unauthenticated traffic stays bounded per IP
     and inventing tokens buys no extra budget.
   - **Auth surfaces** (`/api/auth/login`, `/register`, `/password/*`, `/email/*`; each surface has its own buckets, so
-    failed logins do not block registration): 10 per 15 minutes per client IP + normalised email (trimmed, lower-case;
+    failed logins do not block registration): the per-IP ceiling below runs before body parsing, so malformed or
+    oversized bodies count against it too; then 10 per 15 minutes per client IP + normalised email (trimmed, lower-case;
     on the signed-in `/email/*` and `/password/change` routes, per IP + user). That stops one account being brute-forced
     without locking out the other people behind the same IP. A looser ceiling of 100 per 15 minutes per client IP stops
     one IP spraying many emails (credential stuffing) while leaving room for a busy CGNAT. These routes are not counted
     by the global limiter.
+  - Authenticated traffic gets a per-account budget: several accounts signed in from one IP each have their own
+    `RATE_LIMIT_MAX`, instead of sharing one per-IP bucket.
   - Unchanged: `/api/healthz` and `/api/readyz` are never limited; the RevenueCat webhook has its own per-IP bucket
     (600 per minute); the data export has its own per-user limit.
   - The client IP is only right with `TRUST_PROXY` set to the real number of proxy hops ([Reverse proxies](#reverse-proxies-trust_proxy)).

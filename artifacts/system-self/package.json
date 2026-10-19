@@ -4,7 +4,7 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
-    "dev": "pnpm exec expo start --localhost --port 8081",
+    "dev": "pnpm exec expo start --go --localhost --port 8081",
     "build": "node scripts/build.js",
     "serve": "node server/serve.js",
     "gen:legal": "node scripts/gen-legal.mjs",

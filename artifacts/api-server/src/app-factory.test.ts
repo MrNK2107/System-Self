@@ -172,3 +172,28 @@ test("auth limiter: one IP spraying many emails hits the per-IP ceiling", async 
   const otherIp = await request(a).post("/api/auth/password/forgot").set("X-Forwarded-For", "198.51.100.11").send({ email: "fresh@example.com" });
   assert.equal(otherIp.status, 503);
 });
+
+// --- P8 fix round 2: the per-IP auth ceiling counts requests the JSON parser rejects ---
+test("auth ceiling runs before body parsing: 100 malformed-JSON logins from one IP, the 101st is 429", async () => {
+  const a = createApp({ db: null, mailer, trustProxy: 1 });
+  const ip = "198.51.100.20";
+  for (let i = 0; i < AUTH_IP_RATE_LIMIT_MAX; i++) {
+    const res = await request(a).post("/api/auth/login").set("X-Forwarded-For", ip).set("Content-Type", "application/json").send("{nope");
+    assert.equal(res.status, 400, `malformed ${i + 1}`);
+  }
+  const limited = await request(a).post("/api/auth/login").set("X-Forwarded-For", ip).set("Content-Type", "application/json").send("{nope");
+  assert.equal(limited.status, 429);
+  assert.equal(limited.body.code, "rate_limited");
+});
+
+test("auth ceiling counts oversized (over 100 KB) bodies too: after 100 of them a valid login is 429", async () => {
+  const a = createApp({ db: null, mailer, trustProxy: 1 });
+  const ip = "198.51.100.21";
+  const big = jsonOfSize(101 * 1024);
+  for (let i = 0; i < AUTH_IP_RATE_LIMIT_MAX; i++) {
+    const res = await request(a).post("/api/auth/register").set("X-Forwarded-For", ip).set("Content-Type", "application/json").send(big);
+    assert.equal(res.status, 413, `oversized ${i + 1}`);
+  }
+  const limited = await request(a).post("/api/auth/register").set("X-Forwarded-For", ip).send({ email: "late@example.com", password: "x" });
+  assert.equal(limited.status, 429);
+});

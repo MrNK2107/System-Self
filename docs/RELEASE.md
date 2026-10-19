@@ -18,7 +18,7 @@ Blocked on HOLD H-03 (store accounts and final app identity). Everything below i
 
 EAS CLI is not a workspace dependency: run it with `npx eas-cli@latest` (always the current CLI, which `eas.json`'s
 `cli.version` floor `>= 12.0.0` accepts). The `development` profile builds a dev client; `expo-dev-client` is installed
-for it (`pnpm exec expo install expo-dev-client`), and Expo Go keeps working for development without it.
+for it (`pnpm exec expo install expo-dev-client`). Expo Go keeps working for development with `expo start --go` (the app's `pnpm dev` script and the README pass it); without `--go` the dev server switches to dev-client mode, which Expo Go cannot open.
 
 1. `cd artifacts/system-self && npx eas-cli@latest login`
 2. `npx eas-cli@latest init` creates the EAS project and prints a project id. Set it as `EAS_PROJECT_ID` (EAS env var for each profile).

@@ -111,3 +111,25 @@ test("docker-entrypoint.sh: role from ROLE or $1, explicit commands run as given
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /entrypoint tests passed/);
 });
+
+test("every documented `expo start` passes --go (expo-dev-client would otherwise start in dev-client mode)", () => {
+  const files = ["README.md", "artifacts/system-self/package.json"];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(path.join(repo, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(rel);
+      else if (e.name.endsWith(".md") && rel !== "docs/DECISIONS.md") files.push(rel);
+    }
+  };
+  walk("docs");
+  let seen = 0;
+  for (const f of files) {
+    for (const line of read(f).split("\n")) {
+      if (!/expo start/.test(line)) continue;
+      seen++;
+      for (const cmd of line.match(/expo start[^`"\n]*/g) ?? []) assert.match(cmd, /--go\b/, `${f}: ${line.trim()}`);
+    }
+  }
+  assert.ok(seen >= 3, "README, the dev script and HOLD H-10 mention expo start");
+  assert.match(read("docs/RELEASE.md"), /Expo Go keeps working[^\n]*--go/);
+});
