@@ -42,6 +42,7 @@ import {
   type RankedDomain,
 } from "@workspace/engine";
 import type { Notice, PublicProfile, RivalChallenge, RivalChallengeOutcome, RivalTaunt, RivalsResponse } from "@workspace/contracts";
+import { isPro, isProSql } from "./entitlements";
 import { loadProjectionSubjects, projectGhost, projectUser } from "./projection";
 import { insertNotice, toShadowState } from "./scoring";
 import { hiddenAndTrajectoryBatch } from "./state";
@@ -439,7 +440,13 @@ export async function ownAssignment(db: Reader, userId: string, assignmentId: st
 }
 
 /** Each assignment as its viewer may see it: a ghost projection or projectUser(subject, "rival"). */
-export async function rivalProfiles(db: Reader, assignments: readonly RivalAssignment[], now: Date): Promise<Map<string, PublicProfile>> {
+export async function rivalProfiles(
+  db: Reader,
+  assignments: readonly RivalAssignment[],
+  now: Date,
+  /** The viewer holds PRO: a `public` rival is shown by username (projectUser decides; nothing else changes). */
+  viewerIsPro = false,
+): Promise<Map<string, PublicProfile>> {
   const out = new Map<string, PublicProfile>();
   const ghostIds = assignments.flatMap((a) => (a.ghostId ? [a.ghostId] : []));
   const ghosts = ghostIds.length > 0 ? await db.select().from(ghostRivals).where(inArray(ghostRivals.id, ghostIds)) : [];
@@ -450,8 +457,7 @@ export async function rivalProfiles(db: Reader, assignments: readonly RivalAssig
       if (g) out.set(a.id, projectGhost({ ...toGhostState(g), codename: a.codename }));
     } else if (a.rivalUserId) {
       const s = subjects.get(a.rivalUserId);
-      // rivalReveal is a P7 unlock: until then a rival is always shown by the assignment codename.
-      if (s) out.set(a.id, projectUser(s, "rival", { rivalCodename: a.codename, rivalReveal: false }));
+      if (s) out.set(a.id, projectUser(s, "rival", { rivalCodename: a.codename, rivalReveal: viewerIsPro }));
     }
   }
   return out;
@@ -483,7 +489,7 @@ export function toTauntDto(t: typeof rivalTaunts.$inferSelect): RivalTaunt {
 /** GET /api/rivals: slots, the user's own shadow, challenges (open + recent), record and transmissions. */
 export async function buildRivalsResponse(db: Reader, userId: string, now: Date): Promise<RivalsResponse> {
   const assignments = await db.select().from(rivalAssignments).where(eq(rivalAssignments.userId, userId)).orderBy(asc(rivalAssignments.slot));
-  const profilesById = await rivalProfiles(db, assignments, now);
+  const profilesById = await rivalProfiles(db, assignments, now, await isPro(db, userId, now));
   const rivals = assignments.flatMap((a) => {
     const profile = profilesById.get(a.id);
     return profile ? [{ assignmentId: a.id, slot: a.slot, codename: a.codename, isGhost: a.ghostId !== null, profile }] : [];
@@ -557,7 +563,10 @@ export async function rivalPassedLines(db: Reader, userId: string, tz: string, t
     });
 }
 
-/** Users with an expired slot that can be refilled now (no open challenge holding it), longest expired first. */
+/**
+ * Users with an expired slot that can be refilled now (no open challenge holding it): PRO users first (priority
+ * matching), then longest expired first. Only the order of seekers changes: each one is matched by the same rules.
+ */
 export async function usersWithExpiredSlots(db: Pick<Db, "select">, now: Date, limit: number): Promise<string[]> {
   const oldest = sql<Date>`min(${rivalAssignments.expiresAt})`;
   const rows = await db
@@ -570,7 +579,7 @@ export async function usersWithExpiredSlots(db: Pick<Db, "select">, now: Date, l
       ),
     )
     .groupBy(rivalAssignments.userId)
-    .orderBy(asc(oldest), asc(rivalAssignments.userId))
+    .orderBy(sql`case when ${isProSql(rivalAssignments.userId, now)} then 0 else 1 end`, asc(oldest), asc(rivalAssignments.userId))
     .limit(limit);
   return rows.map((r) => r.userId);
 }

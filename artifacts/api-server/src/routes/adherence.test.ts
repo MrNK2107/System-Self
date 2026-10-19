@@ -224,6 +224,7 @@ const baseCtx: PromptContext = {
   homePathActive: false,
   lifeContext: "student",
   season: null,
+  pro: true, // the full SYSTEM persona: quoted deferral reasons are PRO context
 };
 
 test("morning briefing and nightly debrief prompts carry the deferral instruction only when deferrals exist", () => {

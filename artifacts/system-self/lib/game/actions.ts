@@ -1,6 +1,7 @@
 // Network logic behind the game screens: reads, the outbox for logs, and guarded quest/chain mutations.
 // No React Native imports (used by the smoke script under plain node).
 import {
+  BonusQuestResponseSchema,
   ChainStartResponseSchema,
   ChainTemplatesResponseSchema,
   ComebackResponseSchema,
@@ -212,6 +213,17 @@ export function setQuestSlot(
       body: { ...(slot ?? { slotStart: null }), clientId },
       idempotencyKey: clientId,
       schema: QuestSlotResponseSchema,
+    }),
+  );
+}
+
+/** PRO bonus daily (up to 3 a local day; the server answers 402 pro_required / 409 bonus_limit). */
+export function requestBonusQuest(api: ApiClient, outbox: Guard, clientId: string) {
+  return afterOutbox(outbox, () =>
+    api.request("POST", "/api/quests/bonus", {
+      body: { clientId },
+      idempotencyKey: clientId,
+      schema: BonusQuestResponseSchema,
     }),
   );
 }

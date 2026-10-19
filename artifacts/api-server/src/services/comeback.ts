@@ -14,6 +14,7 @@ import type { Notice } from "@workspace/contracts";
 import { insertNotice } from "./scoring";
 import { notSystemLog } from "./system-logs";
 import type { Tx } from "./user-lock";
+import { countsForRank } from "./quests";
 
 /**
  * Whether an activity (log, quest completion, gym session) on `activityDate` is a return after 5+ empty days. Must
@@ -137,6 +138,7 @@ export async function evaluateComeback(
     .where(
       and(
         eq(quests.userId, userId),
+        countsForRank,
         eq(quests.status, "complete"),
         gte(quests.resolvedLocalDate, cb.startedOn),
         lte(quests.resolvedLocalDate, today),
@@ -146,7 +148,7 @@ export async function evaluateComeback(
   const [pending] = await tx
     .select({ n: count() })
     .from(quests)
-    .where(and(eq(quests.userId, userId), eq(quests.type, "daily"), eq(quests.status, "active"), gt(quests.expiresAt, now)));
+    .where(and(eq(quests.userId, userId), countsForRank, eq(quests.type, "daily"), eq(quests.status, "active"), gt(quests.expiresAt, now)));
   const done = checklistDone({
     logs: windowLogs,
     questsCompletedToday: Number(completed?.n ?? 0),

@@ -23,6 +23,9 @@ interface QuestCardProps {
   busy?: boolean;
 }
 
+/** Marks a bonus quest card: it never touches the score or the rank. */
+export const BONUS_LABEL = "BONUS — no rank effect";
+
 const TYPE_LABELS: Record<string, string> = {
   daily: "DAILY",
   weekly: "WEEKLY",
@@ -66,6 +69,7 @@ export function QuestCard({ quest, onComplete, onRefuse, onSlot, onBriefing, onS
             <Text style={[styles.typeText, { color: domainColor }]}>{TYPE_LABELS[quest.type]}</Text>
           </View>
           <Text style={[styles.domainText, { color: colors.mutedForeground }]}>{quest.domain}</Text>
+          {quest.bonus && <Text style={[styles.domainText, { color: colors.primary }]}>{BONUS_LABEL}</Text>}
           {quest.chainTotal != null && quest.chainStep != null && (
             <Text style={[styles.domainText, { color: colors.mutedForeground, fontFamily: "SpaceMono" }]}>
               STEP {quest.chainStep + 1}/{quest.chainTotal}
@@ -113,7 +117,7 @@ export function QuestCard({ quest, onComplete, onRefuse, onSlot, onBriefing, onS
         </TouchableOpacity>
       )}
 
-      {isActive && onShame && (
+      {isActive && onShame && !quest.bonus && (
         <TouchableOpacity
           onPress={() => onShame(quest, !quest.shameMode)}
           disabled={busy}

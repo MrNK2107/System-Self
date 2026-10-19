@@ -29,6 +29,7 @@ import {
   refuseQuest as refuseQuestRequest,
   setQuestSlot as setQuestSlotRequest,
   setQuestShame as setQuestShameRequest,
+  requestBonusQuest as requestBonusQuestRequest,
   setHomePath as setHomePathRequest,
   retryFailedEntries,
   startChain,
@@ -135,6 +136,8 @@ interface AppContextType {
   setQuestSlot: (questId: string, slot: { slotStart: string; slotEnd: string } | null) => Promise<GameMutationResult>;
   /** PRO Shame Mode for an active quest (clan members only). */
   setQuestShame: (questId: string, enabled: boolean) => Promise<GameMutationResult>;
+  /** PRO: asks for one more daily that has no rank effect (409 bonus_limit after 3 a day, 402 pro_required for free). */
+  requestBonusQuest: () => Promise<GameMutationResult>;
   /** Opt in to or out of the home path (Tier I home sessions before the gym). */
   setHomePath: (active: boolean) => Promise<GameMutationResult>;
   /** Schedules a season (from tomorrow, 1-14 days). */
@@ -299,6 +302,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       runGuarded("quest-shame", (id) => setQuestShameRequest(api, getOutbox(), questId, enabled, id)),
     [runGuarded],
   );
+  const requestBonusQuest = useCallback(
+    () =>
+      runGuarded("quest-bonus", async (id) => {
+        const r = await requestBonusQuestRequest(api, getOutbox(), id);
+        return r.ok ? { ok: true as const, value: undefined } : r;
+      }),
+    [runGuarded],
+  );
   const setHomePath = useCallback(
     (active: boolean) =>
       runGuarded("home-path", async (id) => {
@@ -375,6 +386,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refuseQuest,
       setQuestSlot,
       setQuestShame,
+      requestBonusQuest,
       setHomePath,
       scheduleSeason,
       cancelSeason,
@@ -390,7 +402,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
       state, stateQ.isError, stateQ.error, questsQ.data, questsQ.dataUpdatedAt, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
-      getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, setQuestShame, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
+      getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, setQuestShame, requestBonusQuest, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
       pendingCount, outboxSnap.failed.length, retryFailed, discardFailed,
     ],
   );

@@ -3,7 +3,7 @@
  * source with RevenueCat webhooks writing the same `entitlements` row; `isPro` and `requirePro` stay as they are.
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { billingEvents, entitlements, users, type Db } from "@workspace/db";
 import { logger } from "../lib/logger";
@@ -18,6 +18,11 @@ export async function isPro(db: Pick<Db, "select">, userId: string, now: Date): 
     .limit(1);
   if (!row || row.tier !== "pro") return false;
   return row.expiresAt === null || row.expiresAt.getTime() > now.getTime();
+}
+
+/** SQL twin of isPro for ordering and filtering many users at once: `userIdCol` holds an unexpired `pro` row at `now`. */
+export function isProSql(userIdCol: unknown, now: Date): SQL<boolean> {
+  return sql<boolean>`exists (select 1 from ${entitlements} e where e.user_id = ${userIdCol} and e.tier = 'pro' and (e.expires_at is null or e.expires_at > ${now.toISOString()}::timestamptz))`;
 }
 
 /** Sets (or replaces) a user's tier from an admin grant. */

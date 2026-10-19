@@ -150,6 +150,7 @@ export function toQuest(q: GameQuest): Quest {
   if (q.chainStep !== null) quest.chainStep = q.chainStep;
   if (q.chainTotal !== null) quest.chainTotal = q.chainTotal;
   if (q.shameMode) quest.shameMode = true;
+  if (q.bonus) quest.bonus = true;
   if (q.slotStart && q.slotEnd) {
     quest.slotStart = q.slotStart;
     quest.slotEnd = q.slotEnd;

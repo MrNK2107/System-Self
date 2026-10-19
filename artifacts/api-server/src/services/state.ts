@@ -30,6 +30,7 @@ import {
 import { NOTICE_PAGE_SIZE, type GameState, type Notice, type NoticeKind } from "@workspace/contracts";
 import { toNotice, toShadowState } from "./scoring";
 import { currentSeasons } from "./seasons";
+import { countsForRank } from "./quests";
 
 /**
  * The oldest NOTICE_PAGE_SIZE unseen notices, and whether more are waiting. With `kinds` only those kinds are
@@ -74,6 +75,7 @@ export async function hiddenAndTrajectoryBatch(
     .where(
       and(
         inArray(quests.userId, ids),
+        countsForRank,
         inArray(quests.status, ["complete", "failed", "refused"]),
         gte(quests.resolvedLocalDate, earliest),
       ),

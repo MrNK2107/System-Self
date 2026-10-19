@@ -8,7 +8,9 @@ import { generatedQuestsPayloadSchema } from "../lib/schemas";
 import type { WeeklyRecap } from "./recap";
 import { rivalPassedLines } from "./rivals";
 import { buildGameState } from "./state";
+import { isPro } from "./entitlements";
 import { notSystemLog } from "./system-logs";
+import { countsForRank } from "./quests";
 
 export const MESSAGE_PROMPT_VERSION = "system-message-v5";
 export const QUESTS_PROMPT_VERSION = "system-quests-v5";
@@ -65,7 +67,15 @@ export interface PromptContext {
   /** Rival pressure lines from today's rival_passed notices ("RIVAL // X passed your MIND score overnight."). */
   rivalPassed?: string[];
   weeklyRecap?: WeeklyRecap;
+  /**
+   * The user holds PRO: SYSTEM messages get the full context (past-log references, quoted words) and the full word
+   * limit. Anything but `true` is the free depth: base context and 60% of the word limit.
+   */
+  pro?: boolean;
 }
+
+/** Free SYSTEM messages keep this share of a message type's word limit (rounded down). */
+export const FREE_WORD_SHARE = 0.6;
 
 /** Lowest ranked score; ties resolve in RANKED_DOMAINS order. */
 export function weakestDomainOf(scores: Record<RankedDomain, number>): RankedDomain {
@@ -103,13 +113,14 @@ export async function buildUserContext(
   const active = await tx
     .select({ id: quests.id, domain: quests.domain, slotStart: quests.slotStart, slotEnd: quests.slotEnd })
     .from(quests)
-    .where(and(eq(quests.userId, userId), eq(quests.status, "active"), gt(quests.expiresAt, now)));
+    .where(and(eq(quests.userId, userId), countsForRank, eq(quests.status, "active"), gt(quests.expiresAt, now)));
   const resolved30 = await tx
     .select({ status: quests.status, date: quests.resolvedLocalDate })
     .from(quests)
     .where(
       and(
         eq(quests.userId, userId),
+        countsForRank,
         inArray(quests.status, ["complete", "failed", "refused"]),
         gte(quests.resolvedLocalDate, addDays(today, -29)),
       ),
@@ -127,6 +138,7 @@ export async function buildUserContext(
     .where(
       and(
         eq(quests.userId, userId),
+        countsForRank,
         eq(quests.status, "refused"),
         isNotNull(quests.refusalReason),
         gte(quests.resolvedLocalDate, addDays(today, -6)),
@@ -140,6 +152,7 @@ export async function buildUserContext(
     .where(
       and(
         eq(quests.userId, userId),
+        countsForRank,
         eq(quests.status, "refused"),
         isNotNull(quests.refusalReason),
         gte(quests.resolvedLocalDate, addDays(today, -6)),
@@ -171,6 +184,7 @@ export async function buildUserContext(
     lifeContext: state.profile.lifeContext,
     season: state.profile.season?.kind ?? null,
     rivalPassed: await rivalPassedLines(tx, userId, user?.tz ?? "UTC", today, now),
+    pro: await isPro(tx, userId, now),
   };
 }
 
@@ -182,7 +196,11 @@ export function quoted(text: string): string {
   return `"${text.replace(/[\p{Cc}\p{Cf}\u2028\u2029\s]+/gu, " ").trim().replace(/"/g, "'")}"`;
 }
 
-function contextBlock(ctx: PromptContext, extraContext?: string): string {
+/**
+ * The USER CONTEXT block. `depth: "base"` (a free user's SYSTEM message) leaves out what the user wrote in the past:
+ * recent log text and refusal reasons. Quest generation always uses "full": it is not the SYSTEM persona.
+ */
+function contextBlock(ctx: PromptContext, extraContext?: string, depth: "full" | "base" = "full"): string {
   const scoreLine = RANKED_DOMAINS.map((d) => `${d} ${ctx.scores[d].toFixed(1)}`).join(", ");
   return `USER CONTEXT:
 - Username: ${quoted(ctx.username)}
@@ -194,9 +212,9 @@ function contextBlock(ctx: PromptContext, extraContext?: string): string {
 - Active quests: ${ctx.activeQuests} | Completed today: ${ctx.completedToday}
 - 30-day quest completion rate: ${ctx.completionRate30 === null ? "no data" : `${Math.round(ctx.completionRate30 * 100)}%`}
 - Shadow Self status: ${ctx.shadowActive ? `ACTIVE — gap is ${ctx.shadowGap.toFixed(1)} points` : "inactive"}
-- Primary goal: ${quoted(ctx.primaryGoal)}
+- Primary goal: ${quoted(ctx.primaryGoal)}${depth === "base" ? "" : `
 - Recent logs (7 days): ${ctx.recentLogs.length > 0 ? ctx.recentLogs.map((l) => `${l.domain}: ${l.logType}${l.text ? ` ${quoted(l.text)}` : ""}`).join(" | ") : "none"}
-- Recent refusal reasons (7 days): ${ctx.recentRefusals.length > 0 ? ctx.recentRefusals.map(quoted).join(" | ") : "none"}${(ctx.rivalPassed ?? []).map((l) => `
+- Recent refusal reasons (7 days): ${ctx.recentRefusals.length > 0 ? ctx.recentRefusals.map(quoted).join(" | ") : "none"}`}${(ctx.rivalPassed ?? []).map((l) => `
 - Rival pressure: ${l}`).join("")}${ctx.lockedSlots.map((w) => `
 - Locked slot: ${w}`).join("")}${extraContext ? `
 - Extra context (user supplied): ${quoted(extraContext)}` : ""}`;
@@ -287,7 +305,9 @@ export function buildMessagePrompt(
     },
   };
   const config = configs[type];
-  const blocks = [contextBlock(ctx, extras.extraContext)];
+  const full = ctx.pro === true;
+  const maxWords = full ? config.maxWords : Math.floor(config.maxWords * FREE_WORD_SHARE);
+  const blocks = [contextBlock(ctx, extras.extraContext, full ? "full" : "base")];
   if (ctx.weeklyRecap) blocks.push(weeklyRecapBlock(ctx.weeklyRecap));
   if (extras.debrief) {
     const d = extras.debrief;
@@ -299,12 +319,12 @@ export function buildMessagePrompt(
       ? `\nA finance week verdict is listed in DEBRIEF FACTS. Repeat it word for word, without the quotation marks, before the verdict word.`
       : "";
   const deferral =
-    ctx.deferralsThisWeek > 0 && (type === "morning_briefing" || type === "nightly_debrief")
+    full && ctx.deferralsThisWeek > 0 && (type === "morning_briefing" || type === "nightly_debrief")
       ? `\nThe user deferred ${ctx.deferralsThisWeek} times this week. Quote up to 3 of their reasons verbatim, in quotation marks, as evidence. Do not comment on them beyond one line.`
       : "";
   return {
-    prompt: `${blocks.join("\n\n")}\n\nGenerate a ${type.replace(/_/g, " ")} for this user.\n${config.instruction}${financeLine}${deferral}\nOutput only the message. No preamble. No explanation. Maximum ${config.maxWords} words.`,
-    maxWords: config.maxWords,
+    prompt: `${blocks.join("\n\n")}\n\nGenerate a ${type.replace(/_/g, " ")} for this user.\n${config.instruction}${financeLine}${deferral}\nOutput only the message. No preamble. No explanation. Maximum ${maxWords} words.`,
+    maxWords,
   };
 }
 

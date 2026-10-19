@@ -10,6 +10,7 @@ import { cachedMessage, storeMessage } from "../services/messages";
 import { buildWeeklyRecap } from "../services/recap";
 import { ensureRolledOver } from "../services/rollover";
 import { withUserLock } from "../services/user-lock";
+import { countsForRank } from "../services/quests";
 
 const messageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -174,6 +175,7 @@ router.get("/system/completions/summary", async (req, res) => {
     .where(
       and(
         eq(quests.userId, userId),
+        countsForRank,
         inArray(quests.status, RESOLVED_STATUSES),
         gte(quests.resolvedLocalDate, from),
         lte(quests.resolvedLocalDate, to),

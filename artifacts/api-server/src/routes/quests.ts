@@ -11,12 +11,19 @@ import {
   pickFloorRoutine,
   refusalOutcome,
 } from "@workspace/engine";
-import { QuestRefuseRequestSchema, QuestShameRequestSchema, QuestSlotRequestSchema } from "@workspace/contracts";
+import {
+  BONUS_QUESTS_PER_DAY,
+  BonusQuestRequestSchema,
+  QuestRefuseRequestSchema,
+  QuestShameRequestSchema,
+  QuestSlotRequestSchema,
+} from "@workspace/contracts";
 import type { AiDeps } from "../lib/ai";
 import { generateQuestsRequestSchema } from "../lib/schemas";
 import { findReplay, readKey, withIdempotency, type HandlerResult } from "../services/idempotency";
 import { rollOverBeforeToday } from "../services/rollover";
 import { proRequiredUnlessPro } from "../services/entitlements";
+import { templateBonusQuest } from "../lib/ai-fallback";
 import { membershipOf } from "../services/clans";
 import { abandonChain, activeBoard, createQuests, hasActiveChain, slotStateOf, toQuestDto } from "../services/quests";
 import { track } from "../services/analytics";
@@ -41,12 +48,13 @@ async function userTimezone(tx: Pick<Tx, "select">, userId: string): Promise<str
 
 const GENERATE_ROUTE = "POST /quests/generate";
 const DAILY_TARGET = 3;
+const BONUS_ROUTE = "POST /quests/bonus";
 /** Weekly expires at the end of local day +6, an arc at the end of local day +20. */
 const EXPIRY_DAYS = { daily: 0, weekly: 6, arc: 20 } as const;
 
-/** What the board is missing: dailies up to 3, a weekly if none, an arc if none and no active chain. */
-async function questNeed(tx: Tx, userId: string, active: { type: string }[]): Promise<QuestNeed> {
-  const count = (t: string) => active.filter((q) => q.type === t).length;
+/** What the board is missing (bonus dailies never count): dailies up to 3, a weekly if none, an arc if none and no active chain. */
+async function questNeed(tx: Tx, userId: string, active: { type: string; bonus: boolean }[]): Promise<QuestNeed> {
+  const count = (t: string) => active.filter((q) => q.type === t && !q.bonus).length;
   return {
     daily: Math.max(0, DAILY_TARGET - count("daily")),
     weekly: count("weekly") === 0 ? 1 : 0,
@@ -179,6 +187,69 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
     });
   });
 
+  /**
+   * PRO bonus daily: up to 3 per local day, flagged `bonus`. A bonus quest has no rank effect (see countsForRank):
+   * completing, failing or refusing it writes no score event. Generated like a daily (model, else a template), in
+   * three steps so the model call never holds the user lock; a replay answers before the PRO check.
+   */
+  router.post("/quests/bonus", async (req, res) => {
+    BonusQuestRequestSchema.parse(req.body ?? {});
+    const userId = req.user!.id;
+
+    /** Bonus quests created on the user's current local day. */
+    const bonusToday = async (tx: Tx, tz: string, now: Date) => {
+      const today = localDate(now, tz);
+      const rows = await tx
+        .select({ id: quests.id })
+        .from(quests)
+        .where(and(eq(quests.userId, userId), eq(quests.bonus, true), gt(quests.createdAt, endOfLocalDay(addDays(today, -1), tz))));
+      return rows.length;
+    };
+    const limitReached = { status: 409, body: { error: "Bonus quest limit reached for today", code: "bonus_limit" } };
+
+    const step1 = await withUserLock(
+      db,
+      userId,
+      async (tx): Promise<{ kind: "done"; result: HandlerResult } | { kind: "generate"; ctx: PromptContext }> => {
+        const replay = await findReplay(tx, userId, readKey(req), BONUS_ROUTE);
+        if (replay) return { kind: "done", result: replay };
+        const now = clock();
+        const noPro = await proRequiredUnlessPro(tx, userId, now);
+        if (noPro) return { kind: "done", result: noPro };
+        await rollOverBeforeToday(tx, userId, now);
+        const ctx = await buildUserContext(tx, userId, now);
+        if (!ctx) return { kind: "done", result: { status: 409, body: { error: "Onboarding required", code: "not_onboarded" } } };
+        if ((await bonusToday(tx, ctx.timezone, now)) >= BONUS_QUESTS_PER_DAY) return { kind: "done", result: limitReached };
+        return { kind: "generate", ctx };
+      },
+    );
+    if (step1.kind === "done") {
+      res.status(step1.result.status).json(step1.result.body);
+      return;
+    }
+    const { ctx } = step1;
+    const generated = await generateQuestCandidates(ctx, { daily: 1, weekly: 0, arc: 0 }, ai);
+
+    await withIdempotency(db, req, res, BONUS_ROUTE, async (tx) => {
+      const now = clock();
+      const noPro = await proRequiredUnlessPro(tx, userId, now);
+      if (noPro) return noPro;
+      await rollOverBeforeToday(tx, userId, now);
+      const tz = (await userTimezone(tx, userId)) ?? ctx.timezone;
+      const used = await bonusToday(tx, tz, now);
+      if (used >= BONUS_QUESTS_PER_DAY) return limitReached;
+      const today = localDate(now, tz);
+      const board = new Set((await activeBoard(tx, userId, now)).map((q) => q.title));
+      const pick =
+        generated.candidates.find((q) => q.type === "daily" && !board.has(q.title)) ??
+        templateBonusQuest({ weakestDomain: ctx.weakestDomain, homePathActive: ctx.homePathActive, seasonActive: ctx.season !== null }, board, used + 1);
+      const [created] = await createQuests(tx, userId, [
+        { type: "daily", title: pick.title, description: pick.description, domain: pick.domain, expiresAt: endOfLocalDay(today, tz), bonus: true },
+      ]);
+      return { status: 201, body: { quest: toQuestDto(created!), remaining: BONUS_QUESTS_PER_DAY - used - 1 } };
+    });
+  });
+
   router.post("/quests/:id/complete", async (req, res) => {
     const questId = String(req.params.id);
     const userId = req.user!.id;
@@ -206,6 +277,8 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
         .where(and(eq(quests.id, quest.id), eq(quests.status, "active")))
         .returning();
       if (!done) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+      // A bonus quest has no rank effect: no score event, no streak or activity credit. The result is still shown.
+      if (done.bonus) return { status: 200, body: { quest: toQuestDto(done), results: [], notices: [] } };
 
       /** Advances the quest's chain: the next step, or the chain's completion notice. */
       const advanceChain = async () => {
@@ -327,6 +400,9 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
         if (quest.status !== "active" || quest.expiresAt.getTime() <= now.getTime()) {
           return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
         }
+        if (body.enabled && quest.bonus) {
+          return { status: 409, body: { error: "A bonus quest cannot use Shame Mode", code: "bonus_no_shame" } };
+        }
         if (body.enabled && !(await membershipOf(tx, userId))) {
           return { status: 409, body: { error: "Join a clan to use Shame Mode", code: "not_in_clan" } };
         }
@@ -374,12 +450,26 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
       const tz = (await userTimezone(tx, userId))!;
       const today = localDate(now, tz);
 
+      if (quest.bonus) {
+        // No rank effect: free, outside the weekly refusal allowance, no penalty, no Floor Quest, no Shadow takeover.
+        const [refusedBonus] = await tx
+          .update(quests)
+          .set({ status: "refused", resolvedAt: now, resolvedLocalDate: today, refusalReason: body.reason })
+          .where(and(eq(quests.id, quest.id), eq(quests.status, "active")))
+          .returning();
+        if (!refusedBonus) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+        return {
+          status: 200,
+          body: { quest: toQuestDto(refusedBonus), penalty: 0, results: [], notices: [], floor: null, shadowTook: null },
+        };
+      }
+
       // Refusals already used this ISO week (week boundaries follow the user timezone).
       const week = isoWeekKey(today);
       const recentRefused = await tx
         .select({ d: quests.resolvedLocalDate })
         .from(quests)
-        .where(and(eq(quests.userId, userId), eq(quests.status, "refused"), gte(quests.resolvedLocalDate, addDays(today, -7))));
+        .where(and(eq(quests.userId, userId), eq(quests.status, "refused"), eq(quests.bonus, false), gte(quests.resolvedLocalDate, addDays(today, -7))));
       const used = recentRefused.filter((r) => r.d && isoWeekKey(r.d) === week).length;
       const outcome = refusalOutcome(used);
       if (!outcome.allowed) {

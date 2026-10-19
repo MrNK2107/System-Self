@@ -26,6 +26,7 @@ import {
 import type { Notice, NoticeKind, NoticePayload } from "@workspace/contracts";
 import { notSystemLog } from "./system-logs";
 import type { Tx } from "./user-lock";
+import { countsForRank } from "./quests";
 
 export type ScoreReason =
   | "onboarding"
@@ -185,7 +186,7 @@ export async function applyChanges(
   const [completedQuests] = await tx
     .select({ n: count() })
     .from(quests)
-    .where(and(eq(quests.userId, userId), eq(quests.status, "complete")));
+    .where(and(eq(quests.userId, userId), eq(quests.status, "complete"), countsForRank));
   const shadowRows = await tx.select().from(shadowSelves).where(eq(shadowSelves.userId, userId)).limit(1);
   const unlockedRows = await tx.select().from(achievementsTable).where(eq(achievementsTable.userId, userId));
   const unlocked = new Set(unlockedRows.map((a) => a.achievementId as AchievementId));

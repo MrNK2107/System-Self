@@ -13,6 +13,8 @@ export interface NewQuest {
   chainId?: string;
   chainStep?: number;
   chainTotal?: number;
+  /** PRO bonus daily (no rank effect). */
+  bonus?: boolean;
 }
 
 /** Inserts quests for a user and returns the created rows (in input order). */
@@ -32,10 +34,17 @@ export async function createQuests(tx: Pick<Tx, "insert">, userId: string, items
         chainId: i.chainId ?? null,
         chainStep: i.chainStep ?? null,
         chainTotal: i.chainTotal ?? null,
+        bonus: i.bonus ?? false,
       })),
     )
     .returning();
 }
+
+/**
+ * SQL: the quest counts toward ranking (completion rate, rank windows, adherence, clan/raid stats, achievements).
+ * Every ranking consumer of the quests table must carry this; bonus quests are excluded everywhere.
+ */
+export const countsForRank = eq(quests.bonus, false);
 
 export type SlotState = "none" | "upcoming" | "open" | "missed";
 
@@ -66,6 +75,7 @@ export function toQuestDto(q: typeof quests.$inferSelect, slotState: SlotState =
     slotStart: q.slotStart,
     slotEnd: q.slotEnd,
     shameMode: q.shameMode,
+    bonus: q.bonus,
     slotState,
     createdAt: q.createdAt.toISOString(),
   };

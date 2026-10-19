@@ -1,0 +1,1 @@
+ALTER TABLE "quests" ADD COLUMN "bonus" boolean DEFAULT false NOT NULL;

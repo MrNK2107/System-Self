@@ -114,3 +114,28 @@ export function templateQuests(ctx: { weakestDomain: string; homePathActive?: bo
     { ...pick(first, "arc", ARC_QUESTS[first]!), domain: first, type: "arc" as const },
   ];
 }
+
+/**
+ * Template for a bonus daily (AI-failure fallback): the first domain, weakest first, whose daily template title is
+ * not already on the board; when all five are taken, the weakest domain's again with a numeric suffix.
+ */
+export function templateBonusQuest(
+  ctx: { weakestDomain: string; homePathActive?: boolean; seasonActive?: boolean },
+  usedTitles: ReadonlySet<string>,
+  ordinal: number,
+): TemplateQuest {
+  const first = DOMAIN_QUESTS[ctx.weakestDomain] ? ctx.weakestDomain : "DISCIPLINE";
+  const domains = [first, ...DOMAIN_ORDER.filter((d) => d !== first)];
+  const base = (domain: string) =>
+    (ctx.homePathActive || ctx.seasonActive) && domain === "BODY"
+      ? HOME_QUESTS.daily
+      : ctx.seasonActive && SEASON_QUESTS[domain]
+        ? SEASON_QUESTS[domain]!
+        : DOMAIN_QUESTS[domain]!;
+  for (const domain of domains) {
+    const t = base(domain);
+    if (!usedTitles.has(t.title)) return { ...t, domain, type: "daily" };
+  }
+  const t = base(first);
+  return { ...t, title: `${t.title} ${ordinal}`, domain: first, type: "daily" };
+}

@@ -370,6 +370,8 @@ export const QuestSchema = z.object({
   slotEnd: z.string().nullable(),
   /** PRO Shame Mode opted in for this quest (the clan is told if it fails). */
   shameMode: z.boolean(),
+  /** PRO bonus daily: no rank effect (no score events, not in completion rate or any ranking input). */
+  bonus: z.boolean(),
   /** Computed from the user's local now on GET /quests; "none" everywhere else. */
   slotState: z.enum(["none", "upcoming", "open", "missed"]),
   createdAt: z.string(),
@@ -387,6 +389,11 @@ export const QuestListResponseSchema = z.object({
   active: z.array(QuestSchema),
   recent: z.array(QuestSchema),
 });
+
+/** POST /quests/bonus: one more daily, at most 3 per local day (PRO). */
+export const BonusQuestRequestSchema = z.object({ clientId: ClientIdSchema.optional() });
+export const BonusQuestResponseSchema = z.object({ quest: QuestSchema, remaining: z.number().int().min(0).max(2) });
+export const BONUS_QUESTS_PER_DAY = 3;
 
 export const QuestCompleteRequestSchema = z.object({ clientId: ClientIdSchema.optional() });
 export const QuestCompleteResponseSchema = z.object({

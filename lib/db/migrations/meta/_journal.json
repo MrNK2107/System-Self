@@ -239,6 +239,13 @@
       "when": 1792406348903,
       "tag": "0033_happy_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792407907404,
+      "tag": "0034_cloudy_hedge_knight",
+      "breakpoints": true
     }
   ]
 }

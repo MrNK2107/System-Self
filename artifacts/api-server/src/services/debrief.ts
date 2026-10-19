@@ -6,6 +6,7 @@ import { buildUserContext, generateMessage, type DebriefFacts, type PromptContex
 import { financeVerdictFor, markVerdictQuoted } from "./finance";
 import { rollOverDue } from "./rollover";
 import { withUserLock } from "./user-lock";
+import { countsForRank } from "./quests";
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -40,7 +41,7 @@ export async function computeDebriefFacts(tx: Pick<Db, "select">, userId: string
   const resolved = await tx
     .select({ status: quests.status })
     .from(quests)
-    .where(and(eq(quests.userId, userId), eq(quests.resolvedLocalDate, today)));
+    .where(and(eq(quests.userId, userId), countsForRank, eq(quests.resolvedLocalDate, today)));
   const questCompleted = resolved.filter((q) => q.status === "complete").length;
   const questTotal = resolved.length;
   const verdict = debriefVerdict(deltas, questTotal > 0 ? questCompleted / questTotal : 0);

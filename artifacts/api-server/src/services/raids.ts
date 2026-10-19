@@ -77,7 +77,7 @@ export async function raidMetricsDetailed(
     const q = await db.execute(sql`
       select m.clan_id, count(*) filter (where q.status = 'complete')::int as done, count(*)::int as resolved
       from clan_members m join quests q on q.user_id = m.user_id
-      where ${inClan} and q.status in ('complete', 'failed', 'refused') and ${inSpan("q.resolved_at")}
+      where ${inClan} and not q.bonus and q.status in ('complete', 'failed', 'refused') and ${inSpan("q.resolved_at")}
       group by m.clan_id`);
     for (const r of q.rows as { clan_id: string; done: number; resolved: number }[]) {
       out.set(r.clan_id, { value: Number(r.resolved) > 0 ? round2((Number(r.done) / Number(r.resolved)) * 100) : 0, contributors: null });

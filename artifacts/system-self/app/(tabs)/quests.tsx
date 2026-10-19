@@ -21,6 +21,7 @@ import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
 import { QuestCard } from "@/components/QuestCard";
 import { ProLock } from "@/components/ProLock";
 import { useMyClanQuery } from "@/hooks/useClan";
+import { useBillingStatusQuery } from "@/hooks/usePro";
 import { isProRequired } from "@/lib/api/pro";
 import { describeChallengeError } from "@/lib/challenges/challenges";
 import { SlotPicker } from "@/components/SlotPicker";
@@ -32,6 +33,8 @@ import type { RefuseOutcome } from "@/context/AppContext";
 import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
 import { useQuestScheduler } from "@/hooks/useQuestScheduler";
 import { DOMAIN_COLORS } from "@/constants/domains";
+
+const BONUS_LIMIT_LINE = "Bonus quests: 3 issued today. The limit resets tomorrow.";
 
 function GeneratingState() {
   const colors = useColors();
@@ -123,7 +126,7 @@ export default function QuestsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    quests, completeQuest, refuseQuest, setQuestSlot, setQuestShame, shadowSelf, getWeakestDomain,
+    quests, completeQuest, refuseQuest, setQuestSlot, setQuestShame, requestBonusQuest, shadowSelf, getWeakestDomain,
     questChains, chainTemplates, startQuestChain, user, tierProgress,
     loading, loadError, questsLoadError, refresh, offline,
   } = useApp();
@@ -158,6 +161,10 @@ export default function QuestsScreen() {
   // PRO Shame Mode: offered on active quests only for clan members; a free account's toggle shows the PRO lock.
   const inClan = !!useMyClanQuery().data?.clan;
   const [shamePro, setShamePro] = useState(false);
+  // PRO bonus quests: a free account (known from billing status, or after the server's 402) sees the PRO lock.
+  const knownFree = useBillingStatusQuery().data?.tier === "free";
+  const [bonusPro, setBonusPro] = useState(false);
+  const [bonusBusy, setBonusBusy] = useState(false);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const onRefresh = async () => {
@@ -221,6 +228,21 @@ export default function QuestsScreen() {
     }
   };
 
+  const onRequestBonus = async () => {
+    if (bonusBusy) return;
+    setBonusBusy(true);
+    setNotice(null);
+    try {
+      const r = await requestBonusQuest();
+      if (r.ok) return;
+      if (r.reason === "error" && isProRequired(r.error)) setBonusPro(true);
+      else if (r.reason === "error" && hasApiCode(r.error, "bonus_limit")) setNotice(BONUS_LIMIT_LINE);
+      else setNotice(describeFailure(r));
+    } finally {
+      setBonusBusy(false);
+    }
+  };
+
   const saveSlot = async (slot: { slotStart: string; slotEnd: string } | null) => {
     if (!slotting || inFlight.current.has(slotting.id)) return;
     const id = slotting.id;
@@ -250,11 +272,15 @@ export default function QuestsScreen() {
     : quests;
 
   // Partition quests
-  const activeDailies = visibleQuests.filter(q => q.type === "daily" && q.status === "active");
-  const activeWeeklies = visibleQuests.filter(q => q.type === "weekly" && q.status === "active");
-  const activeArcs = visibleQuests.filter(q => q.type === "arc" && q.status === "active");
-  const completedQuests = visibleQuests.filter(q => q.status === "complete");
-  const failedQuests = visibleQuests.filter(q => q.status === "failed" || q.status === "refused");
+  // Bonus quests have no rank effect: they sit in their own section and stay out of every count below.
+  const rankQuests = visibleQuests.filter(q => !q.bonus);
+  const activeBonus = visibleQuests.filter(q => q.bonus && q.status === "active");
+  const resolvedBonus = visibleQuests.filter(q => q.bonus && q.status !== "active");
+  const activeDailies = rankQuests.filter(q => q.type === "daily" && q.status === "active");
+  const activeWeeklies = rankQuests.filter(q => q.type === "weekly" && q.status === "active");
+  const activeArcs = rankQuests.filter(q => q.type === "arc" && q.status === "active");
+  const completedQuests = rankQuests.filter(q => q.status === "complete");
+  const failedQuests = rankQuests.filter(q => q.status === "failed" || q.status === "refused");
 
   const completedCount = completedQuests.length;
   const totalActive = activeDailies.length + activeWeeklies.length + activeArcs.length;
@@ -491,6 +517,35 @@ export default function QuestsScreen() {
                 )}
               </View>
             )}
+
+            {/* Bonus (PRO): no rank effect */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>BONUS</Text>
+                <Text style={[styles.sectionMeta, { color: colors.mutedForeground }]}>3 a day, no rank effect</Text>
+              </View>
+              {activeBonus.map(q => (
+                <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} busy={busyIds.has(q.id)} />
+              ))}
+              {knownFree || bonusPro ? (
+                <ProLock label="BONUS QUEST" />
+              ) : (
+                <TouchableOpacity
+                  onPress={() => void onRequestBonus()}
+                  disabled={bonusBusy}
+                  accessibilityRole="button"
+                  accessibilityLabel="Request bonus quest"
+                  style={[styles.bonusBtn, { borderColor: colors.primary + "60", opacity: bonusBusy ? 0.5 : 1 }]}
+                  activeOpacity={0.7}
+                >
+                  <Feather name="plus" size={12} color={colors.primary} />
+                  <Text style={[styles.bonusBtnText, { color: colors.primary }]}>{bonusBusy ? "REQUESTING" : "REQUEST BONUS QUEST"}</Text>
+                </TouchableOpacity>
+              )}
+              {resolvedBonus.map(q => (
+                <QuestCard key={q.id} quest={q} onComplete={onComplete} busy={busyIds.has(q.id)} />
+              ))}
+            </View>
 
             {/* Weekly */}
             {activeWeeklies.length > 0 && (
@@ -730,6 +785,8 @@ const styles = StyleSheet.create({
   prepDomainText: { fontSize: 8, fontWeight: "800" as const, letterSpacing: 1 },
 
   section: { gap: 8 },
+  bonusBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 3, paddingHorizontal: 10, paddingVertical: 8, alignSelf: "flex-start" },
+  bonusBtnText: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 2 },
   sectionHeader: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2,
   },

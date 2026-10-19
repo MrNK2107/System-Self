@@ -145,6 +145,8 @@ export const quests = pgTable(
     slotEnd: text("slot_end"),
     /** PRO Shame Mode (PRD 11): when this quest fails the clan is told its title. Explicit per-quest opt-in. */
     shameMode: boolean("shame_mode").notNull().default(false),
+    /** PRO bonus daily: never a ranking input (no score events, not in completion rate, rank windows, adherence or clan/raid stats). */
+    bonus: boolean("bonus").notNull().default(false),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
   (t) => [index("quests_user_status_expires_idx").on(t.userId, t.status, t.expiresAt)],

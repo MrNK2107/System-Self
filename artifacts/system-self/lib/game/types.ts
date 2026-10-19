@@ -67,6 +67,8 @@ export interface Quest {
   slotState?: "none" | "upcoming" | "open" | "missed";
   /** PRO Shame Mode is on for this quest (the clan is told if it fails). */
   shameMode?: boolean;
+  /** PRO bonus daily: no rank effect (no score, not in the completion rate). */
+  bonus?: boolean;
 }
 
 export interface QuestChain {

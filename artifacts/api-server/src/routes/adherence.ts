@@ -3,6 +3,7 @@ import { and, desc, eq, gte } from "drizzle-orm";
 import { quests, shadowTakeovers, users, type Db } from "@workspace/db";
 import { addDays, localDate } from "@workspace/engine";
 import { DeferralsQuerySchema, ShadowTakeoversQuerySchema } from "@workspace/contracts";
+import { countsForRank } from "../services/quests";
 
 export function adherenceRoutes(db: Db): IRouter {
   const router = Router();
@@ -29,7 +30,7 @@ export function adherenceRoutes(db: Db): IRouter {
         localDate: quests.resolvedLocalDate,
       })
       .from(quests)
-      .where(and(eq(quests.userId, userId), eq(quests.status, "refused"), gte(quests.resolvedLocalDate, addDays(d, -(q.days - 1)))))
+      .where(and(eq(quests.userId, userId), countsForRank, eq(quests.status, "refused"), gte(quests.resolvedLocalDate, addDays(d, -(q.days - 1)))))
       .orderBy(desc(quests.resolvedAt), desc(quests.createdAt));
     const items = rows.flatMap((r) =>
       r.reason?.trim() && r.localDate

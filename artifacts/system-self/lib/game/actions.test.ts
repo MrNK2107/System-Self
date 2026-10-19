@@ -12,6 +12,7 @@ import {
   fetchGameState,
   fetchNotices,
   setHomePath,
+  requestBonusQuest,
   setQuestShame,
   markNoticesSeen,
   newClientId,
@@ -113,6 +114,7 @@ const questDto = {
   slotEnd: null,
   slotState: "none",
   shameMode: false,
+  bonus: false,
   createdAt: "2026-10-19T00:00:00.000Z",
 };
 
@@ -317,6 +319,20 @@ test("setHomePath flushes the outbox first, then POSTs the flag with an idempote
   assert.equal(api.calls[0]!.path, "/api/profile/home-path");
   assert.deepEqual(api.calls[0]!.opts.body, { active: true, clientId: "hp-1" });
   assert.equal(api.calls[0]!.opts.idempotencyKey, "hp-1");
+});
+
+test("requestBonusQuest POSTs after the outbox flush with an idempotency key and reads the bonus quest", async () => {
+  const api = fakeApi(() => ({ quest: { ...questDto, status: "active", bonus: true }, remaining: 2 }));
+  const blocked = await requestBonusQuest(api, { flushBeforeMutation: async () => false }, "bq-0");
+  assert.deepEqual(blocked, { ok: false, reason: "sync_pending" });
+  assert.equal(api.calls.length, 0);
+  const res = await requestBonusQuest(api, { flushBeforeMutation: async () => true }, "bq-1");
+  assert.equal(res.ok && res.value.quest.bonus, true);
+  assert.equal(res.ok && res.value.remaining, 2);
+  assert.equal(api.calls[0]!.method, "POST");
+  assert.equal(api.calls[0]!.path, "/api/quests/bonus");
+  assert.deepEqual(api.calls[0]!.opts.body, { clientId: "bq-1" });
+  assert.equal(api.calls[0]!.opts.idempotencyKey, "bq-1");
 });
 
 test("setQuestShame PATCHes the flag after the outbox flush with an idempotency key", async () => {

@@ -41,7 +41,7 @@ import { logger } from "../lib/logger";
 import { resolveDueForUser } from "./challenges";
 import { evaluateFinanceWeek, postRecurringIncome } from "./finance";
 import { evaluatePeerRatingsWeek } from "./peer-ratings";
-import { abandonChain } from "./quests";
+import { abandonChain, countsForRank } from "./quests";
 import { expireAssignments, rivalRollover } from "./rivals";
 import { applyChanges, insertNotice, toShadowState, type ScoreChange } from "./scoring";
 import { notSystemLog } from "./system-logs";
@@ -160,6 +160,11 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
       .returning({ id: quests.id });
     if (!failed) continue;
     if (q.chainId) await abandonChain(tx, q.chainId);
+    if (q.bonus) {
+      // A bonus quest has no rank effect: the result is shown (zero penalty), but no score event and no shame.
+      failNotices.push({ questId: q.id, title: q.title, type: q.type as QuestType, penalty: 0 });
+      continue;
+    }
     const penalty = QUEST_FAIL_PENALTY[q.type as QuestType];
     failChanges.push({ domain: "DISCIPLINE", delta: -penalty, bonus: false, activity: false, reason: "quest_failed", refId: q.id });
     failNotices.push({ questId: q.id, title: q.title, type: q.type as QuestType, penalty });
@@ -212,6 +217,7 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
     .where(
       and(
         eq(quests.userId, userId),
+        countsForRank,
         inArray(quests.status, ["complete", "failed", "refused"]),
         gte(quests.resolvedLocalDate, addDays(date, -29)),
         lte(quests.resolvedLocalDate, date),

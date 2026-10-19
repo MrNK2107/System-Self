@@ -171,6 +171,7 @@ const quest = (over: Partial<GameQuest> = {}): GameQuest => ({
   slotEnd: null,
   slotState: "none" as const,
   shameMode: false,
+  bonus: false,
   createdAt: "2026-10-19T00:00:00.000Z",
   ...over,
 });
@@ -191,6 +192,11 @@ test("toQuest maps server quests; chain fields only when present; unknown domain
   assert.equal(chained.chainStep, 1);
   assert.equal(chained.chainTotal, 3);
   assert.equal(chained.domain, "DISCIPLINE");
+});
+
+test("toQuest marks a bonus quest, and only a bonus quest", () => {
+  assert.equal(toQuest(quest({ bonus: true })).bonus, true);
+  assert.equal("bonus" in toQuest(quest()), false);
 });
 
 test("toQuest carries a locked slot and its state", () => {

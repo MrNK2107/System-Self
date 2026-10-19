@@ -257,8 +257,8 @@ export async function clanMembersView(db: Reader, clanId: string, viewerId: stri
       role: clanMembers.role,
       flaggedAt: clanMembers.flaggedAt,
       removable: removableSql(clanMembers.userId, clanMembers.joinedAt, users.timezone, now),
-      resolved: sql<number>`(select count(*)::int from ${quests} q where q.user_id = ${clanMembers.userId} and q.status in ('complete', 'failed', 'refused') and q.resolved_local_date >= ((${now.toISOString()}::timestamptz at time zone ${users.timezone})::date - 29))`,
-      completed: sql<number>`(select count(*)::int from ${quests} q where q.user_id = ${clanMembers.userId} and q.status = 'complete' and q.resolved_local_date >= ((${now.toISOString()}::timestamptz at time zone ${users.timezone})::date - 29))`,
+      resolved: sql<number>`(select count(*)::int from ${quests} q where q.user_id = ${clanMembers.userId} and not q.bonus and q.status in ('complete', 'failed', 'refused') and q.resolved_local_date >= ((${now.toISOString()}::timestamptz at time zone ${users.timezone})::date - 29))`,
+      completed: sql<number>`(select count(*)::int from ${quests} q where q.user_id = ${clanMembers.userId} and not q.bonus and q.status = 'complete' and q.resolved_local_date >= ((${now.toISOString()}::timestamptz at time zone ${users.timezone})::date - 29))`,
     })
     .from(clanMembers)
     .innerJoin(users, eq(users.id, clanMembers.userId))

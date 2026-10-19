@@ -3,6 +3,7 @@ import { analyticsEvents, comebacks, logs, quests, type Db } from "@workspace/db
 import { COMEBACK_MIN_GAP_DAYS, addDays, localDate } from "@workspace/engine";
 import type { AdherenceMetricsResponse } from "@workspace/contracts";
 import { notSystemLog } from "./system-logs";
+import { countsForRank } from "./quests";
 
 /** BODY log types that are a training session. */
 export const SESSION_LOG_TYPES = ["gym_session", "home_session", "floor_session"] as const;
@@ -78,6 +79,7 @@ export async function adherenceMetrics(db: Db, now: Date, days: number): Promise
     .from(quests)
     .where(
       and(
+        countsForRank,
         eq(quests.status, "refused"),
         isNotNull(quests.refusalReason),
         sql`btrim(${quests.refusalReason}) <> ''`,

@@ -2,6 +2,7 @@ import { and, eq, gte, lte, ne, sql } from "drizzle-orm";
 import { achievements, logs, questChains, quests, scoreEvents, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, addDays, endOfLocalDay, type RankedDomain } from "@workspace/engine";
 import { notSystemLog } from "./system-logs";
+import { countsForRank } from "./quests";
 
 export interface WeeklyRecap {
   weekStart: string;
@@ -51,7 +52,7 @@ export async function buildWeeklyRecap(
   const questRows = await db
     .select({ status: quests.status, n: sql<number>`count(*)::int` })
     .from(quests)
-    .where(and(eq(quests.userId, userId), gte(quests.resolvedLocalDate, weekStart), lte(quests.resolvedLocalDate, today)))
+    .where(and(eq(quests.userId, userId), countsForRank, gte(quests.resolvedLocalDate, weekStart), lte(quests.resolvedLocalDate, today)))
     .groupBy(quests.status);
   const questCount = (status: string) => questRows.find((r) => r.status === status)?.n ?? 0;
 
