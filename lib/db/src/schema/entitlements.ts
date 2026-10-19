@@ -1,4 +1,4 @@
-import { check, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { check, index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { users } from "./users";
 
@@ -39,6 +39,9 @@ export const billingEvents = pgTable("billing_events", {
   type: text("type").notNull(),
   payload: jsonb("payload").notNull(),
   receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => [
+  // Retention prune (180 days).
+  index("billing_events_received_idx").on(t.receivedAt),
+]);
 
 export type BillingEvent = typeof billingEvents.$inferSelect;

@@ -169,3 +169,30 @@ test("onboarding stores the canonical spelling of the timezone", { skip }, async
     400,
   );
 });
+
+test("a timezone Postgres does not know is 400 invalid_timezone at onboarding, register and PATCH /auth/me", { skip }, async () => {
+  // Intl accepts the zone; this Postgres "does not": every timezone write is checked against the database.
+  const a = createApp({ db, mailer, timezoneKnown: async (_db, tz) => tz !== "America/New_York" });
+  const { token, id } = await register(a);
+  const ob = await request(a).post("/api/onboarding").set("Authorization", `Bearer ${token}`).send(body({ timezone: "America/New_York" }));
+  assert.equal(ob.status, 400);
+  assert.equal(ob.body.code, "invalid_timezone");
+  assert.deepEqual(ob.body.issues, [{ path: "timezone", message: "Unknown timezone" }], "the app retries with a fallback zone");
+  assert.equal((await db!.select().from(profiles).where(eq(profiles.userId, id))).length, 0, "nothing was written");
+  const patch = await request(a).patch("/api/auth/me").set("Authorization", `Bearer ${token}`).send({ timezone: "America/New_York" });
+  assert.equal(patch.status, 400);
+  assert.equal(patch.body.code, "invalid_timezone");
+  const reg = await request(a).post("/api/auth/register").send({
+    email: "bob@example.com",
+    password: "correct horse battery",
+    username: "bob_1",
+    birthYear: 1990,
+    acceptTerms: true,
+    timezone: "America/New_York",
+  });
+  assert.equal(reg.status, 400);
+  assert.equal(reg.body.code, "invalid_timezone");
+  assert.equal((await db!.select().from(users).where(eq(users.email, "bob@example.com"))).length, 0);
+  // Known zones still pass.
+  assert.equal((await request(a).post("/api/onboarding").set("Authorization", `Bearer ${token}`).send(body())).status, 201);
+});

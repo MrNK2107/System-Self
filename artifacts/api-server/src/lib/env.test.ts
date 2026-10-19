@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { parseEnv } from "./env";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { formatEnvError, parseEnv } from "./env";
 
 const STRONG = "k3Jx9vQ2mP7rT5wZ8nB4cF6hL1sD0aGyE";
-const PROD_BASE = { NODE_ENV: "production", JWT_SECRET: STRONG, RESEND_API_KEY: "re_live_key" };
+const PROD_REQUIRED = { DATABASE_URL: "postgres://u:p@db:5432/x", CORS_ORIGIN: "https://app.systemself.app" };
+const PROD_BASE = { NODE_ENV: "production", JWT_SECRET: STRONG, RESEND_API_KEY: "re_live_key", ...PROD_REQUIRED };
 
 function exampleValue(name: string): string {
   const file = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.env.example");
@@ -38,12 +40,12 @@ test("non-dev JWT_SECRET must be >= 32 chars and not contain change-me", () => {
   assert.throws(() => parseEnv({ ...PROD_BASE, JWT_SECRET: `my-secret-CHANGE-ME-${STRONG}` }), /JWT_SECRET/);
   assert.throws(() => parseEnv({ JWT_SECRET: "dev-insecure-secret-change-me-0123456789" }), /JWT_SECRET/);
   assert.equal(parseEnv(PROD_BASE).JWT_SECRET, STRONG);
-  assert.equal(parseEnv({ JWT_SECRET: STRONG, RESEND_API_KEY: "re_x" }).JWT_SECRET, STRONG);
+  assert.equal(parseEnv({ JWT_SECRET: STRONG, RESEND_API_KEY: "re_x", ...PROD_REQUIRED }).JWT_SECRET, STRONG);
 });
 
 test("production requires RESEND_API_KEY unless MAILER=log", () => {
-  assert.throws(() => parseEnv({ NODE_ENV: "production", JWT_SECRET: STRONG }), /RESEND_API_KEY/);
-  assert.equal(parseEnv({ NODE_ENV: "production", JWT_SECRET: STRONG, MAILER: "log" }).MAILER, "log");
+  assert.throws(() => parseEnv({ NODE_ENV: "production", JWT_SECRET: STRONG, ...PROD_REQUIRED }), /RESEND_API_KEY/);
+  assert.equal(parseEnv({ NODE_ENV: "production", JWT_SECRET: STRONG, MAILER: "log", ...PROD_REQUIRED }).MAILER, "log");
   assert.doesNotThrow(() => parseEnv(PROD_BASE));
   assert.doesNotThrow(() => parseEnv({ NODE_ENV: "development" }));
 });
@@ -77,4 +79,61 @@ test(".env.prod.example secrets trip the production guard", () => {
     if (m) vars[m[1]!] = m[2]!.replace(/^"|"$/g, "");
   }
   assert.throws(() => parseEnv(vars), /placeholder/);
+});
+
+test("production requires CORS_ORIGIN, without any wildcard; a comma-separated list is fine", () => {
+  const { CORS_ORIGIN: _omit, ...noCors } = PROD_BASE;
+  assert.throws(() => parseEnv(noCors), /CORS_ORIGIN/);
+  assert.throws(() => parseEnv({ ...PROD_BASE, CORS_ORIGIN: "" }), /CORS_ORIGIN/);
+  assert.throws(() => parseEnv({ ...PROD_BASE, CORS_ORIGIN: "*" }), /CORS_ORIGIN/);
+  assert.throws(() => parseEnv({ ...PROD_BASE, CORS_ORIGIN: "https://a.app, *" }), /CORS_ORIGIN/);
+  assert.equal(parseEnv({ ...PROD_BASE, CORS_ORIGIN: "https://a.app, https://b.app" }).CORS_ORIGIN, "https://a.app, https://b.app");
+  // development stays relaxed: unset means "*"
+  assert.doesNotThrow(() => parseEnv({ NODE_ENV: "development" }));
+});
+
+test("production requires DATABASE_URL", () => {
+  const { DATABASE_URL: _omit, ...noDb } = PROD_BASE;
+  assert.throws(() => parseEnv(noDb), /DATABASE_URL/);
+  assert.doesNotThrow(() => parseEnv({ NODE_ENV: "test" }));
+});
+
+test("JWT_SECRET_PREVIOUS: optional, >= 32 chars and no placeholder in production", () => {
+  assert.equal(parseEnv(PROD_BASE).JWT_SECRET_PREVIOUS, undefined);
+  assert.equal(parseEnv({ ...PROD_BASE, JWT_SECRET_PREVIOUS: `${STRONG}-old` }).JWT_SECRET_PREVIOUS, `${STRONG}-old`);
+  assert.throws(() => parseEnv({ ...PROD_BASE, JWT_SECRET_PREVIOUS: "short" }), /JWT_SECRET_PREVIOUS/);
+  assert.throws(() => parseEnv({ ...PROD_BASE, JWT_SECRET_PREVIOUS: `REPLACE-${STRONG}` }), /JWT_SECRET_PREVIOUS/);
+});
+
+test("DB_POOL_MAX defaults to 10 and must be a positive integer", () => {
+  assert.equal(parseEnv({ NODE_ENV: "test" }).DB_POOL_MAX, 10);
+  assert.equal(parseEnv({ NODE_ENV: "test", DB_POOL_MAX: "25" }).DB_POOL_MAX, 25);
+  assert.throws(() => parseEnv({ NODE_ENV: "test", DB_POOL_MAX: "0" }), /DB_POOL_MAX/);
+});
+
+test("formatEnvError names every offending variable on one line each", () => {
+  let message = "";
+  try {
+    parseEnv({ NODE_ENV: "production", JWT_SECRET: "short", MAILER: "log" });
+  } catch (err) {
+    message = formatEnvError(err);
+  }
+  assert.match(message, /^Invalid environment/);
+  assert.match(message, /JWT_SECRET: .*32/);
+  assert.match(message, /CORS_ORIGIN: /);
+  assert.match(message, /DATABASE_URL: /);
+});
+
+test("production boot without CORS_ORIGIN exits 1 with a clear message", () => {
+  const { CORS_ORIGIN: _omit, ...noCors } = PROD_BASE;
+  const envFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "env.ts");
+  const r = spawnSync(process.execPath, ["--import", "tsx", "-e", `await import(${JSON.stringify(pathToFileURL(envFile).href)})`], {
+    env: { PATH: process.env.PATH ?? "", SystemRoot: process.env.SystemRoot ?? "", ...noCors },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /Invalid environment/);
+  assert.match(r.stderr, /CORS_ORIGIN: CORS_ORIGIN is required in production/);
+  assert.doesNotMatch(r.stderr, /at parseEnv|ZodError/);
 });

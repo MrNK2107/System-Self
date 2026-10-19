@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { closeTestDb, getTestDb, resetDb } from "@workspace/db/testing";
 import { emailCodes, refreshTokens, users } from "@workspace/db";
 import { hashPassword, verifyPassword } from "./passwords";
-import { hashToken, signAccessToken, verifyAccessToken } from "./tokens";
+import { accessTokenSecrets, hashToken, signAccessToken, verifyAccessToken } from "./tokens";
 import { issueRefreshToken, revokeRefreshFamilyByToken, rotateRefreshToken } from "./refresh";
 import { consumeEmailCode, createEmailCode } from "./codes";
 import { env } from "../env";
@@ -34,9 +34,36 @@ test("access token roundtrip; tampered token -> null; expired -> null", async ()
   const tampered = `${parts[0]}.${parts[1]}x.${parts[2]}`;
   assert.equal(await verifyAccessToken(tampered), null);
   assert.equal(await verifyAccessToken("garbage"), null);
-  const short = await signAccessToken(u, { ttlSec: 1 });
-  await new Promise((r) => setTimeout(r, 2100));
+  // Injected clock instead of a real sleep: deterministic under CPU load.
+  const t0 = new Date("2026-01-01T00:00:00Z");
+  const short = await signAccessToken(u, { ttlSec: 1, now: t0 });
+  assert.equal(short.expiresAt.getTime(), t0.getTime() + 1000);
+  assert.ok(await verifyAccessToken(short.token, { now: t0 }));
+  assert.equal(await verifyAccessToken(short.token, { now: new Date(t0.getTime() + 2000) }), null);
   assert.equal(await verifyAccessToken(short.token), null);
+});
+
+const CURRENT = "current-secret-k3Jx9vQ2mP7rT5wZ8nB4cF6hL1sD0aGyE";
+const PREVIOUS = "previous-secret-Z8nB4cF6hL1sD0aGyEk3Jx9vQ2mP7rT5w";
+const OTHER = "other-secret-hL1sD0aGyEk3Jx9vQ2mP7rT5wZ8nB4cF6";
+
+test("rotation: a token signed with JWT_SECRET_PREVIOUS still verifies; new tokens use JWT_SECRET", async () => {
+  const u = { id: "11111111-1111-1111-1111-111111111111", role: "user" as const, tokenVersion: 0 };
+  const old = await signAccessToken(u, { secret: PREVIOUS });
+  const rotated = { current: CURRENT, previous: PREVIOUS };
+  assert.deepEqual(await verifyAccessToken(old.token, { secrets: rotated }), { userId: u.id, role: "user", ver: 0 });
+  // Once the previous secret is dropped, the old token is rejected.
+  assert.equal(await verifyAccessToken(old.token, { secrets: { current: CURRENT } }), null);
+  // An unrelated secret never verifies.
+  const forged = await signAccessToken(u, { secret: OTHER });
+  assert.equal(await verifyAccessToken(forged.token, { secrets: rotated }), null);
+  // Signing always uses the current secret.
+  const fresh = await signAccessToken(u, { secret: CURRENT });
+  assert.ok(await verifyAccessToken(fresh.token, { secrets: { current: CURRENT } }));
+  assert.equal(await verifyAccessToken(fresh.token, { secrets: { current: PREVIOUS } }), null);
+  // Default: env secrets (JWT_SECRET, plus JWT_SECRET_PREVIOUS when set).
+  assert.deepEqual(accessTokenSecrets(), { current: env.JWT_SECRET, previous: env.JWT_SECRET_PREVIOUS });
+  assert.ok(await verifyAccessToken((await signAccessToken(u)).token, { secrets: { current: env.JWT_SECRET } }));
 });
 
 async function makeUser(): Promise<string> {

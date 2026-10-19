@@ -4,11 +4,13 @@ import { idempotencyKeys, userDayState, type Db } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { claimDueUsers, ensureRolledOver } from "../services/rollover";
 import { runSocialJobs } from "./social";
-import { prunePushLogs, runNotificationJobs } from "./notifications";
+import { pruneOrphanedPushTokens, prunePushLogs, runNotificationJobs } from "./notifications";
 import { createExpoTransport, type PushTransport } from "../services/push";
 import { env } from "../lib/env";
 import { jobDuration, rolloverUsers, timeJob } from "../lib/metrics";
 import { pruneBillingEvents } from "../services/entitlements";
+import { pruneAnalyticsEvents } from "../services/analytics";
+import { closeAbandonedGymSessions } from "../services/gym";
 
 export const WORKER_BATCH_SIZE = 200;
 const defaultPushTransport = () => createExpoTransport({ accessToken: env.EXPO_ACCESS_TOKEN });
@@ -16,7 +18,7 @@ export const IDEMPOTENCY_KEY_TTL_MS = 7 * 86_400_000;
 
 /**
  * One worker pass: claims up to `batchSize` due users and rolls each over, runs the social jobs (rival
- * re-matching), the notification jobs (quest-deadline notice, push dispatch), then prunes push logs (30 days), billing events (180 days) and idempotency keys (7 days). If `signal` aborts mid-batch, the current user finishes and the remaining claimed
+ * re-matching), the notification jobs (quest-deadline notice, push dispatch), then prunes push logs (30 days), billing events (180 days), analytics events (90 days) and idempotency keys (7 days). If `signal` aborts mid-batch, the current user finishes and the remaining claimed
  * users are released (made due again) for the next worker.
  */
 export async function runWorkerTick(
@@ -71,6 +73,21 @@ export async function runWorkerTick(
     await pruneBillingEvents(db, now);
   } catch (err) {
     logger.error({ err }, "Billing event prune failed");
+  }
+  try {
+    await pruneOrphanedPushTokens(db, now);
+  } catch (err) {
+    logger.error({ err }, "Orphaned push token prune failed");
+  }
+  try {
+    await closeAbandonedGymSessions(db, now);
+  } catch (err) {
+    logger.error({ err }, "Abandoned gym session sweep failed");
+  }
+  try {
+    await pruneAnalyticsEvents(db, now);
+  } catch (err) {
+    logger.error({ err }, "Analytics event prune failed");
   }
   await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(now.getTime() - IDEMPOTENCY_KEY_TTL_MS)));
   return { processed, claimed: ids.length };

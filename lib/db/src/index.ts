@@ -6,8 +6,16 @@ const { Pool } = pg;
 
 export type Db = NodePgDatabase<typeof schema>;
 
-export function createDb(url: string): { db: Db; pool: pg.Pool } {
-  const pool = new Pool({ connectionString: url });
+const DEFAULT_POOL_MAX = 10;
+
+/** DB_POOL_MAX (validated by the API's env schema); anything unusable falls back to 10. */
+export function poolMaxFromEnv(source: NodeJS.ProcessEnv): number {
+  const n = Number(source.DB_POOL_MAX);
+  return Number.isInteger(n) && n >= 1 ? n : DEFAULT_POOL_MAX;
+}
+
+export function createDb(url: string, opts: { max?: number } = {}): { db: Db; pool: pg.Pool } {
+  const pool = new Pool({ connectionString: url, max: opts.max ?? poolMaxFromEnv(process.env) });
   return { db: drizzle(pool, { schema }), pool };
 }
 

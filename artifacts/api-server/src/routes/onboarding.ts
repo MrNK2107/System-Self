@@ -13,13 +13,18 @@ import { withIdempotency } from "../services/idempotency";
 import { freePublicCodename } from "../services/social";
 import { rolloverDueAt } from "../services/rollover";
 import { buildGameState } from "../services/state";
+import { INVALID_TIMEZONE, postgresKnowsTimezone, type TimezoneCheck } from "../services/timezone";
 
-export function onboardingRoutes(db: Db): IRouter {
+export function onboardingRoutes(db: Db, timezoneKnown: TimezoneCheck = postgresKnowsTimezone): IRouter {
   const router = Router();
 
   router.post("/onboarding", async (req, res) => {
     const body = OnboardingRequestSchema.parse(req.body);
     const userId = req.user!.id;
+    if (!(await timezoneKnown(db, body.timezone))) {
+      res.status(400).json(INVALID_TIMEZONE);
+      return;
+    }
 
     await withIdempotency(db, req, res, "POST /onboarding", async (tx) => {
       const now = new Date();

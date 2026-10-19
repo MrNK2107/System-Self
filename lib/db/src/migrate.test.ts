@@ -50,7 +50,16 @@ test("a held advisory lock makes migrate wait, and it releases the lock afterwar
     const run = runMigrations(f.url).then(() => {
       done = true;
     });
-    await new Promise((r) => setTimeout(r, 700));
+    // Wait until migrate is observably blocked on the advisory lock (bounded), instead of sleeping a fixed time.
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+      const { rows } = await holder.query(
+        "select count(*)::int as n from pg_locks where locktype = 'advisory' and not granted and database = (select oid from pg_database where datname = current_database())",
+      );
+      if (rows[0].n > 0) break;
+      if (Date.now() > deadline) throw new Error("migrate never waited on the advisory lock");
+      await new Promise((r) => setTimeout(r, 20));
+    }
     assert.equal(done, false, "migrate must wait for the lock");
     await holder.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]);
     await run;

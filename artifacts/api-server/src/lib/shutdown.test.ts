@@ -74,8 +74,10 @@ test("shutdown: in-flight request completes, readyz flips to 503, new connection
 test("shutdown: a second call returns the same promise, and a stuck request is cut off at the timeout", async () => {
   resetShuttingDown();
   const outer = express();
+  let entered!: () => void;
+  const inHandler = new Promise<void>((r) => (entered = r));
   outer.get("/hang", () => {
-    /* never answers */
+    entered(); // never answers
   });
   const server = http.createServer(outer);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -83,7 +85,7 @@ test("shutdown: a second call returns the same promise, and a stuck request is c
   let closed = 0;
   const shutdown = createShutdown({ server, closePool: async () => void closed++, timeoutMs: 150 });
   const hung = get(port, "/hang").catch((e: unknown) => e);
-  await new Promise((r) => setTimeout(r, 50));
+  await inHandler; // the request is in flight: no timing guess
   const a = shutdown("SIGTERM");
   const b = shutdown("SIGINT");
   assert.equal(a, b);

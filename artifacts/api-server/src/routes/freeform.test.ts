@@ -234,6 +234,15 @@ test("voice: 415 for other content types and 413 above 5 MB, both before any AI 
   assert.equal(await usageRows(), 0); // neither refusal spends the day's budget
 });
 
+test("voice: a 4 MB upload is not caught by the global 100 KB body limit", { skip }, async () => {
+  const { token, id } = await setup(a());
+  await pro(id);
+  const { ai, seen } = countingAudio(json({ transcript: "hi", proposals: [] }));
+  const res = await withKey(() => voice(token, audio(4 * 1024 * 1024), "audio/mp4", ai));
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(seen[0]!.size, 4 * 1024 * 1024);
+});
+
 test("voice: exactly 5 MB is accepted", { skip }, async () => {
   const { token, id } = await setup(a());
   await pro(id);

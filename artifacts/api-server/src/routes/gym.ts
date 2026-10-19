@@ -270,6 +270,9 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
       await rollOverDue(tx, userId, clock());
       const session = await ownSession(tx, userId, sessionId);
       if (!session) return notFound("Session");
+      if (session.abandonedAt) {
+        return { status: 409, body: { error: "Session was abandoned", code: "session_abandoned" } };
+      }
       if (session.completedAt) {
         return { status: 409, body: { error: "Session already completed", code: "already_completed" } };
       }
@@ -320,6 +323,9 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
       await rollOverDue(tx, userId, now, { before: today });
       const session = await ownSession(tx, userId, sessionId);
       if (!session) return notFound("Session");
+      if (session.abandonedAt) {
+        return { status: 409, body: { error: "Session was abandoned", code: "session_abandoned" } };
+      }
       if (session.completedAt) {
         return { status: 409, body: { error: "Session already completed", code: "already_completed" } };
       }

@@ -26,7 +26,7 @@ type Call = { method: string; url: string; body: unknown; auth: string | null };
 function setup(
   handler: (call: Call) => { status: number; body?: unknown },
   initial: Session | null = null,
-  extra: { unregisterDevice?: () => Promise<void> } = {},
+  extra: { unregisterDevice?: () => Promise<void>; forgetPushToken?: () => Promise<void> } = {},
 ) {
   let stored: Session | null = initial;
   const tokens: TokenStore = { get: async () => stored, set: async (s) => void (stored = s) };
@@ -190,4 +190,20 @@ test("validateSignUp enforces the server rules", () => {
   assert.ok(validateSignUp({ ...good, birthYear: "99" }, now).birthYear);
   assert.ok(validateSignUp({ ...good, acceptTerms: false }, now).acceptTerms);
   assert.deepEqual(validateSignUp({ ...good, username: "ALPHA" }, now), {});
+});
+
+test("sessionExpired forgets the local push token without calling the server, and never throws", async () => {
+  let forgotten = 0;
+  const { actions, calls } = setup(() => ({ status: 500 }), session, { forgetPushToken: async () => void forgotten++ });
+  await actions.sessionExpired();
+  assert.equal(forgotten, 1);
+  assert.equal(calls.length, 0, "the session is dead: no server call");
+  const failing = setup(() => ({ status: 500 }), session, {
+    forgetPushToken: async () => {
+      throw new Error("storage unavailable");
+    },
+  });
+  await failing.actions.sessionExpired();
+  // Without the dependency it is a no-op.
+  await setup(() => ({ status: 500 })).actions.sessionExpired();
 });

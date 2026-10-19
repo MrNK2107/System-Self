@@ -12,7 +12,9 @@ Required in production:
 
 Recommended:
 - `PORT=3001`
-- `CORS_ORIGIN=https://your-app-domain.com` (comma-separated allowlist; unset means `*`)
+- `CORS_ORIGIN=https://your-app-domain.com` (comma-separated allowlist). Required outside development/test, and `*` is refused: boot fails with a one-line-per-variable message. Requests from an unlisted `Origin` get 403; requests without an `Origin` header (the native app, server-to-server) pass. Unset (development only) means `*`.
+- `DATABASE_URL` is required outside development/test (boot fails without it). `DB_POOL_MAX` sizes each process's Postgres pool (default 10): keep `DB_POOL_MAX × (API instances + workers)` under the database's connection limit.
+- JSON and urlencoded bodies are limited to 100 KB (413 `payload_too_large`); the voice upload route keeps its own 5 MB raw limit.
 - `GEMINI_API_KEY=...` (without it, or when Gemini fails after retries and the fallback model, the API serves template output with `meta.model = "template"`)
 
 Optional tuning (defaults shown):
@@ -60,7 +62,7 @@ Warning: `lib/db/migrations/0002_*.sql` was hand-edited to begin with `DELETE FR
 
 ## 5. Auth Operations
 - Accounts use email + password (argon2). Sessions are short-lived JWT access tokens plus rotating refresh tokens (`/api/auth/refresh`); reuse of a rotated token revokes its family. Grace window: a client whose refresh response was lost may retry with the same token within 30 seconds of the original rotation; if the unseen successor is still live it is revoked (`revoked_reason = 'superseded'`) and a new token is issued in the same family. Replays after 30 seconds, or of tokens revoked by logout/password change, revoke the family.
-- Rotate `JWT_SECRET`: deploying a new value invalidates all access tokens; clients recover via refresh only if the refresh token store is intact (refresh tokens are opaque and not signed with `JWT_SECRET`).
+- Rotate `JWT_SECRET` without logging anyone out: set `JWT_SECRET_PREVIOUS` to the old value and `JWT_SECRET` to the new one, and deploy. Access tokens verify against `JWT_SECRET`, then `JWT_SECRET_PREVIOUS`; new tokens are always signed with `JWT_SECRET`. After one `ACCESS_TOKEN_TTL_SEC` (15 min by default), remove `JWT_SECRET_PREVIOUS` and deploy again. For a leaked secret, skip `JWT_SECRET_PREVIOUS`: every access token dies at once and clients recover through refresh (refresh tokens are opaque and not signed with `JWT_SECRET`).
 - Email codes (verification, password reset) are capped at 5 per account and purpose per hour: `/api/auth/email/verify/request` then answers 429 `code_rate_limited`; `/api/auth/password/forgot` still answers 204 but sends nothing.
 - Password change/reset bumps the user's `tokenVersion` and revokes all refresh tokens. `/api/auth/password/change` then returns a fresh session (200, same body as login) so the caller stays signed in; reset returns 204 and the user signs in again.
 - Operator access: users with `role = "admin"` can use `/api/admin/users` and `PATCH /api/admin/users/:id/role`. Demoting the last remaining admin is refused with 409 `last_admin`.

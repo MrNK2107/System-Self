@@ -35,16 +35,18 @@ import { seasonsRoutes } from "./seasons";
 import { socialRoutes } from "./social";
 import { stateRoutes } from "./state";
 import { systemRoutes } from "./system";
+import { postgresKnowsTimezone, type TimezoneCheck } from "../services/timezone";
 
-export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; revenuecat?: RevenueCatClient | null }): IRouter {
+export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; revenuecat?: RevenueCatClient | null; timezoneKnown?: TimezoneCheck }): IRouter {
   const { db, mailer } = deps;
   const ai = deps.ai ?? {};
   const router: IRouter = Router();
   const requireAuth = createRequireAuth(db);
+  const timezoneKnown = deps.timezoneKnown ?? postgresKnowsTimezone;
 
   // Public: healthz, readyz, and the public /auth endpoints (the auth router guards its own private ones).
   router.use(healthRoutes(db));
-  router.use(authRoutes({ db, mailer, requireAuth }));
+  router.use(authRoutes({ db, mailer, requireAuth, timezoneKnown }));
 
   // Private surfaces. requireAuth is mounted per prefix so unknown /api paths fall through to 404.
   router.use(["/system", "/admin", "/onboarding", "/profile", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym", "/adherence", "/comeback", "/seasons", "/progress", "/social", "/rivals", "/clans", "/challenges", "/duo", "/finance", "/custom-domains", "/push", "/notifications", "/history", "/rank-freeze"], requireAuth);
@@ -54,7 +56,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
     router.use(billingRoutes(db, requireAuth, deps.now, deps.revenuecatSecret, deps.revenuecat ?? null));
     router.use(adminRoutes(db, deps.now));
     router.use(adminMetricsRoutes(db, deps.now));
-    router.use(onboardingRoutes(db));
+    router.use(onboardingRoutes(db, timezoneKnown));
     router.use(profileRoutes(db, deps.now));
     router.use(stateRoutes(db));
     router.use(logsRoutes(db, deps.now, ai));

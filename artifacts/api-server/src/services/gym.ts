@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import {
   exercises,
   personalRecords,
@@ -6,6 +6,7 @@ import {
   workoutSessions,
   type PlanDay,
   type WorkoutPlan,
+  type Db,
   type WorkoutSession,
 } from "@workspace/db";
 import { DEFAULT_PLAN, WEEKDAYS, estimate1RM, type Weekday } from "@workspace/engine";
@@ -129,3 +130,36 @@ export async function applyPersonalRecords(
   }
   return newPrs;
 }
+
+/** A session still open this long after it started was abandoned (the app was closed mid-workout, a crash, ...). */
+export const ABANDON_GYM_SESSION_AFTER_MS = 12 * 3_600_000;
+
+/**
+ * Closes sessions left open for more than 12 h as abandoned: completed_at and abandoned_at are stamped and points
+ * stay 0. Rank-neutral by design: nothing is scored, no gym_session log, PR or body-part points are written (the
+ * finish path only scores a session the user completes). Bounded batches; the rest waits for the next tick.
+ */
+export async function closeAbandonedGymSessions(
+  db: Db,
+  now: Date,
+  opts: { batch?: number; maxBatches?: number } = {},
+): Promise<number> {
+  const batch = opts.batch ?? 500;
+  const maxBatches = opts.maxBatches ?? 5;
+  const cutoff = new Date(now.getTime() - ABANDON_GYM_SESSION_AFTER_MS);
+  let total = 0;
+  for (let i = 0; i < maxBatches; i++) {
+    const res = await db.execute(sql`
+      update workout_sessions set completed_at = ${now}, abandoned_at = ${now}, points = 0
+      where id in (
+        select id from workout_sessions where completed_at is null and started_at < ${cutoff}
+        limit ${batch} for update skip locked
+      ) and completed_at is null`);
+    total += res.rowCount ?? 0;
+    if ((res.rowCount ?? 0) < batch) break;
+  }
+  return total;
+}
+
+/** Completed workouts, not abandoned ones. */
+export const finishedSession = () => and(isNotNull(workoutSessions.completedAt), isNull(workoutSessions.abandonedAt));

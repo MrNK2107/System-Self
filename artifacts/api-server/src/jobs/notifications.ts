@@ -223,7 +223,8 @@ async function decideUser(db: Db, userId: string, now: Date): Promise<PushMessag
   });
 }
 
-type Budget = { budgetMs?: number; nowMs?: () => number };
+/** budgetMs bounds the decide phase (PUSH_JOB_BUDGET_MS); sendBudgetMs bounds the send phase (PUSH_SEND_BUDGET_MS). */
+type Budget = { budgetMs?: number; sendBudgetMs?: number; nowMs?: () => number };
 
 /**
  * Decides up to `limit` users (see `decideUser`), each committed under its own user lock, and returns the messages to
@@ -258,17 +259,18 @@ export async function decidePushes(
 /**
  * Sends decided messages in batches of EXPO_BATCH_SIZE, outside any transaction (each request times out on its own).
  * Delivery is at most once: a failed, timed-out or (past the budget) unsent batch loses its pushes, and the notices
- * stay in-app. Error tickets are logged as counts per Expo error code, never with tokens.
+ * stay in-app. Error tickets are logged as counts per Expo error code, never with tokens. Sending has its own budget
+ * (`sendBudgetMs`), timed from its own start: a slow decide phase cannot starve already-decided pushes.
  */
 export async function deliverPushes(
   db: Db,
   transport: PushTransport,
   messages: PushMessage[],
-  opts: Budget & { started?: number } = {},
+  opts: Budget = {},
 ): Promise<{ sent: number; errors: number; unsent: number }> {
-  const budgetMs = opts.budgetMs ?? env.PUSH_JOB_BUDGET_MS;
+  const budgetMs = opts.sendBudgetMs ?? env.PUSH_SEND_BUDGET_MS;
   const nowMs = opts.nowMs ?? Date.now;
-  const started = opts.started ?? nowMs();
+  const started = nowMs();
   let sent = 0;
   let errors = 0;
   let removed = 0;
@@ -310,7 +312,7 @@ export async function dispatchPushes(
 ): Promise<{ users: number; sent: number; errors: number }> {
   const started = (opts.nowMs ?? Date.now)();
   const decided = await decidePushes(db, now, { ...opts, started });
-  const out = await deliverPushes(db, transport, decided.messages, { ...opts, started });
+  const out = await deliverPushes(db, transport, decided.messages, opts);
   return { users: decided.users, sent: out.sent, errors: out.errors };
 }
 
@@ -349,6 +351,40 @@ export async function prunePushLogs(
   return total;
 }
 
+/** A user whose sessions all ended this long ago no longer gets pushes (their app could not delete the token). */
+export const ORPHAN_PUSH_TOKEN_TTL_MS = 30 * 86_400_000;
+
+/**
+ * Deletes push tokens of users who have had no valid refresh token for 30 days: every refresh_tokens row of theirs
+ * stopped being valid (revoked or expired, whichever came first) before the cutoff, or none is left. A signed-out
+ * or expired app forgets its token locally but cannot delete it server-side. Bounded batches. Returns the rows deleted.
+ */
+export async function pruneOrphanedPushTokens(
+  db: Db,
+  now: Date,
+  opts: { batch?: number; maxBatches?: number } = {},
+): Promise<number> {
+  const batch = opts.batch ?? PRUNE_BATCH;
+  const maxBatches = opts.maxBatches ?? PRUNE_MAX_BATCHES;
+  const cutoff = new Date(now.getTime() - ORPHAN_PUSH_TOKEN_TTL_MS);
+  let total = 0;
+  for (let i = 0; i < maxBatches; i++) {
+    const res = await db.execute(sql`
+      delete from push_tokens where id in (
+        select p.id from push_tokens p
+        where p.last_seen_at < ${cutoff}
+          and not exists (
+            select 1 from refresh_tokens r
+            where r.user_id = p.user_id and least(r.expires_at, coalesce(r.revoked_at, r.expires_at)) >= ${cutoff}
+          )
+        limit ${batch}
+      )`);
+    total += res.rowCount ?? 0;
+    if ((res.rowCount ?? 0) < batch) break;
+  }
+  return total;
+}
+
 /**
  * One pass of the notification jobs. The dispatch job lock covers only the decisions (each committed under its user
  * lock); the messages are sent after the lock's transaction ends, so no transaction is held across HTTP. A second
@@ -359,6 +395,6 @@ export async function runNotificationJobs(db: Db, now: Date, transport: PushTran
   const started = (opts.nowMs ?? Date.now)();
   const decided = await withJobLock(db, DISPATCH_JOB_LOCK, () => decidePushes(db, now, { ...opts, started }));
   if (decided === "skipped") return { deadline, dispatch: "skipped" as const };
-  const out = await deliverPushes(db, transport, decided.messages, { ...opts, started });
+  const out = await deliverPushes(db, transport, decided.messages, opts);
   return { deadline, dispatch: { users: decided.users, sent: out.sent, errors: out.errors } };
 }

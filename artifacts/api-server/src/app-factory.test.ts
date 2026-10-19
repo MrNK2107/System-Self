@@ -32,3 +32,54 @@ test("unknown /api path -> 404 even without a database", async () => {
   const res = await request(createApp({ db: null, mailer })).get("/api/nope");
   assert.equal(res.status, 404);
 });
+
+const jsonOfSize = (bytes: number) => {
+  const shell = JSON.stringify({ pad: "" });
+  return JSON.stringify({ pad: "x".repeat(bytes - shell.length) });
+};
+
+test("JSON bodies are limited to 100 KB: 101 KB -> 413 with a JSON error body, 99 KB is parsed", async () => {
+  const a = createApp({ db: null, mailer });
+  const big = await request(a).post("/api/nope").set("Content-Type", "application/json").send(jsonOfSize(101 * 1024));
+  assert.equal(big.status, 413);
+  assert.match(big.headers["content-type"] ?? "", /application\/json/);
+  assert.deepEqual(big.body, { error: "Request body too large", code: "payload_too_large" });
+  const ok = await request(a).post("/api/nope").set("Content-Type", "application/json").send(jsonOfSize(99 * 1024));
+  assert.equal(ok.status, 404, "parsed, then no route");
+});
+
+test("malformed JSON is a 400 with a JSON body, not a 500", async () => {
+  const res = await request(createApp({ db: null, mailer })).post("/api/nope").set("Content-Type", "application/json").send("{nope");
+  assert.equal(res.status, 400);
+  assert.deepEqual(res.body, { error: "Malformed JSON body", code: "invalid_json" });
+});
+
+test("strict CORS: listed origins get CORS headers, unknown origins 403, no Origin (native apps) allowed", async () => {
+  const a = createApp({ db: null, mailer, corsOrigins: ["https://app.systemself.app", "https://admin.systemself.app"] });
+  const listed = await request(a).get("/api/healthz").set("Origin", "https://admin.systemself.app");
+  assert.equal(listed.status, 200);
+  assert.equal(listed.headers["access-control-allow-origin"], "https://admin.systemself.app");
+  const unknown = await request(a).get("/api/healthz").set("Origin", "https://evil.example");
+  assert.equal(unknown.status, 403);
+  assert.deepEqual(unknown.body, { error: "Origin not allowed", code: "cors_origin_rejected" });
+  assert.equal(unknown.headers["access-control-allow-origin"], undefined);
+  const preflight = await request(a).options("/api/auth/login").set("Origin", "https://evil.example").set("Access-Control-Request-Method", "POST");
+  assert.equal(preflight.status, 403);
+  const okPreflight = await request(a).options("/api/auth/login").set("Origin", "https://app.systemself.app").set("Access-Control-Request-Method", "POST");
+  assert.equal(okPreflight.status, 204);
+  const native = await request(a).get("/api/healthz");
+  assert.equal(native.status, 200);
+});
+
+test("unset CORS_ORIGIN (development only) stays permissive", async () => {
+  const res = await request(createApp({ db: null, mailer, corsOrigins: "*" })).get("/api/healthz").set("Origin", "http://localhost:8081");
+  assert.equal(res.status, 200);
+  assert.equal(res.headers["access-control-allow-origin"], "*");
+});
+
+test("helmet headers are set and x-powered-by is not", async () => {
+  const res = await request(createApp({ db: null, mailer })).get("/api/healthz");
+  assert.equal(res.headers["x-content-type-options"], "nosniff");
+  assert.ok(res.headers["strict-transport-security"]);
+  assert.equal(res.headers["x-powered-by"], undefined);
+});

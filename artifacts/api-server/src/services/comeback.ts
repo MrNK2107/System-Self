@@ -15,6 +15,7 @@ import { insertNotice } from "./scoring";
 import { notSystemLog } from "./system-logs";
 import type { Tx } from "./user-lock";
 import { countsForRank } from "./quests";
+import { finishedSession } from "./gym";
 
 /**
  * Whether an activity (log, quest completion, gym session) on `activityDate` is a return after 5+ empty days. Must
@@ -52,7 +53,7 @@ export async function detectComeback(
   const [gym] = await tx
     .select({ n: count() })
     .from(workoutSessions)
-    .where(and(eq(workoutSessions.userId, userId), isNotNull(workoutSessions.completedAt)));
+    .where(and(eq(workoutSessions.userId, userId), finishedSession()));
   const notice = await insertNotice(
     tx,
     userId,

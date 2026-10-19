@@ -4,7 +4,7 @@ import { api, onSessionExpired } from "@/lib/api/client";
 import { clearLocalData, handleSignIn } from "@/lib/api/query";
 import { secureTokenStore, type PublicUser } from "@/lib/api/session";
 import { createAuthActions, type SignUpInput } from "@/lib/auth/actions";
-import { unregisterDevice } from "@/lib/notifications";
+import { forgetPushToken, unregisterDevice } from "@/lib/notifications";
 import { settingsActions } from "@/lib/settings/instance";
 
 export type AuthStatus = "loading" | "signed_out" | "signed_in";
@@ -34,6 +34,7 @@ const actions = createAuthActions({
   handleSignIn,
   clearLocalData,
   unregisterDevice: () => unregisterDevice(api),
+  forgetPushToken,
 });
 
 /** The device timezone as the runtime reports it (canonicalised by the server). */
@@ -95,8 +96,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshUser, signedOut]);
 
-  // The refresh token was rejected (expired, revoked, account deleted elsewhere). Local data stays for a same-user re-login.
-  useEffect(() => onSessionExpired(signedOut), [signedOut]);
+  // The refresh token was rejected (expired, revoked, account deleted elsewhere). Local data stays for a same-user re-login;
+  // the push token is forgotten (the server prunes tokens of users without a valid session for 30 days).
+  useEffect(
+    () =>
+      onSessionExpired(() => {
+        signedOut();
+        void actions.sessionExpired();
+      }),
+    [signedOut],
+  );
 
   const value = useMemo<AuthContextValue>(
     () => ({

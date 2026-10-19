@@ -35,11 +35,13 @@ test("registering a token is idempotent and a token moves to whoever is signed i
   assert.equal((await reg(alice.token)).status, 204);
   const [first] = await db!.select().from(pushTokens);
   assert.equal(first!.userId, alice.id);
-  await new Promise((r) => setTimeout(r, 15));
+  // Backdate instead of sleeping: re-registering must move last_seen_at forward, whatever the clock resolution.
+  const earlier = new Date(first!.lastSeenAt.getTime() - 60_000);
+  await db!.update(pushTokens).set({ lastSeenAt: earlier });
   assert.equal((await reg(alice.token)).status, 204);
   const rows = await db!.select().from(pushTokens);
   assert.equal(rows.length, 1);
-  assert.ok(rows[0]!.lastSeenAt.getTime() > first!.lastSeenAt.getTime());
+  assert.ok(rows[0]!.lastSeenAt.getTime() > earlier.getTime());
   assert.equal(rows[0]!.createdAt.getTime(), first!.createdAt.getTime());
   assert.equal((await reg(bob.token)).status, 204);
   const moved = await db!.select().from(pushTokens);

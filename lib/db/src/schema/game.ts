@@ -331,7 +331,11 @@ export const analyticsEvents = pgTable(
     props: jsonb("props").notNull().default(sql`'{}'::jsonb`),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
-  (t) => [index("analytics_events_name_created_idx").on(t.name, t.createdAt)],
+  (t) => [
+    index("analytics_events_name_created_idx").on(t.name, t.createdAt),
+    // Retention prune (90 days) scans by age alone.
+    index("analytics_events_created_idx").on(t.createdAt),
+  ],
 );
 
 /** A return after 5+ empty days. The checklist is recognition only: completing it pays no score. */

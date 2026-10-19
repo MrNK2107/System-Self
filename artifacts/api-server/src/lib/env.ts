@@ -37,7 +37,14 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().min(1).optional(),
   MAIL_FROM: z.string().min(1).default("SYSTEM // SELF <no-reply@systemself.app>"),
   DATABASE_URL: z.string().min(1).optional(),
-  JWT_SECRET: z.string().min(32).optional(),
+  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters").optional(),
+  /**
+   * The secret being rotated out. Access tokens verify against JWT_SECRET, then this one; new tokens are always
+   * signed with JWT_SECRET. Keep it for one ACCESS_TOKEN_TTL_SEC after a rotation, then remove it.
+   */
+  JWT_SECRET_PREVIOUS: z.string().min(32, "JWT_SECRET_PREVIOUS must be at least 32 characters").optional(),
+  /** Max connections of each process's Postgres pool. */
+  DB_POOL_MAX: z.coerce.number().int().min(1).max(500).default(10),
   ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().min(1).default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(30),
   WORKER_TICK_MS: z.coerce.number().int().min(1000).default(60_000),
@@ -58,8 +65,10 @@ const envSchema = z.object({
   EXPO_ACCESS_TOKEN: z.string().min(1).optional(),
   /** Wall-clock budget of one social job pass; the rest of its backlog waits for the next tick. */
   SOCIAL_JOB_BUDGET_MS: z.coerce.number().int().min(0).default(2000),
-  /** Wall-clock budget of one push dispatch pass (deciding, then sending); undecided users wait for the next tick. */
+  /** Wall-clock budget of the push decide phase; undecided users wait for the next tick. */
   PUSH_JOB_BUDGET_MS: z.coerce.number().int().min(0).default(15_000),
+  /** Wall-clock budget of the push send phase, timed from its own start; batches past it are lost (at most once). */
+  PUSH_SEND_BUDGET_MS: z.coerce.number().int().min(0).default(15_000),
 });
 
 export type Env = Omit<z.infer<typeof envSchema>, "JWT_SECRET"> & { JWT_SECRET: string };
@@ -74,7 +83,7 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     .superRefine((v, ctx) => {
       const relaxed = isDevOrTest(v.NODE_ENV);
       if (!relaxed) {
-        for (const name of ["REVENUECAT_WEBHOOK_SECRET", "METRICS_TOKEN"] as const) {
+        for (const name of ["REVENUECAT_WEBHOOK_SECRET", "METRICS_TOKEN", "JWT_SECRET_PREVIOUS"] as const) {
           const value = v[name];
           if (value && PLACEHOLDER.test(value)) {
             ctx.addIssue({ code: "custom", path: [name], message: `${name} is a placeholder value` });
@@ -89,6 +98,19 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
         } else if (PLACEHOLDER.test(v.JWT_SECRET) || PUBLIC_JWT_SECRETS.has(v.JWT_SECRET)) {
           ctx.addIssue({ code: "custom", path: ["JWT_SECRET"], message: "JWT_SECRET is a public placeholder" });
         }
+        if (!v.DATABASE_URL) {
+          ctx.addIssue({ code: "custom", path: ["DATABASE_URL"], message: "DATABASE_URL is required in production" });
+        }
+        const origins = splitOrigins(v.CORS_ORIGIN);
+        if (origins.length === 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["CORS_ORIGIN"],
+            message: "CORS_ORIGIN is required in production (comma-separated list of allowed origins)",
+          });
+        } else if (origins.some((o) => o.includes("*"))) {
+          ctx.addIssue({ code: "custom", path: ["CORS_ORIGIN"], message: 'CORS_ORIGIN must not contain "*" in production' });
+        }
         if (!v.RESEND_API_KEY && v.MAILER !== "log") {
           ctx.addIssue({
             code: "custom",
@@ -102,11 +124,33 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     .parse(source);
 }
 
-export const env = parseEnv(process.env);
+function splitOrigins(value: string | undefined): string[] {
+  return (value ?? "").split(",").map((origin) => origin.trim()).filter(Boolean);
+}
 
-export function resolveCorsOrigins() {
-  if (!env.CORS_ORIGIN) {
-    return "*";
+/** One line per offending variable, without a stack: what an operator needs to fix the deployment. */
+export function formatEnvError(err: unknown): string {
+  if (err instanceof z.ZodError) {
+    const lines = err.issues.map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`);
+    return `Invalid environment:\n${lines.join("\n")}`;
   }
-  return env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean);
+  return `Invalid environment: ${err instanceof Error ? err.message : String(err)}`;
+}
+
+function loadEnv(source: NodeJS.ProcessEnv): Env {
+  try {
+    return parseEnv(source);
+  } catch (err) {
+    // Boot must fail loudly and readably: a ZodError stack trace hides which variable is wrong.
+    process.stderr.write(`${formatEnvError(err)}\n`);
+    process.exit(1);
+  }
+}
+
+export const env = loadEnv(process.env);
+
+/** "*" only when CORS_ORIGIN is unset, which production validation forbids. */
+export function resolveCorsOrigins(): "*" | string[] {
+  const origins = splitOrigins(env.CORS_ORIGIN);
+  return origins.length === 0 ? "*" : origins;
 }

@@ -267,6 +267,20 @@
       "when": 1792413172246,
       "tag": "0037_old_mysterio",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792422366699,
+      "tag": "0038_jittery_post",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792422493345,
+      "tag": "0039_fearless_morgan_stark",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { users } from "./users";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
@@ -69,11 +70,17 @@ export const workoutSessions = pgTable(
     planId: uuid("plan_id").references(() => workoutPlans.id, { onDelete: "set null" }),
     startedAt: ts("started_at").notNull(),
     completedAt: ts("completed_at"),
+    /** Set (with completed_at, points 0) when the worker closes a session left open for more than 12 h. */
+    abandonedAt: ts("abandoned_at"),
     localDate: date("local_date", { mode: "string" }).notNull(),
     points: real("points").notNull().default(0),
     clientId: text("client_id").notNull(),
   },
-  (t) => [uniqueIndex("workout_sessions_user_client_id_idx").on(t.userId, t.clientId)],
+  (t) => [
+    uniqueIndex("workout_sessions_user_client_id_idx").on(t.userId, t.clientId),
+    // The abandoned-session sweep scans open sessions by age.
+    index("workout_sessions_open_started_idx").on(t.startedAt).where(sql`completed_at is null`),
+  ],
 );
 
 export const performedSets = pgTable(

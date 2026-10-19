@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, count, eq, isNotNull } from "drizzle-orm";
 import { domainScores, personalRecords, profiles, users, workoutSessions, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, localDate, type RankedDomain } from "@workspace/engine";
+import { finishedSession } from "../services/gym";
 import type { PastSelfResponse } from "@workspace/contracts";
 
 type Scores = Record<RankedDomain, number>;
@@ -43,7 +44,7 @@ export function progressRoutes(db: Db): IRouter {
     const [sessions] = await db
       .select({ n: count() })
       .from(workoutSessions)
-      .where(and(eq(workoutSessions.userId, userId), isNotNull(workoutSessions.completedAt)));
+      .where(and(eq(workoutSessions.userId, userId), finishedSession()));
     const [prs] = await db.select({ n: count() }).from(personalRecords).where(eq(personalRecords.userId, userId));
 
     const onboardedOn = localDate(who.onboardedAt, who.tz);

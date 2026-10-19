@@ -26,6 +26,11 @@ export interface AuthActionDeps {
   clearLocalData: (userId?: string) => Promise<void>;
   /** Deletes this device's push token (and our scheduled reminders). Runs first on sign-out, while the session is still valid. */
   unregisterDevice?: () => Promise<void>;
+  /**
+   * Forgets this device's push token locally, without a server call. Runs when the session expired: the server can no
+   * longer be asked to delete the token, so it prunes push tokens of users without a valid session for 30 days.
+   */
+  forgetPushToken?: () => Promise<void>;
 }
 
 const MeSchema = z.object({ user: PublicUserSchema });
@@ -87,6 +92,15 @@ export function createAuthActions(deps: AuthActionDeps) {
         else throw e;
       }
       return adopt(session);
+    },
+
+    /** The refresh token was rejected: forget the local push token (the next sign-in registers it again). Never throws. */
+    async sessionExpired(): Promise<void> {
+      try {
+        await deps.forgetPushToken?.();
+      } catch {
+        // Best effort: storage failures must not block the signed-out transition.
+      }
     },
 
     /** Best-effort server logout, then local wipe, then the session. Never throws on a network failure. */

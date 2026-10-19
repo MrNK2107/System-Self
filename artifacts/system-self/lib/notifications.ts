@@ -194,6 +194,11 @@ export async function registerPushToken(api: ApiClient): Promise<void> {
   }
 }
 
+/** Session-expired hook: forgets this device's push token locally (the session is dead, so no server call). */
+export async function forgetPushToken(): Promise<void> {
+  await AsyncStorage.removeItem(PUSH_TOKEN_KEY).catch(() => undefined);
+}
+
 /**
  * Sign-out hook: deletes this device's token on the server (the session is still valid), forgets it locally and
  * cancels our reminders. Bounded so an unreachable server cannot hold sign-out up.

@@ -6,7 +6,7 @@ import { notices, noticePushes, notificationLog, notificationPrefs, profiles, pu
 import request from "supertest";
 import { app, assertStoredNoticesMatchContract, auth, db, setup, skip } from "../routes/game-test-helpers";
 import { runWorkerTick } from "./run-loop";
-import { createQuestDeadlineNotices, dispatchPushes, runNotificationJobs } from "./notifications";
+import { createQuestDeadlineNotices, deliverPushes, dispatchPushes, runNotificationJobs } from "./notifications";
 import { PUSH_PRIORITY, pushCopy } from "../services/push-policy";
 import { createExpoTransport, type PushMessage, type PushTicket } from "../services/push";
 import { logger } from "../lib/logger";
@@ -556,4 +556,21 @@ test("reminder slots are reserved only while a device was seen within the 14-day
   const g = fakeTransport();
   await dispatchPushes(db!, NOW, g.transport);
   assert.deepEqual(kindsSent(g.sent), ["rank_change"]);
+});
+
+test("the send phase has its own budget, separate from the decide phase", { skip }, async () => {
+  const messages = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ to: `ExponentPushToken[m${i}]`, title: "SYSTEM", body: "x", badge: 0 }) as PushMessage);
+  // A decide phase that spent its whole (tiny) budget long ago does not starve the send phase.
+  let t = 0;
+  const f = fakeTransport();
+  const out = await deliverPushes(db!, f.transport, messages(250), { budgetMs: 10, sendBudgetMs: 60_000, nowMs: () => (t += 1000) });
+  assert.equal(out.unsent, 0);
+  assert.equal(f.sent.length, 250);
+  // The send budget itself still bounds sending (first batch always goes).
+  let u = 0;
+  const g = fakeTransport();
+  const capped = await deliverPushes(db!, g.transport, messages(250), { budgetMs: 60_000, sendBudgetMs: 500, nowMs: () => (u += 1000) });
+  assert.equal(g.sent.length, 100);
+  assert.equal(capped.unsent, 150);
 });

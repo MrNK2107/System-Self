@@ -18,6 +18,7 @@ import type { Mailer } from "../lib/mailer";
 import { rollOverDue } from "../services/rollover";
 import { deleteAccount } from "../services/account";
 import { withUserLock } from "../services/user-lock";
+import { INVALID_TIMEZONE, postgresKnowsTimezone, type TimezoneCheck } from "../services/timezone";
 
 const MIN_AGE = 16;
 
@@ -78,8 +79,9 @@ const CODE_ERRORS = {
   locked: "locked",
 } as const;
 
-export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: RequestHandler }): IRouter {
+export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: RequestHandler; timezoneKnown?: TimezoneCheck }): IRouter {
   const { db, mailer, requireAuth } = deps;
+  const timezoneKnown = deps.timezoneKnown ?? postgresKnowsTimezone;
   const router = Router();
 
   router.use("/auth", (_req, res, next) => {
@@ -136,6 +138,10 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
 
   router.post("/auth/register", async (req, res) => {
     const body = registerSchema.parse(req.body);
+    if (body.timezone && !(await timezoneKnown(database(), body.timezone))) {
+      res.status(400).json(INVALID_TIMEZONE);
+      return;
+    }
     const passwordHash = await hashPassword(body.password);
     let user: User;
     let verifyCode: string | null;
@@ -213,6 +219,10 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
 
   router.patch("/auth/me", requireAuth, async (req, res) => {
     const body = patchMeSchema.parse(req.body);
+    if (body.timezone && !(await timezoneKnown(database(), body.timezone))) {
+      res.status(400).json(INVALID_TIMEZONE);
+      return;
+    }
     const changes: Partial<Pick<User, "timezone" | "username">> = {};
     if (body.timezone) changes.timezone = body.timezone;
     if (body.username) changes.username = body.username;

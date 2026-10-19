@@ -1,0 +1,2 @@
+ALTER TABLE "workout_sessions" ADD COLUMN "abandoned_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "workout_sessions_open_started_idx" ON "workout_sessions" USING btree ("started_at") WHERE completed_at is null;

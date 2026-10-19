@@ -4,7 +4,8 @@ import { db, pool } from "@workspace/db";
 import { env } from "./lib/env";
 import { logger } from "./lib/logger";
 import { runLoop } from "./jobs/run-loop";
-import { startWorkerMetricsServer } from "./worker-metrics";
+import { closeWorkerMetricsServer, startWorkerMetricsServer } from "./worker-metrics";
+import type http from "node:http";
 
 const WORKER_EXIT_BUDGET_MS = 60_000;
 
@@ -30,9 +31,10 @@ async function main(): Promise<number> {
       }, WORKER_EXIT_BUDGET_MS).unref();
     });
   }
+  let metricsServer: http.Server | null = null;
   if (env.WORKER_METRICS_PORT) {
     if (env.METRICS_TOKEN) {
-      startWorkerMetricsServer(env.WORKER_METRICS_PORT, env.METRICS_TOKEN);
+      metricsServer = startWorkerMetricsServer(env.WORKER_METRICS_PORT, env.METRICS_TOKEN);
       logger.info({ port: env.WORKER_METRICS_PORT }, "Worker metrics listening");
     } else {
       logger.warn("WORKER_METRICS_PORT is set but METRICS_TOKEN is not; worker metrics are off");
@@ -40,6 +42,7 @@ async function main(): Promise<number> {
   }
   logger.info({ tickMs: env.WORKER_TICK_MS }, "Worker started");
   await runLoop(db, { tickMs: env.WORKER_TICK_MS, signal: controller.signal });
+  if (metricsServer) await closeWorkerMetricsServer(metricsServer);
   await pool?.end();
   logger.info("Worker stopped");
   return 0;

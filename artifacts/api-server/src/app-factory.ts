@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type RequestHandler } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import helmet from "helmet";
@@ -15,14 +15,36 @@ import type { AiDeps } from "./lib/ai";
 import { createMailer, type Mailer } from "./lib/mailer";
 import { createRevenueCatClient, type RevenueCatClient } from "./services/entitlements";
 import { errorHandler, notFoundHandler } from "./middlewares/errors";
+import type { TimezoneCheck } from "./services/timezone";
 
 const HEALTH_PATHS = new Set(["/api/healthz", "/api/readyz"]);
 /** The RevenueCat webhook is authenticated by its secret and arrives from RevenueCat's few IPs in bursts. */
 export const BILLING_WEBHOOK_PATH = "/api/billing/revenuecat";
 export const BILLING_WEBHOOK_RATE_LIMIT_MAX = 600;
+/** JSON / urlencoded body limit. The voice upload route reads its own raw body (5 MB) and is skipped here. */
+export const JSON_BODY_LIMIT = "100kb";
+const VOICE_UPLOAD_PATH = "/api/logs/voice";
+
+/**
+ * With an allowlist, a request whose Origin is not on it is refused outright (403) instead of merely missing CORS
+ * headers. Requests without an Origin header (native apps, server-to-server, curl) are not browser cross-origin
+ * requests and pass.
+ */
+function strictOrigin(origins: "*" | string[]): RequestHandler {
+  const allowed = origins === "*" ? null : new Set(origins);
+  return (req, res, next) => {
+    const origin = req.headers.origin;
+    if (!allowed || origin === undefined || allowed.has(origin)) return next();
+    req.log.info({ event: "cors_origin_rejected", origin: origin.slice(0, 200) }, "cors_rejected");
+    res.status(403).json({ error: "Origin not allowed", code: "cors_origin_rejected" });
+  };
+}
+
+const skipVoice = (parser: RequestHandler): RequestHandler => (req, res, next) =>
+  req.path === VOICE_UPLOAD_PATH ? next() : parser(req, res, next);
 
 export function createApp(
-  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number; revenuecat?: RevenueCatClient | null; metricsToken?: string | null; logger?: Logger } = {},
+  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number; revenuecat?: RevenueCatClient | null; metricsToken?: string | null; logger?: Logger; corsOrigins?: "*" | string[]; timezoneKnown?: TimezoneCheck } = {},
 ): Express {
   const db = deps.db === undefined ? defaultDb : deps.db;
   const mailer = deps.mailer ?? createMailer();
@@ -61,9 +83,11 @@ export function createApp(
   if (metricsToken) app.use(metricsRoutes(metricsToken));
   app.disable("x-powered-by");
   app.use(helmet());
+  const corsOrigins = deps.corsOrigins ?? resolveCorsOrigins();
+  app.use(strictOrigin(corsOrigins));
   app.use(
     cors({
-      origin: resolveCorsOrigins(),
+      origin: corsOrigins,
     }),
   );
   app.use(
@@ -98,10 +122,10 @@ export function createApp(
       }),
     );
   }
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(skipVoice(express.json({ limit: JSON_BODY_LIMIT })));
+  app.use(skipVoice(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT })));
 
-  app.use("/api", createRouter({ db, mailer, ai: deps.ai, now: deps.now, revenuecatSecret: deps.revenuecatSecret, revenuecat }));
+  app.use("/api", createRouter({ db, mailer, ai: deps.ai, now: deps.now, revenuecatSecret: deps.revenuecatSecret, revenuecat, timezoneKnown: deps.timezoneKnown }));
   app.use(notFoundHandler);
   app.use(errorHandler);
 

@@ -83,12 +83,18 @@ test("401 -> refresh -> retry succeeds", async () => {
 });
 
 test("5 concurrent 401s trigger one refresh", async () => {
+  // The refresh answers only once all 5 requests got their 401 (a gate, not a sleep): deterministic under load.
+  let stale = 0;
+  let open!: () => void;
+  const allRejected = new Promise<void>((r) => (open = r));
   const h = harness(async (c) => {
     if (isRefresh(c)) {
-      await new Promise((r) => setTimeout(r, 20));
+      await allRejected;
       return json(200, { ...session(2) });
     }
-    return c.auth === "Bearer access-2" ? json(200, { ok: true }) : json(401, { error: "Unauthorized" });
+    if (c.auth === "Bearer access-2") return json(200, { ok: true });
+    if (++stale === 5) open();
+    return json(401, { error: "Unauthorized" });
   });
   const results = await Promise.all([1, 2, 3, 4, 5].map((i) => h.client.request("GET", `/api/x${i}`)));
   assert.equal(results.length, 5);
