@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NOTICE_KINDS } from "@workspace/contracts";
-import { NOTICE_ORDER, mergeNotices, nextNoticeGroup, noticeView, parseNotices } from "./notices";
+import { NOTICE_KINDS_PARAM, NOTICE_ORDER, mergeNotices, nextNoticeGroup, noticeView, parseNotices } from "./notices";
 
 let seq = 0;
 const at = () => new Date(Date.UTC(2026, 9, 19, 10, 0, seq++)).toISOString();
@@ -44,7 +44,49 @@ test("NOTICE_ORDER covers every server notice kind exactly once", () => {
     "shadow_activated",
     "shadow_resolved",
     "quest_failed",
+    "comeback",
+    "returner_mark",
+    "gym_unlocked",
   ]);
+  // The kinds filter sent with every notice read is exactly this list.
+  assert.equal(NOTICE_KINDS_PARAM, NOTICE_ORDER.join(","));
+});
+
+test("comeback, returner mark and gym unlock render as SYSTEM modals after chain_complete", () => {
+  const comeback = (offer: boolean) => ({
+    id: id(60),
+    kind: "comeback",
+    payload: { gapDays: 9, line: "You returned. Most don't.", offerHomePath: offer },
+    createdAt: at(),
+  });
+  const mark = { id: id(61), kind: "returner_mark", payload: { count: 2, line: "Returned ×2." }, createdAt: at() };
+  const gym = { id: id(62), kind: "gym_unlocked", payload: { line: "Tier I cleared. The gym is open to you now." }, createdAt: at() };
+  const parsed = parseNotices([gym, mark, comeback(true), failed(63)]).notices;
+  const order: string[] = [];
+  const ack = new Set<string>();
+  for (let g = nextNoticeGroup(parsed, ack); g; g = nextNoticeGroup(parsed, ack)) {
+    order.push(g.kind);
+    g.notices.forEach((n) => ack.add(n.id));
+  }
+  assert.deepEqual(order, ["quest_failed", "comeback", "returner_mark", "gym_unlocked"]);
+
+  const [offer, plain] = [comeback(true), comeback(false)].map((n) => noticeView({ kind: "comeback", notices: parseNotices([n]).notices }));
+  assert.deepEqual(offer, { modal: "comeback", gapDays: 9, line: "You returned. Most don't.", offerHomePath: true });
+  assert.equal(plain!.modal === "comeback" && plain!.offerHomePath, false);
+  assert.deepEqual(noticeView({ kind: "returner_mark", notices: parseNotices([mark]).notices }), {
+    modal: "system",
+    tone: "info",
+    label: "RETURNER",
+    title: "Returned ×2.",
+    body: "Recorded. It pays nothing and it cannot be taken back.",
+  });
+  assert.deepEqual(noticeView({ kind: "gym_unlocked", notices: parseNotices([gym]).notices }), {
+    modal: "system",
+    tone: "info",
+    label: "TIER I CLEARED",
+    title: "The gym is open to you now.",
+    body: "Tier I cleared. The gym is open to you now.",
+  });
 });
 
 test("parseNotices keeps known notices and skips unknown or malformed ones without reporting ids to mark seen", () => {

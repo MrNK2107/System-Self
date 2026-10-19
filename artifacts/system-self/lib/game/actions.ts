@@ -3,6 +3,7 @@
 import {
   ChainStartResponseSchema,
   ChainTemplatesResponseSchema,
+  ComebackResponseSchema,
   GameStateSchema,
   LogListResponseSchema,
   LogRequestSchema,
@@ -12,12 +13,14 @@ import {
   QuestListResponseSchema,
   QuestRefuseResponseSchema,
   QuestSlotResponseSchema,
+  type ComebackResponse,
   type GameLog,
 } from "@workspace/contracts";
 import { z } from "zod";
 import type { ApiClient } from "../api/client";
 import type { Outbox, OutboxEntry } from "../api/outbox";
 import { normalizeReason } from "./adherence";
+import { NOTICE_KINDS_PARAM } from "./notices";
 import type { Domain } from "./types";
 
 // Notice lists are parsed loosely here: a kind this build does not know must not fail the whole response.
@@ -41,7 +44,7 @@ export function newClientId(prefix: string): string {
 // --- reads -------------------------------------------------------------------
 
 export function fetchGameState(api: ApiClient): Promise<LooseGameState> {
-  return api.request("GET", "/api/state", { schema: LooseGameStateSchema });
+  return api.request("GET", `/api/state?noticeKinds=${NOTICE_KINDS_PARAM}`, { schema: LooseGameStateSchema });
 }
 
 /**
@@ -67,7 +70,12 @@ export function fetchChains(api: ApiClient): Promise<ChainTemplates> {
 }
 
 export function fetchNotices(api: ApiClient): Promise<{ items: unknown[]; hasMore: boolean }> {
-  return api.request("GET", "/api/notices", { schema: LooseNoticeListSchema });
+  return api.request("GET", `/api/notices?kinds=${NOTICE_KINDS_PARAM}`, { schema: LooseNoticeListSchema });
+}
+
+/** Today's comeback checklist (null when none) and the stacked returner count. */
+export function fetchComeback(api: ApiClient): Promise<ComebackResponse> {
+  return api.request("GET", "/api/comeback", { schema: ComebackResponseSchema });
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -201,6 +209,17 @@ export function setQuestSlot(
       body: { ...(slot ?? { slotStart: null }), clientId },
       idempotencyKey: clientId,
       schema: QuestSlotResponseSchema,
+    }),
+  );
+}
+
+/** Opts in to or out of the home path. A plain mutation, so queued logs land first. */
+export function setHomePath(api: ApiClient, outbox: Guard, active: boolean, clientId: string) {
+  return afterOutbox(outbox, () =>
+    api.request("POST", "/api/profile/home-path", {
+      body: { active, clientId },
+      idempotencyKey: clientId,
+      schema: GameStateSchema.shape.profile,
     }),
   );
 }

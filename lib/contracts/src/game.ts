@@ -52,6 +52,8 @@ export const OnboardingRequestSchema = z.object({
   nightlyTime: HHMM,
   timezone: TimezoneSchema,
   clientId: z.string().min(1).max(200).optional(),
+  /** Start on the home path (Tier I home sessions before the gym). */
+  homePathActive: z.boolean().optional(),
 });
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
 
@@ -77,6 +79,9 @@ export const NOTICE_KINDS = [
   "streak_break",
   "shadow_activated",
   "shadow_resolved",
+  "comeback",
+  "returner_mark",
+  "gym_unlocked",
 ] as const;
 export const NoticeKindSchema = z.enum(NOTICE_KINDS);
 export type NoticeKind = z.infer<typeof NoticeKindSchema>;
@@ -101,6 +106,9 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
   }),
   shadow_activated: z.object({ gap: z.number(), codename: z.string() }),
   shadow_resolved: z.object({ codename: z.string() }),
+  comeback: z.object({ gapDays: z.number().int(), line: z.string(), offerHomePath: z.boolean() }),
+  returner_mark: z.object({ count: z.number().int(), line: z.string() }),
+  gym_unlocked: z.object({ line: z.string() }),
 } as const satisfies Record<NoticeKind, z.ZodTypeAny>;
 
 const noticeOf = <K extends NoticeKind>(kind: K) =>
@@ -115,6 +123,9 @@ export const NoticeSchema = z.discriminatedUnion("kind", [
   noticeOf("streak_break"),
   noticeOf("shadow_activated"),
   noticeOf("shadow_resolved"),
+  noticeOf("comeback"),
+  noticeOf("returner_mark"),
+  noticeOf("gym_unlocked"),
 ]);
 export type Notice = z.infer<typeof NoticeSchema>;
 export type NoticePayload<K extends NoticeKind> = z.infer<(typeof NOTICE_PAYLOAD_SCHEMAS)[K]>;
@@ -142,6 +153,8 @@ export const GameStateSchema = z.object({
     nightlyTime: z.string(),
     dayNumber: z.number().int(),
     onboarded: z.boolean(),
+    /** True while BODY quests are generated as home sessions (Tier I). */
+    homePathActive: z.boolean(),
   }),
   scores: z.array(
     z.object({
@@ -346,6 +359,20 @@ export const ChainStartResponseSchema = z.object({
 
 /** Unseen notices, oldest first, at most NOTICE_PAGE_SIZE; `hasMore` when newer unseen ones are waiting after them. */
 export const NOTICE_PAGE_SIZE = 50;
+/**
+ * `?kinds=a,b` / `?noticeKinds=a,b`: only these notice kinds are returned and paged. Absent means every kind; names
+ * this server does not know are dropped, so a list of only unknown kinds matches nothing.
+ */
+export const NoticeKindsParamSchema = z
+  .string()
+  .max(500)
+  .transform((raw) => {
+    const known = new Set<string>(NOTICE_KINDS);
+    return [...new Set(raw.split(",").map((k) => k.trim()))].filter((k): k is NoticeKind => known.has(k));
+  })
+  .optional();
+export const NoticeListQuerySchema = z.object({ kinds: NoticeKindsParamSchema });
+export const StateQuerySchema = z.object({ noticeKinds: NoticeKindsParamSchema });
 export const NoticeListResponseSchema = z.object({ items: z.array(NoticeSchema), hasMore: z.boolean() });
 
 export const NoticesSeenRequestSchema = z.object({
@@ -624,4 +651,22 @@ export const CompletionSummarySchema = z.object({
   completionRate: z.number().int(),
   byDomain: z.array(z.object({ domain: z.string(), ...StatusCountSchema })),
   daily: z.array(z.object({ day: z.string(), ...StatusCountSchema })),
+});
+
+// --- comeback and home path -------------------------------------------------
+
+export const ComebackResponseSchema = z.object({
+  active: z
+    .object({
+      gapDays: z.number().int(),
+      checklist: z.array(z.object({ key: z.string(), label: z.string(), done: z.boolean() })),
+    })
+    .nullable(),
+  returnerCount: z.number().int(),
+});
+export type ComebackResponse = z.infer<typeof ComebackResponseSchema>;
+
+export const HomePathRequestSchema = z.object({
+  active: z.boolean(),
+  clientId: ClientIdSchema.optional(),
 });

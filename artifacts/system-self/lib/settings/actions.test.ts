@@ -49,6 +49,7 @@ const profileBody = {
   nightlyTime: "22:00",
   dayNumber: 1,
   onboarded: true,
+  homePathActive: false,
 };
 
 test("requestEmailVerification posts to the request endpoint", async () => {

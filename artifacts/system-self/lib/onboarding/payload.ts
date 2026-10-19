@@ -22,6 +22,8 @@ export interface OnboardingDraft {
   stoppedBefore: string;
   identity: IdentitySetting;
   timezone: string;
+  /** "Haven't trained in a while? START AT HOME FIRST": begin on the home path. */
+  homePath?: boolean;
 }
 
 /** The request body (schema input shape: the server canonicalises the timezone). */
@@ -35,6 +37,7 @@ export interface OnboardingPayload {
   nightlyTime: string;
   timezone: string;
   clientId?: string;
+  homePathActive?: boolean;
 }
 
 /** The zone to onboard with: the device's, else the account's, else UTC. */
@@ -53,6 +56,7 @@ export function buildOnboardingPayload(draft: OnboardingDraft, clientId?: string
     morningTime: DEFAULT_MORNING_TIME,
     nightlyTime: DEFAULT_NIGHTLY_TIME,
     timezone: draft.timezone,
+    ...(draft.homePath ? { homePathActive: true } : {}),
     ...(clientId ? { clientId } : {}),
   };
 }
@@ -96,5 +100,6 @@ export function draftFromParams(params: Params, timezone: string): OnboardingDra
     stoppedBefore: one(params.stoppedBefore),
     identity: isIdentity(identity) ? identity : "semi-public",
     timezone,
+    homePath: one(params.homePath) === "1",
   };
 }

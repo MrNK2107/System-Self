@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { notices, type Db } from "@workspace/db";
-import { NoticesSeenRequestSchema } from "@workspace/contracts";
+import { NoticeListQuerySchema, NoticesSeenRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
 import { unseenNotices } from "../services/state";
 
@@ -9,7 +9,8 @@ export function noticesRoutes(db: Db): IRouter {
   const router = Router();
 
   router.get("/notices", async (req, res) => {
-    const { items, hasMore } = await unseenNotices(db, req.user!.id);
+    const { kinds } = NoticeListQuerySchema.parse(req.query);
+    const { items, hasMore } = await unseenNotices(db, req.user!.id, kinds);
     res.json({ items, hasMore });
   });
 

@@ -41,6 +41,11 @@ export const profiles = pgTable("profiles", {
   onboardingRatings: jsonb("onboarding_ratings").notNull(),
   rankFreezeUntil: date("rank_freeze_until", { mode: "string" }),
   rankFreezeUsedMonth: text("rank_freeze_used_month"), // YYYY-MM
+  /** Home path (Tier I): BODY quests are home sessions until `homeSessions` reaches the unlock count. */
+  homePathActive: boolean("home_path_active").notNull().default(false),
+  homeSessions: integer("home_sessions").notNull().default(0),
+  /** Completed comeback checklists ("Returned ×n"). Recognition only, never a score. */
+  returnerCount: integer("returner_count").notNull().default(0),
 });
 
 export const domainScores = pgTable(
@@ -282,4 +287,18 @@ export const analyticsEvents = pgTable(
     createdAt: ts("created_at").defaultNow().notNull(),
   },
   (t) => [index("analytics_events_name_created_idx").on(t.name, t.createdAt)],
+);
+
+/** A return after 5+ empty days. The checklist is recognition only: completing it pays no score. */
+export const comebacks = pgTable(
+  "comebacks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: userIdCol(),
+    startedOn: date("started_on", { mode: "string" }).notNull(),
+    gapDays: integer("gap_days").notNull(),
+    checklist: jsonb("checklist").notNull().default(sql`'[]'::jsonb`),
+    completedAt: ts("completed_at"),
+  },
+  (t) => [uniqueIndex("comebacks_user_started_idx").on(t.userId, t.startedOn)],
 );

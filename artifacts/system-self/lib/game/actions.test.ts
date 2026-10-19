@@ -8,8 +8,10 @@ import {
   completeQuest,
   discardFailedEntries,
   enqueueLog,
+  fetchComeback,
   fetchGameState,
   fetchNotices,
+  setHomePath,
   markNoticesSeen,
   newClientId,
   refuseQuest,
@@ -17,7 +19,8 @@ import {
   startChain,
   validGameState,
 } from "./actions";
-import { chainsKey, deferralsKey, gameStateKey, invalidateGame, logsKey, noticesKey, questsKey, shadowTakeoversKey } from "./keys";
+import { NOTICE_KINDS_PARAM } from "./notices";
+import { chainsKey, comebackKey, deferralsKey, gameStateKey, invalidateGame, logsKey, noticesKey, questsKey, shadowTakeoversKey } from "./keys";
 
 function memoryStorage(): KeyValueStorage {
   const data = new Map<string, string>();
@@ -177,6 +180,7 @@ const state = {
     nightlyTime: "21:00",
     dayNumber: 1,
     onboarded: true,
+    homePathActive: false,
   },
   scores: [{ domain: "BODY", score: 20, streak: 0, lastLogDate: null }],
   tierProgress: 40,
@@ -192,6 +196,8 @@ const state = {
 test("fetchGameState accepts notice kinds this build does not know (they are skipped later, not a parse error)", async () => {
   const api = fakeApi(() => state);
   const s = await fetchGameState(api);
+  // Always asks only for the kinds this build renders, so an old client never starves on newer kinds.
+  assert.equal(api.calls[0]!.path, `/api/state?noticeKinds=${NOTICE_KINDS_PARAM}`);
   assert.equal(s.unseenNotices.length, 1);
   assert.equal(s.tierProgress, 40);
 });
@@ -199,6 +205,7 @@ test("fetchGameState accepts notice kinds this build does not know (they are ski
 test("fetchNotices and markNoticesSeen use GET /api/notices and POST /api/notices/seen (uuid ids only)", async () => {
   const api = fakeApi((c) => (c.method === "GET" ? { items: [{ id: "n", kind: "nope" }], hasMore: true } : null));
   const page = await fetchNotices(api);
+  assert.equal(api.calls[0]!.path, `/api/notices?kinds=${NOTICE_KINDS_PARAM}`);
   assert.equal(page.hasMore, true);
   assert.equal(page.items.length, 1);
 
@@ -263,7 +270,7 @@ test("retryFailedEntries re-queues failed items; discardFailedEntries drops them
 test("invalidateGame invalidates state, quests and notices (plus logs, chains and the ledger views) for the user", async () => {
   const keys: unknown[] = [];
   await invalidateGame({ invalidateQueries: async (f: { queryKey: readonly unknown[] }) => void keys.push(f.queryKey) }, "u1");
-  assert.deepEqual(keys, [gameStateKey("u1"), questsKey("u1"), noticesKey("u1"), logsKey("u1"), chainsKey("u1"), deferralsKey("u1"), shadowTakeoversKey("u1")]);
+  assert.deepEqual(keys, [gameStateKey("u1"), questsKey("u1"), noticesKey("u1"), logsKey("u1"), chainsKey("u1"), deferralsKey("u1"), shadowTakeoversKey("u1"), comebackKey("u1")]);
 });
 
 test("validGameState passes a contract-valid cached state through unchanged and rejects a stale shape", () => {
@@ -272,4 +279,30 @@ test("validGameState passes a contract-valid cached state through unchanged and 
   assert.equal(validGameState(stale), undefined);
   assert.equal(validGameState({ ...state, scores: "nope" }), undefined);
   assert.equal(validGameState(undefined), undefined);
+});
+
+test("fetchComeback reads GET /api/comeback", async () => {
+  const api = fakeApi(() => ({ active: { gapDays: 6, checklist: [{ key: "body_session", label: "Log one BODY session", done: false }] }, returnerCount: 1 }));
+  const c = await fetchComeback(api);
+  assert.equal(api.calls[0]!.path, "/api/comeback");
+  assert.equal(c.active?.gapDays, 6);
+  assert.equal(c.returnerCount, 1);
+});
+
+test("setHomePath flushes the outbox first, then POSTs the flag with an idempotency key", async () => {
+  const profile = {
+    username: "a", codename: "C", rank: "E", rankSince: "2026-10-01T00:00:00.000Z", identitySetting: "anonymous",
+    primaryGoal: "Build a disciplined life", biggestWeakness: "BODY", morningTime: "07:00", nightlyTime: "21:00",
+    dayNumber: 1, onboarded: true, homePathActive: true,
+  };
+  const api = fakeApi(() => profile);
+  const blocked = await setHomePath(api, { flushBeforeMutation: async () => false }, true, "hp-0");
+  assert.deepEqual(blocked, { ok: false, reason: "sync_pending" });
+  assert.equal(api.calls.length, 0);
+  const res = await setHomePath(api, { flushBeforeMutation: async () => true }, true, "hp-1");
+  assert.equal(res.ok && res.value.homePathActive, true);
+  assert.equal(api.calls[0]!.method, "POST");
+  assert.equal(api.calls[0]!.path, "/api/profile/home-path");
+  assert.deepEqual(api.calls[0]!.opts.body, { active: true, clientId: "hp-1" });
+  assert.equal(api.calls[0]!.opts.idempotencyKey, "hp-1");
 });

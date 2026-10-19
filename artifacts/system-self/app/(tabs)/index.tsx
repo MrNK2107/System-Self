@@ -20,7 +20,7 @@ import { RankBadge } from "@/components/RankBadge";
 import { SystemMessage } from "@/components/SystemMessage";
 import { LogModal } from "@/components/LogModal";
 import { useQuery } from "@tanstack/react-query";
-import { useGameUserId } from "@/hooks/useGameState";
+import { useComebackQuery, useGameUserId } from "@/hooks/useGameState";
 import { api } from "@/lib/api/client";
 import { briefingKey } from "@/lib/game/keys";
 import { fallbackMessage, msUntilLocalMidnight, tryFetchMessage } from "@/lib/game/messages";
@@ -29,6 +29,7 @@ import { useNightlyDebrief } from "@/hooks/useNightlyDebrief";
 import { ShadowConfrontationModal } from "@/components/ShadowConfrontationModal";
 import { RefuseSheet } from "@/components/RefuseSheet";
 import { FloorQuestCard } from "@/components/FloorQuestCard";
+import { ComebackCard } from "@/components/ComebackCard";
 import { shadowTallyLine } from "@/lib/game/adherence";
 import { missedSlotLine, missedSlotQuest, slotStateStale } from "@/lib/game/slots";
 import type { Quest, RefuseOutcome } from "@/context/AppContext";
@@ -161,6 +162,7 @@ export default function Dashboard() {
   const userId = useGameUserId();
   const { user, domainScores, quests, shadowSelf, trajectory, loading, loadError, refresh, refuseQuest, questsUpdatedAt } = useApp();
   const { pendingDebrief, acknowledgeDebrief, debriefText } = useNightlyDebrief();
+  const comeback = useComebackQuery().data?.active ?? null;
 
   const [logVisible, setLogVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -322,6 +324,8 @@ export default function Dashboard() {
             </View>
           </View>
         )}
+
+        {comeback && <ComebackCard gapDays={comeback.gapDays} checklist={comeback.checklist} />}
 
         {floorOffer?.floor && (
           <FloorQuestCard

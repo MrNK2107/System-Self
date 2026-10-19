@@ -55,6 +55,9 @@ test("NoticeSchema is a union by kind with the exact payload the server writes f
     streak_break: { domains: [{ domain: "BODY", lostStreak: 3 }], penalty: 2 },
     shadow_activated: { gap: 12, codename: "SHADOW // ALICE_1" },
     shadow_resolved: { codename: "SHADOW // ALICE_1" },
+    comeback: { gapDays: 6, line: "You returned. Most don't.", offerHomePath: false },
+    returner_mark: { count: 1, line: "Returned ×1." },
+    gym_unlocked: { line: "Tier I cleared. The gym is open to you now." },
   };
   for (const kind of NOTICE_KINDS) {
     assert.equal(NoticeSchema.parse({ ...base, kind, payload: payloads[kind] }).kind, kind);

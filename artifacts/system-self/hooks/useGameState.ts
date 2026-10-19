@@ -4,9 +4,9 @@ import { useEffect, useSyncExternalStore } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api/client";
 import { getOutbox, type FailedOutboxItem, type OutboxItem } from "@/lib/api/outbox";
-import { fetchChains, fetchGameState, fetchLogs, fetchQuests, validGameState } from "@/lib/game/actions";
+import { fetchChains, fetchComeback, fetchGameState, fetchLogs, fetchQuests, validGameState } from "@/lib/game/actions";
 import { fetchDeferrals, fetchShadowTakeovers } from "@/lib/game/adherence";
-import { chainsKey, deferralsKey, gameStateKey, logsKey, questsKey, shadowTakeoversKey } from "@/lib/game/keys";
+import { chainsKey, comebackKey, deferralsKey, gameStateKey, logsKey, questsKey, shadowTakeoversKey } from "@/lib/game/keys";
 
 /** The signed-in user's id, or null. Game queries run only while this is set. */
 export function useGameUserId(): string | null {
@@ -59,6 +59,12 @@ export function useDeferralsQuery(days = 30) {
 export function useShadowTakeoversQuery() {
   const userId = useGameUserId();
   return useQuery({ queryKey: shadowTakeoversKey(userId), queryFn: () => fetchShadowTakeovers(api), enabled: !!userId });
+}
+
+/** Today's comeback checklist; evaluating it can complete the comeback (a returner mark, never points). */
+export function useComebackQuery() {
+  const userId = useGameUserId();
+  return useQuery({ queryKey: comebackKey(userId), queryFn: () => fetchComeback(api), enabled: !!userId });
 }
 
 export interface OutboxSnapshot {

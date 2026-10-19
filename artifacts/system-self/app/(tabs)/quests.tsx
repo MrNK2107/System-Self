@@ -629,7 +629,7 @@ export default function QuestsScreen() {
         visible={slotting !== null}
         questTitle={slotting?.title ?? ""}
         current={slotting?.slotStart && slotting.slotEnd ? { slotStart: slotting.slotStart, slotEnd: slotting.slotEnd } : null}
-        suggestions={quiet.data ? quietChips(quiet.data.suggestions) : undefined}
+        suggestions={quiet.data ? quietChips(quiet.data.suggestions, new Date().getDay()) : undefined}
         hint={quietHint(quiet.data)}
         busy={slotBusy}
         onCancel={() => setSlotting(null)}

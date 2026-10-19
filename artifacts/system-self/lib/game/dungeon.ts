@@ -14,7 +14,6 @@ export type BriefingBlock = GymBriefing["blocks"][number];
 export type CrowdLevel = "quiet" | "normal" | "packed";
 
 const WEEKDAY_NAMES = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
-const WEEKDAY_SHORT = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
 /** `DUNGEON BRIEFING — MONDAY` for the briefing's local date (YYYY-MM-DD). */
 export function briefingHeader(date: string): string {
@@ -39,9 +38,17 @@ export const CROWD_OPTIONS: { label: string; level: CrowdLevel | null }[] = [
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Slot-picker chips for the quiet-hour suggestions: `TUE 07:00` that start the window at 07:00. */
-export function quietChips(suggestions: QuietHours["suggestions"]): { label: string; start: string }[] {
-  return suggestions.map((s) => ({ label: `${WEEKDAY_SHORT[s.weekday]} ${pad(s.hour)}:00`, start: `${pad(s.hour)}:00` }));
+/**
+ * Slot-picker chips for the quiet-hour suggestions of one weekday (0 = Sunday, the user's local "today"): labelled
+ * by hour alone, e.g. `07:00`, and starting the window then. Suggestions for other weekdays are not offered.
+ */
+export function quietChips(
+  suggestions: QuietHours["suggestions"],
+  weekday: number,
+): { label: string; start: string }[] {
+  return suggestions
+    .filter((s) => s.weekday === weekday)
+    .map((s) => ({ label: `${pad(s.hour)}:00`, start: `${pad(s.hour)}:00` }));
 }
 
 /** "{needed} more scout reports needed" while the user has too few reports; otherwise null. */

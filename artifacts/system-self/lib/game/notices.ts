@@ -12,7 +12,13 @@ export const NOTICE_ORDER: readonly NoticeKind[] = [
   "shadow_activated",
   "shadow_resolved",
   "quest_failed",
+  "comeback",
+  "returner_mark",
+  "gym_unlocked",
 ];
+
+/** Sent as `?kinds=` / `?noticeKinds=` with every notice read: the server returns and pages only kinds this build renders. */
+export const NOTICE_KINDS_PARAM: string = NOTICE_ORDER.join(",");
 
 /**
  * Keeps the notices this build understands. Unknown kinds (from a newer server) and malformed payloads are
@@ -74,6 +80,7 @@ export type NoticeView =
   | { modal: "milestone"; milestone: PendingMilestone }
   | { modal: "streak_break"; data: StreakBreakData }
   | { modal: "failure"; failures: FailureItem[] }
+  | { modal: "comeback"; gapDays: number; line: string; offerHomePath: boolean }
   | { modal: "system"; label: string; title: string; body: string; tone: "alert" | "info" };
 
 const MILESTONE_TIER_VALUES: readonly number[] = [60, 70, 80, 90, 100];
@@ -133,6 +140,29 @@ export function noticeView(group: NoticeGroup): NoticeView {
         label: "SHADOW SELF RESOLVED",
         title: first.payload.codename,
         body: "You have overtaken your shadow in every domain. It returns to dormancy. It will wait.",
+      };
+    case "comeback":
+      return {
+        modal: "comeback",
+        gapDays: first.payload.gapDays,
+        line: first.payload.line,
+        offerHomePath: first.payload.offerHomePath,
+      };
+    case "returner_mark":
+      return {
+        modal: "system",
+        tone: "info",
+        label: "RETURNER",
+        title: first.payload.line,
+        body: "Recorded. It pays nothing and it cannot be taken back.",
+      };
+    case "gym_unlocked":
+      return {
+        modal: "system",
+        tone: "info",
+        label: "TIER I CLEARED",
+        title: "The gym is open to you now.",
+        body: first.payload.line,
       };
     case "quest_failed":
       return {

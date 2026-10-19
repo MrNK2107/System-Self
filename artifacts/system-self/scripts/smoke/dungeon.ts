@@ -99,7 +99,7 @@ async function main() {
   assert.equal(after.needed, 0);
   assert.ok(after.suggestions.length >= 1, "suggestions after 3 reports");
   assert.ok(after.suggestions.length <= 3);
-  step("quiet hours after reports", { chips: quietChips(after.suggestions) });
+  step("quiet hours after reports", { chips: quietChips(after.suggestions, new Date().getDay()) });
   console.log("SMOKE PASSED");
 }
 

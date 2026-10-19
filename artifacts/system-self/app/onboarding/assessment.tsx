@@ -143,6 +143,7 @@ export default function AssessmentScreen() {
   const [showCustom, setShowCustom] = useState(false);
   const [weakness, setWeakness] = useState<Domain | null>(null);
   const [stoppedBefore, setStoppedBefore] = useState("");
+  const [homeFirst, setHomeFirst] = useState(false);
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
@@ -167,6 +168,7 @@ export default function AssessmentScreen() {
         primaryGoal,
         weakness: weakness ?? "DISCIPLINE",
         stoppedBefore: stoppedBefore.trim(),
+        ...(homeFirst ? { homePath: "1" } : {}),
       },
     });
   };
@@ -359,6 +361,26 @@ export default function AssessmentScreen() {
             {stoppedBefore.length}/{MAX_STOPPED_BEFORE_LENGTH}
           </Text>
         </View>
+
+        {/* Soft opt-in: BODY quests start as home sessions; the gym is never blocked. */}
+        <TouchableOpacity
+          style={[s.weaknessSection, { borderColor: homeFirst ? "#E05555" : colors.border, backgroundColor: homeFirst ? "#E0555510" : colors.card }]}
+          onPress={() => setHomeFirst((v) => !v)}
+          activeOpacity={0.8}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: homeFirst }}
+          accessibilityLabel="Haven't trained in a while? Start at home first"
+        >
+          <View style={s.goalHeader}>
+            <Feather name={homeFirst ? "check-square" : "square"} size={14} color={homeFirst ? "#E05555" : colors.mutedForeground} />
+            <Text style={[s.goalHeaderText, { color: homeFirst ? "#E05555" : colors.mutedForeground }]}>
+              Haven&apos;t trained in a while? START AT HOME FIRST
+            </Text>
+          </View>
+          <Text style={[s.goalSub, { color: colors.mutedForeground }]}>
+            Your BODY quests are home sessions until you finish six. The gym stays open to you anyway.
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
 
       {/* Footer CTA */}

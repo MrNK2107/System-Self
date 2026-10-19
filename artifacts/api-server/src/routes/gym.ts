@@ -35,6 +35,7 @@ import {
 import { withIdempotency, type HandlerResult } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
 import { applyChanges } from "../services/scoring";
+import { detectComeback } from "../services/comeback";
 import { withUserLock, type Tx } from "../services/user-lock";
 import {
   applyPersonalRecords,
@@ -356,6 +357,8 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
 
       let results: Awaited<ReturnType<typeof applyChanges>>["results"] = [];
       let notices: Awaited<ReturnType<typeof applyChanges>>["notices"] = [];
+      // Judged against the previous activity, before the log below moves lastActivityDate.
+      const comebackNotices = totalPoints > 0 ? await detectComeback(tx, userId, { logDate: today, now }) : [];
       if (totalPoints > 0) {
         for (const [bodyPart, points] of Object.entries(byBodyPart)) {
           await tx
@@ -384,7 +387,7 @@ export function gymRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
           { localDate: today, now },
         );
         results = applied.results;
-        notices = applied.notices;
+        notices = [...comebackNotices, ...applied.notices];
       }
       await rollOverDue(tx, userId, now);
       return {

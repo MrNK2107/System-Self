@@ -54,6 +54,8 @@ export interface PromptContext {
   deferralsThisWeek: number;
   /** HH:MM–HH:MM windows the user locked for active BODY quests. */
   lockedSlots: string[];
+  /** The user is on the home path (Tier I): BODY quests are home sessions. */
+  homePathActive: boolean;
   weeklyRecap?: WeeklyRecap;
 }
 
@@ -147,6 +149,7 @@ export async function buildUserContext(
     lockedSlots: active
       .filter((q) => q.domain === "BODY" && q.slotStart && q.slotEnd)
       .map((q) => `${q.slotStart}–${q.slotEnd}`),
+    homePathActive: state.profile.homePathActive,
   };
 }
 
@@ -385,7 +388,8 @@ ${RANK_INTENSITY[ctx.rank] ?? RANK_INTENSITY["E"]}
 Generate ${parts.join(", ")} for this user.
 Focus on the weakest domain (${ctx.weakestDomain}) but vary the domains across all quests.
 
-Rules:
+Rules:${ctx.homePathActive ? `
+- The user is on the home path. BODY quests must be bodyweight sessions doable at home in under 25 minutes. Use the words "home session".` : ""}
 - Each quest title is under 10 words
 - Each description is 1 sentence, specific, actionable, referencing real domain data
 - Do NOT use encouraging language — this is operational, not motivational

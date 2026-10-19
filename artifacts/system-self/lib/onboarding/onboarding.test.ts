@@ -44,6 +44,7 @@ const profile = {
   nightlyTime: "21:00",
   dayNumber: 1,
   onboarded: true,
+  homePathActive: false,
 };
 const gameState = {
   profile,
@@ -93,6 +94,16 @@ test("payload: an empty 'stopped you' answer is omitted; long text is capped at 
   const p = buildOnboardingPayload({ ...draft, stoppedBefore: "x".repeat(900) });
   assert.equal(p.stoppedBefore?.length, 500);
   assert.equal(OnboardingRequestSchema.safeParse(p).success, true);
+});
+
+test("payload: START AT HOME FIRST sends homePathActive; off omits it; the param round-trips", () => {
+  assert.equal("homePathActive" in buildOnboardingPayload(draft), false);
+  const p = buildOnboardingPayload({ ...draft, homePath: true });
+  assert.equal(p.homePathActive, true);
+  assert.equal(OnboardingRequestSchema.safeParse(p).success, true);
+  const params = { ratings: JSON.stringify(draft.ratings), primaryGoal: "Run 5km without stopping", weakness: "BODY", identity: "public" };
+  assert.equal(draftFromParams({ ...params, homePath: "1" }, "UTC")!.homePath, true);
+  assert.equal(draftFromParams(params, "UTC")!.homePath, false);
 });
 
 test("params: round trip, defaults for damage, null when out of order", () => {

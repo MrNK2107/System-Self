@@ -48,6 +48,7 @@ export function onboardingRoutes(db: Db): IRouter {
           codename: generateCodename("E"),
           onboardedAt: now,
           onboardingRatings: body.ratings,
+          homePathActive: body.homePathActive ?? false,
         });
         await tx
           .insert(domainScores)

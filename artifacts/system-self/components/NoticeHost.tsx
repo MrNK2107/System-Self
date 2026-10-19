@@ -2,6 +2,7 @@
 import React from "react";
 import { AchievementModal } from "@/components/AchievementModal";
 import { FailureModal } from "@/components/FailureModal";
+import { HomePathOffer } from "@/components/HomePathOffer";
 import { MilestoneModal } from "@/components/MilestoneModal";
 import { RankUpModal } from "@/components/RankUpModal";
 import { StreakBrokenModal } from "@/components/StreakBrokenModal";
@@ -36,6 +37,20 @@ export function NoticeHost() {
       return <StreakBrokenModal key={key} visible data={view.data} onAcknowledge={onAcknowledge} />;
     case "failure":
       return <FailureModal key={key} visible failures={view.failures} onAcknowledge={onAcknowledge} />;
+    case "comeback":
+      return view.offerHomePath ? (
+        <HomePathOffer key={key} gapDays={view.gapDays} line={view.line} onDone={onAcknowledge} />
+      ) : (
+        <SystemNoticeModal
+          key={key}
+          visible
+          label="YOU RETURNED"
+          title={view.line}
+          body={`${view.gapDays} empty days. The record stands. Finish today's checklist.`}
+          tone="info"
+          onAcknowledge={onAcknowledge}
+        />
+      );
     case "system":
       return (
         <SystemNoticeModal

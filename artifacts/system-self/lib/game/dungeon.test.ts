@@ -66,11 +66,19 @@ test("crowd sheet copy", () => {
 });
 
 test("quiet chips label weekday and hour; hint only while reports are needed", () => {
-  assert.deepEqual(quietChips([{ weekday: 2, hour: 7, quietShare: 1 }, { weekday: 0, hour: 18, quietShare: 0.5 }]), [
-    { label: "TUE 07:00", start: "07:00" },
-    { label: "SUN 18:00", start: "18:00" },
+  const sugg = [
+    { weekday: 2, hour: 7, quietShare: 1 },
+    { weekday: 0, hour: 18, quietShare: 0.5 },
+    { weekday: 2, hour: 13, quietShare: 0.75 },
+  ];
+  // Only today's local weekday, labelled by hour alone.
+  assert.deepEqual(quietChips(sugg, 2), [
+    { label: "07:00", start: "07:00" },
+    { label: "13:00", start: "13:00" },
   ]);
-  assert.deepEqual(quietChips([]), []);
+  assert.deepEqual(quietChips(sugg, 0), [{ label: "18:00", start: "18:00" }]);
+  assert.deepEqual(quietChips(sugg, 4), []);
+  assert.deepEqual(quietChips([], 2), []);
   assert.equal(quietHint({ suggestions: [], needed: 2 }), "2 more scout reports needed");
   assert.equal(quietHint({ suggestions: [], needed: 1 }), "1 more scout report needed");
   assert.equal(quietHint({ suggestions: [], needed: 0 }), null);

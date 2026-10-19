@@ -27,6 +27,7 @@ const profile: GameState["profile"] = {
   nightlyTime: "21:00",
   dayNumber: 12,
   onboarded: true,
+  homePathActive: false,
 };
 
 test("toAppUser maps profile + auth user to the old User shape", () => {

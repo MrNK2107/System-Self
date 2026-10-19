@@ -35,6 +35,7 @@ interface LogConfig {
 const LOG_TYPES: Record<Domain, { key: string; label: string }[]> = {
   BODY: [
     { key: "workout", label: "Workout" },
+    { key: "home_session", label: "Home Session" },
     { key: "sleep", label: "Sleep" },
     { key: "meal", label: "Meal" },
   ],
