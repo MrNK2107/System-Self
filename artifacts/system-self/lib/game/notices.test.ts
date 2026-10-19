@@ -418,3 +418,9 @@ test("the 18:00 deadline notice renders as a SYSTEM alert with the count", () =>
     body: "Complete them before midnight. Logged.",
   });
 });
+
+test("the deadline notice title is singular for one quest", () => {
+  const parsed = parseNotices([{ id: id(91), kind: "quest_deadline_24h", payload: { count: 1, localDate: "2026-10-19" }, createdAt: at() }]).notices;
+  const view = noticeView(nextNoticeGroup(parsed, new Set())!);
+  assert.equal(view.modal === "system" && view.title, "1 quest expires tonight.");
+});

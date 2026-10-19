@@ -882,6 +882,10 @@ export type AdherenceMetricsResponse = z.infer<typeof AdherenceMetricsResponseSc
 export const PushTokenSchema = z.string().regex(/^(Expo|Exponent)PushToken\[[^\]\s]{1,200}\]$/);
 export const PushTokenRegisterRequestSchema = z.object({ token: PushTokenSchema, platform: z.enum(["ios", "android"]) });
 
+/** "1 quest expires tonight." / "{count} quests expire tonight." (push body and in-app title share it). */
+export const questsExpireLine = (count: number): string =>
+  count === 1 ? "1 quest expires tonight." : `${count} quests expire tonight.`;
+
 /** Which system notifications the user wants. `morning` / `nightly` are the on-device reminders; `events` the server pushes. */
 export const NotificationPrefsSchema = z.object({ morning: z.boolean(), nightly: z.boolean(), events: z.boolean() });
 export type NotificationPrefs = z.infer<typeof NotificationPrefsSchema>;

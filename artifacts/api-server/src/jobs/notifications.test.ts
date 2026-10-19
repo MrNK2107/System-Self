@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { notices, noticePushes, notificationLog, notificationPrefs, pushTokens, quests } from "@workspace/db";
-import { app, assertStoredNoticesMatchContract, db, setup, skip } from "../routes/game-test-helpers";
+import request from "supertest";
+import { app, assertStoredNoticesMatchContract, auth, db, setup, skip } from "../routes/game-test-helpers";
+import { runWorkerTick } from "./run-loop";
 import { createQuestDeadlineNotices, dispatchPushes, runNotificationJobs } from "./notifications";
 import { PUSH_PRIORITY, pushCopy } from "../services/push-policy";
 import type { PushMessage, PushTicket } from "../services/push";
@@ -244,7 +246,10 @@ test("copy is verbatim", () => {
   assert.equal(c("raid_result", PAYLOADS.raid_result!), "RAID RESULT — Week 42. Your clan placed 2 of 8.");
   assert.equal(c("quest_deadline_24h", PAYLOADS.quest_deadline_24h!), "3 quests expire tonight.");
   assert.equal(c("challenge_result", PAYLOADS.challenge_result!), "Challenge resolved. You won.");
-  assert.equal(c("duo_checkin", PAYLOADS.duo_checkin!), "bob_1 is done.");
+  assert.equal(c("quest_deadline_24h", { count: 1, localDate: "2026-10-19" }), "1 quest expires tonight.");
+  assert.equal(c("duo_checkin", PAYLOADS.duo_checkin!), "Duo partner is done.");
+  assert.equal(c("duo_checkin", { handle: "bob_1", kind: "going_now" }), "Duo partner is going now.");
+  assert.equal(c("duo_checkin", { handle: "bob_1", kind: "checked_in" }), "Duo partner checked in.");
 });
 
 // --- quest_deadline_24h ---------------------------------------------------------------------------------------
@@ -305,5 +310,80 @@ test("runNotificationJobs creates the deadline notice and pushes it in the same 
   const f = fakeTransport();
   const out = await runNotificationJobs(db!, EVENING, f.transport);
   assert.equal(out.deadline, 1);
-  assert.deepEqual(f.sent.map((m) => m.body), ["1 quests expire tonight."]);
+  assert.deepEqual(f.sent.map((m) => m.body), ["1 quest expires tonight."]);
+});
+
+test("no deadline notice is created from 23:00 local", { skip }, async () => {
+  const u = await user();
+  await db!.insert(quests).values(quest(u.id));
+  assert.equal(await createQuestDeadlineNotices(db!, new Date("2026-10-19T17:30:00Z")), 0); // 23:00 IST
+  assert.equal(await createQuestDeadlineNotices(db!, new Date("2026-10-19T17:29:00Z")), 1); // 22:59 IST
+});
+
+test("a deadline notice from yesterday's local date is skipped, not pushed, at the next day's first tick", { skip }, async () => {
+  const u = await user();
+  const n = await notice(u.id, "quest_deadline_24h", new Date("2026-10-19T18:29:30Z")); // 23:59:30 IST
+  const f = fakeTransport();
+  await dispatchPushes(db!, new Date("2026-10-19T18:30:30Z"), f.transport); // 00:00:30 IST next day
+  assert.equal(f.sent.length, 0);
+  assert.equal((await db!.select().from(notificationLog)).length, 0);
+  const [d] = await db!.select().from(noticePushes).where(eq(noticePushes.noticeId, n.id));
+  assert.equal(d!.decision, "skipped");
+});
+
+test("turning a reminder off after it fired keeps its slot reserved for the day", { skip }, async () => {
+  const clock = { now: NOW }; // 13:30 IST: the 06:30 morning reminder has fired, the 21:30 nightly has not
+  const a = app({ now: () => clock.now });
+  const u = await setup(a, { email: "p@example.com", username: "p_1" });
+  await db!.insert(pushTokens).values({ userId: u.id, token: "ExponentPushToken[p]", platform: "ios" });
+  const put = (b: object) => request(a).put("/api/notifications/prefs").set(auth(u.token)).send(b);
+  assert.equal((await put({ morning: false, nightly: false })).status, 200);
+  const log = await db!.select().from(notificationLog).where(eq(notificationLog.userId, u.id));
+  assert.deepEqual(log.map((l) => [l.kind, l.localDate]), [["reminder_morning", "2026-10-19"]]);
+  // Repeating the PUT does not add a second row.
+  await put({ morning: false });
+  assert.equal((await db!.select().from(notificationLog).where(eq(notificationLog.userId, u.id))).length, 1);
+  // Both reminders are off, one is reserved: 2 event slots left today.
+  for (const k of ["rank_change", "shadow_activated", "rival_passed"]) await notice(u.id, k);
+  const f = fakeTransport();
+  await dispatchPushes(db!, NOW, f.transport);
+  assert.deepEqual(kindsSent(f.sent), ["rank_change", "shadow_activated"]);
+});
+
+test("turning a reminder back on counts its slot once, never twice", { skip }, async () => {
+  const a = app({ now: () => NOW });
+  const u = await setup(a, { email: "q@example.com", username: "q_1" });
+  await db!.insert(pushTokens).values({ userId: u.id, token: "ExponentPushToken[q]", platform: "ios" });
+  const put = (b: object) => request(a).put("/api/notifications/prefs").set(auth(u.token)).send(b);
+  await put({ morning: false });
+  await put({ morning: true });
+  for (const k of ["rank_change", "shadow_activated"]) await notice(u.id, k);
+  const f = fakeTransport();
+  await dispatchPushes(db!, NOW, f.transport);
+  assert.deepEqual(kindsSent(f.sent), ["rank_change"]); // morning + nightly on: one event slot
+});
+
+test("an off-toggle before the reminder's time reserves nothing", { skip }, async () => {
+  const a = app({ now: () => NOW });
+  const u = await setup(a, { email: "r@example.com", username: "r_1" });
+  await request(a).put("/api/notifications/prefs").set(auth(u.token)).send({ nightly: false }); // 21:30 not reached
+  assert.equal((await db!.select().from(notificationLog)).length, 0);
+});
+
+test("the worker prunes push decisions and log rows older than 30 days", { skip }, async () => {
+  const u = await user();
+  const old = new Date(NOW.getTime() - 31 * 86_400_000);
+  const fresh = new Date(NOW.getTime() - 29 * 86_400_000);
+  const [oldN, freshN] = [await notice(u.id, "rank_change", old), await notice(u.id, "rank_change", fresh)];
+  await db!.insert(noticePushes).values([
+    { noticeId: oldN.id, userId: u.id, decision: "sent", decidedAt: old },
+    { noticeId: freshN.id, userId: u.id, decision: "sent", decidedAt: fresh },
+  ]);
+  await db!.insert(notificationLog).values([
+    { userId: u.id, localDate: "2026-09-18", kind: "rank_change", sentAt: old },
+    { userId: u.id, localDate: "2026-09-20", kind: "rank_change", sentAt: fresh },
+  ]);
+  await runWorkerTick(db!, NOW, undefined, 200, fakeTransport().transport);
+  assert.deepEqual((await db!.select().from(noticePushes)).map((r) => r.noticeId), [freshN.id]);
+  assert.deepEqual((await db!.select().from(notificationLog)).map((r) => r.localDate), ["2026-09-20"]);
 });

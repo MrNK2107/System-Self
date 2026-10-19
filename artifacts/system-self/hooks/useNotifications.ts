@@ -10,6 +10,7 @@ import { api } from "@/lib/api/client";
 import {
   cancelOurReminders,
   fetchNotificationPrefs,
+  initNotifications,
   notificationPrefsKey,
   onPermissionRequested,
   registerPushToken,
@@ -42,6 +43,10 @@ export function useNotificationSync(): void {
       sub.remove();
       off();
     };
+  }, []);
+
+  useEffect(() => {
+    void initNotifications();
   }, []);
 
   useEffect(() => {

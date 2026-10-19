@@ -74,7 +74,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
     router.use(duoRoutes(db, deps.now));
     router.use(financeRoutes(db, deps.now));
     router.use(customDomainsRoutes(db, deps.now));
-    router.use(pushRoutes(db));
+    router.use(pushRoutes(db, deps.now));
   }
   return router;
 }

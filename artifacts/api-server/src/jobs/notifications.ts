@@ -23,6 +23,10 @@ export const DEADLINE_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "notify:q
 export const DISPATCH_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "notify:dispatch" } as const;
 /** The deadline notice is written from this local hour onward. */
 export const DEADLINE_LOCAL_HOUR = 18;
+/** ...and not from this local hour on (a notice written at 23:59 would push on the next day). */
+export const DEADLINE_LAST_LOCAL_HOUR = 23;
+/** Reserved log rows (a reminder switched off after it fired) use these kinds. */
+export const RESERVED_LOG_KIND = { morning: "reminder_morning", nightly: "reminder_nightly" } as const;
 /** Users handled per dispatch pass; the rest wait for the next tick. */
 export const DISPATCH_BATCH = 200;
 
@@ -46,7 +50,8 @@ export async function createQuestDeadlineNotices(db: Db, now: Date): Promise<num
     );
   let created = 0;
   for (const c of candidates) {
-    if (localHour(now, c.timezone) < DEADLINE_LOCAL_HOUR) continue;
+    const hour = localHour(now, c.timezone);
+    if (hour < DEADLINE_LOCAL_HOUR || hour >= DEADLINE_LAST_LOCAL_HOUR) continue;
     const date = localDate(now, c.timezone);
     const end = endOfLocalDay(date, c.timezone);
     try {
@@ -124,7 +129,9 @@ async function decideUser(db: Db, userId: string, now: Date): Promise<PushMessag
 
     const decisions = new Map<string, "sent" | "dropped" | "skipped">();
     const eligible = rows.filter((r) => {
-      const ok = r.seenAt === null && isPushKind(r.kind);
+      // A deadline notice is about its own local day: once that day is over it is stale.
+      const stale = r.kind === "quest_deadline_24h" && (r.payload as { localDate?: string }).localDate !== date;
+      const ok = r.seenAt === null && isPushKind(r.kind) && !stale;
       if (!ok) decisions.set(r.id, "skipped");
       return ok;
     });
@@ -132,11 +139,15 @@ async function decideUser(db: Db, userId: string, now: Date): Promise<PushMessag
     if (!prefs.events || tokens.length === 0) {
       for (const r of eligible) decisions.set(r.id, "skipped");
     } else {
-      const [used] = await tx
-        .select({ n: count() })
+      const logged = await tx
+        .select({ kind: notificationLog.kind })
         .from(notificationLog)
         .where(and(eq(notificationLog.userId, userId), eq(notificationLog.localDate, date)));
-      const free = Math.max(0, Math.min(DAILY_CAP, eventSlots(prefs)) - (used?.n ?? 0));
+      // Reserved rows only count while their reminder is off (while on, eventSlots already reserves it).
+      const used = logged.filter(
+        (l) => !(l.kind === RESERVED_LOG_KIND.morning && prefs.morning) && !(l.kind === RESERVED_LOG_KIND.nightly && prefs.nightly),
+      ).length;
+      const free = Math.max(0, Math.min(DAILY_CAP, eventSlots(prefs)) - used);
       const ranked = rankCandidates(eligible.map((r) => ({ ...r, kind: r.kind as PushKind })));
       for (const [i, r] of ranked.entries()) {
         if (i < free) picked.push(r);

@@ -4,6 +4,7 @@ import {
   CHALLENGE_RESPOND_HOURS,
   CHALLENGE_WIN_DELTA,
   NoticeSchema,
+  questsExpireLine,
   type Notice,
   type NoticeKind,
 } from "@workspace/contracts";
@@ -263,7 +264,7 @@ export function noticeView(group: NoticeGroup): NoticeView {
     }
     case "quest_deadline_24h": {
       const n = first.payload.count;
-      return { modal: "system", tone: "alert", label: "QUESTS EXPIRING", title: `${n} quests expire tonight.`, body: "Complete them before midnight. Logged." };
+      return { modal: "system", tone: "alert", label: "QUESTS EXPIRING", title: questsExpireLine(n), body: "Complete them before midnight. Logged." };
     }
     case "challenge_received": {
       const p = first.payload;

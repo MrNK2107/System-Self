@@ -1,5 +1,5 @@
 // Pure push policy: which notice kinds push, their priority, the daily cap and the verbatim copy.
-import type { NoticeKind, NoticePayload } from "@workspace/contracts";
+import { questsExpireLine, type NoticeKind, type NoticePayload } from "@workspace/contracts";
 
 /** Notice kinds that may become a push, highest priority first. Everything else stays in-app only. */
 export const PUSH_PRIORITY = [
@@ -55,14 +55,15 @@ export function pushCopy<K extends PushKind>(kind: K, payload: NoticePayload<K>)
       return `RAID RESULT — Week ${p.week}. Your clan placed ${p.position} of ${p.count}.`;
     }
     case "quest_deadline_24h":
-      return `${(payload as NoticePayload<"quest_deadline_24h">).count} quests expire tonight.`;
+      return questsExpireLine((payload as NoticePayload<"quest_deadline_24h">).count);
     case "challenge_result": {
       const o = (payload as NoticePayload<"challenge_result">).outcome;
       return o === "win" ? "Challenge resolved. You won." : o === "loss" ? "Challenge resolved. You lost." : "Challenge resolved. A draw.";
     }
     case "duo_checkin": {
       const p = payload as NoticePayload<"duo_checkin">;
-      return p.kind === "going_now" ? `${p.handle} is going now.` : p.kind === "checked_in" ? `${p.handle} checked in.` : `${p.handle} is done.`;
+      // No handle on a lock screen: the in-app notice names the partner.
+      return p.kind === "going_now" ? "Duo partner is going now." : p.kind === "checked_in" ? "Duo partner checked in." : "Duo partner is done.";
     }
   }
 }

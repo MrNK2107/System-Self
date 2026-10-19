@@ -62,6 +62,17 @@ async function configure(N: Native): Promise<void> {
   }
 }
 
+/** Root-mount setup: foreground handler and Android channel. Never prompts for permission. Safe to call repeatedly. */
+export async function initNotifications(): Promise<void> {
+  const N = loadNative();
+  if (!N) return;
+  try {
+    await configure(N);
+  } catch {
+    configured = false;
+  }
+}
+
 export interface PermissionState {
   status: "granted" | "denied" | "undetermined";
   canAskAgain: boolean;

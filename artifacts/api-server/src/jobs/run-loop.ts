@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { inArray, lt } from "drizzle-orm";
-import { idempotencyKeys, userDayState, type Db } from "@workspace/db";
+import { idempotencyKeys, noticePushes, notificationLog, userDayState, type Db } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { claimDueUsers, ensureRolledOver } from "../services/rollover";
 import { runSocialJobs } from "./social";
@@ -10,6 +10,8 @@ import { env } from "../lib/env";
 
 export const WORKER_BATCH_SIZE = 200;
 const defaultPushTransport = () => createExpoTransport({ accessToken: env.EXPO_ACCESS_TOKEN });
+/** Push decisions and the push log only matter for the day cap; kept this long for support. */
+export const PUSH_LOG_TTL_MS = 30 * 86_400_000;
 export const IDEMPOTENCY_KEY_TTL_MS = 7 * 86_400_000;
 
 /**
@@ -56,6 +58,9 @@ export async function runWorkerTick(
       logger.error({ err }, "Notification jobs failed");
     }
   }
+  const logCutoff = new Date(now.getTime() - PUSH_LOG_TTL_MS);
+  await db.delete(noticePushes).where(lt(noticePushes.decidedAt, logCutoff));
+  await db.delete(notificationLog).where(lt(notificationLog.sentAt, logCutoff));
   await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(now.getTime() - IDEMPOTENCY_KEY_TTL_MS)));
   return { processed, claimed: ids.length };
 }
