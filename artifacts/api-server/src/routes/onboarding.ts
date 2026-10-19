@@ -10,6 +10,7 @@ import {
 } from "@workspace/engine";
 import { OnboardingRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
+import { freePublicCodename } from "../services/social";
 import { rolloverDueAt } from "../services/rollover";
 import { buildGameState } from "../services/state";
 
@@ -35,7 +36,7 @@ export function onboardingRoutes(db: Db): IRouter {
         >;
 
         await tx.update(users).set({ timezone: body.timezone, updatedAt: now }).where(eq(users.id, userId));
-        await tx.insert(profiles).values({
+        const profile = {
           userId,
           identitySetting: body.identitySetting,
           primaryGoal: body.primaryGoal,
@@ -52,7 +53,21 @@ export function onboardingRoutes(db: Db): IRouter {
           lifeContext: body.lifeContext ?? "student",
           baselineScores: initial,
           baselineDate: today,
-        });
+        };
+        // The public codename is unique: a concurrent onboarding can take the chosen one between check and insert,
+        // so retry the insert in a savepoint (a unique violation would otherwise abort the whole transaction).
+        for (let attempt = 0; ; attempt++) {
+          const publicCodename = await freePublicCodename(tx);
+          try {
+            await tx.transaction((sp) => sp.insert(profiles).values({ ...profile, publicCodename }));
+            break;
+          } catch (err) {
+            const e = err as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } };
+            const code = e.cause?.code ?? e.code;
+            const constraint = e.cause?.constraint ?? e.constraint;
+            if (code !== "23505" || constraint !== "profiles_public_codename_unique" || attempt >= 20) throw err;
+          }
+        }
         await tx
           .insert(domainScores)
           .values(

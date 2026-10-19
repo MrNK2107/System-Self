@@ -51,6 +51,8 @@ export const profiles = pgTable("profiles", {
   /** "Past You" baseline: the ranked-domain scores at onboarding (backfilled from the first snapshot) and their date. */
   baselineScores: jsonb("baseline_scores"),
   baselineDate: date("baseline_date", { mode: "string" }),
+  /** Public codename (`USER // WORD-N`) shown to other players whenever the identity setting hides the username. Unique. */
+  publicCodename: text("public_codename").notNull().unique(),
 });
 
 export const domainScores = pgTable(

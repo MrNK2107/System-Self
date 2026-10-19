@@ -92,7 +92,7 @@ test("profiles baseline backfill takes each user's earliest daily snapshot", asy
   if (!db) return t.skip("TEST_DATABASE_URL not set");
   await resetDb(db);
   const userId = await mkUser(db);
-  await db.insert(profiles).values({ userId, primaryGoal: "g", biggestWeakness: "BODY", codename: "c", onboardingRatings: {} });
+  await db.insert(profiles).values({ userId, primaryGoal: "g", biggestWeakness: "BODY", codename: "c", publicCodename: "USER // TEST-1", onboardingRatings: {} });
   const snap = (localDate: string, BODY: number) => ({ userId, localDate, scores: { BODY }, hidden: 1, rank: "E" });
   await db.insert(dailySnapshots).values([snap("2026-10-03", 30), snap("2026-10-01", 10), snap("2026-10-02", 20)]);
   const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../migrations");

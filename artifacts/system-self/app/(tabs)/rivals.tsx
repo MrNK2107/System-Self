@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
@@ -852,9 +853,19 @@ export default function RivalsScreen() {
               {sorted.length} entities ranked live
             </Text>
           </View>
-          <View style={[styles.livePill, { borderColor: "#E0555540", backgroundColor: "#E0555510" }]}>
-            <Animated.View style={[styles.liveDot, { opacity: pulseAnim, backgroundColor: "#E05555" }]} />
-            <Text style={[styles.liveText, { color: "#E05555" }]}>LIVE</Text>
+          <View style={styles.headerRight}>
+            <TouchableOpacity
+              onPress={() => router.push("/social/search")}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Find players"
+            >
+              <Feather name="users" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+            <View style={[styles.livePill, { borderColor: "#E0555540", backgroundColor: "#E0555510" }]}>
+              <Animated.View style={[styles.liveDot, { opacity: pulseAnim, backgroundColor: "#E05555" }]} />
+              <Text style={[styles.liveText, { color: "#E05555" }]}>LIVE</Text>
+            </View>
           </View>
         </View>
 
@@ -1028,6 +1039,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { paddingHorizontal: 16, gap: 12 },
   pageHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 14 },
   title: { fontSize: 14, fontWeight: "800" as const, letterSpacing: 3 },
   subtitle: { fontSize: 10, letterSpacing: 1, marginTop: 3 },
   livePill: {

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, lt, or } from "drizzle-orm";
-import { logs, profiles, users, type Db } from "@workspace/db";
+import { logs, profiles, quests, users, type Db } from "@workspace/db";
 import { localDate, logChanges } from "@workspace/engine";
 import { LogListQuerySchema, LogRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
@@ -38,6 +38,8 @@ function decodeCursor(c: string): { at: Date; id: string } | null {
   if (!iso || !id || Number.isNaN(at.getTime())) return null;
   return { at, id };
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRouter {
   const router = Router();
@@ -101,10 +103,16 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
         afterApply: () => countHomeSession(tx, userId, { id: log!.id, logType: body.logType, forbidden, localDate: logDate }, now),
       });
       await rollOverDue(tx, userId, now);
-      // Only a floor session started from a refusal's floor offer completes that offer (floorUptake).
+      // Only a floor session started from a refusal's floor offer completes that offer (floorUptake): the id
+      // must be a quest this user refused, so a client cannot inflate the metric with arbitrary ids.
       const refusedQuestId = body.data?.refusedQuestId;
-      if (body.logType === "floor_session" && typeof refusedQuestId === "string" && refusedQuestId.length > 0) {
-        await track(tx, userId, "floor_completed", { logId: log!.id, questId: refusedQuestId });
+      if (body.logType === "floor_session" && typeof refusedQuestId === "string" && UUID.test(refusedQuestId)) {
+        const [refused] = await tx
+          .select({ id: quests.id })
+          .from(quests)
+          .where(and(eq(quests.id, refusedQuestId), eq(quests.userId, userId), eq(quests.status, "refused")))
+          .limit(1);
+        if (refused) await track(tx, userId, "floor_completed", { logId: log!.id, questId: refused.id });
       }
       return { status: 201, body: { log: toLogDto(log!), results, notices } };
     }, { preferClientId: true });

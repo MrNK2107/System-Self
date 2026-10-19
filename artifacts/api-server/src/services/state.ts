@@ -52,26 +52,16 @@ export async function unseenNotices(
   return { items: rows.slice(0, NOTICE_PAGE_SIZE).map(toNotice), hasMore: rows.length > NOTICE_PAGE_SIZE };
 }
 
-/** Builds the client-facing game state. The hidden score is used internally but never included. */
-export async function buildGameState(
+/**
+ * The user's hidden score (server-side only: callers must never put it in a response) and 7-day trajectory.
+ * Shared by the game state and the social projections, so both derive from the same domain scores.
+ */
+export async function hiddenAndTrajectory(
   db: Pick<Db, "select">,
   userId: string,
-  now: Date,
-  opts: { noticeKinds?: readonly NoticeKind[] } = {},
-): Promise<GameState | null> {
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  const [profile] = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
-  if (!user || !profile) return null;
-
-  const today = localDate(now, user.timezone);
-  const rows = await db.select().from(domainScores).where(eq(domainScores.userId, userId));
-  const byDomain = new Map(rows.map((r) => [r.domain, r]));
-  const scores = RANKED_DOMAINS.map((d) => {
-    const r = byDomain.get(d);
-    return { domain: d, score: r?.score ?? 0, streak: r?.streak ?? 0, lastLogDate: r?.lastLogDate ?? null };
-  });
-  const scoreMap = Object.fromEntries(scores.map((s) => [s.domain, s.score])) as Record<RankedDomain, number>;
-
+  today: string,
+  scoreMap: Record<RankedDomain, number>,
+): Promise<{ hidden: number; trajectory: "up" | "stable" | "down" }> {
   const resolvedQuests = await db
     .select({ status: quests.status })
     .from(quests)
@@ -92,6 +82,30 @@ export async function buildGameState(
     .orderBy(desc(dailySnapshots.localDate))
     .limit(30);
   const snapshots = recent.reverse().map((s) => ({ date: s.date, hidden: s.hidden }));
+  return { hidden, trajectory: trajectory(snapshots, hidden) };
+}
+
+/** Builds the client-facing game state. The hidden score is used internally but never included. */
+export async function buildGameState(
+  db: Pick<Db, "select">,
+  userId: string,
+  now: Date,
+  opts: { noticeKinds?: readonly NoticeKind[] } = {},
+): Promise<GameState | null> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [profile] = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
+  if (!user || !profile) return null;
+
+  const today = localDate(now, user.timezone);
+  const rows = await db.select().from(domainScores).where(eq(domainScores.userId, userId));
+  const byDomain = new Map(rows.map((r) => [r.domain, r]));
+  const scores = RANKED_DOMAINS.map((d) => {
+    const r = byDomain.get(d);
+    return { domain: d, score: r?.score ?? 0, streak: r?.streak ?? 0, lastLogDate: r?.lastLogDate ?? null };
+  });
+  const scoreMap = Object.fromEntries(scores.map((s) => [s.domain, s.score])) as Record<RankedDomain, number>;
+
+  const { hidden, trajectory: trend } = await hiddenAndTrajectory(db, userId, today, scoreMap);
 
   const [shadowRow] = await db.select().from(shadowSelves).where(eq(shadowSelves.userId, userId)).limit(1);
   const shadowState = toShadowState(shadowRow);
@@ -142,7 +156,7 @@ export async function buildGameState(
     },
     scores,
     tierProgress: tierProgress(hidden, rank),
-    trajectory: trajectory(snapshots, hidden),
+    trajectory: trend,
     shadow,
     unseenNotices: unseen.items,
     hasMoreNotices: unseen.hasMore,

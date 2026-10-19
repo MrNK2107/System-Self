@@ -120,6 +120,13 @@
       "when": 1792375482503,
       "tag": "0016_outstanding_brother_voodoo",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792376791474,
+      "tag": "0017_superb_ultimates",
+      "breakpoints": true
     }
   ]
 }

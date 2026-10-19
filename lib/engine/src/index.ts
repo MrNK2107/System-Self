@@ -12,3 +12,4 @@ export * from "./floor";
 export * from "./dungeon";
 export * from "./comeback";
 export * from "./life";
+export * from "./codenames";

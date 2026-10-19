@@ -150,8 +150,9 @@ test("shadow-takeovers lists refused BODY quests", { skip }, async () => {
 test("floor_session log scores the normal BODY delta (2.5 at streak 0) and tracks floor_completed", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
+  const refusedQuestId = (await mkQuest(id, "BODY", "Push Day")).id;
+  assert.equal((await refuse(a, token, refusedQuestId, { reason: "tomorrow" })).status, 200);
   const before = (await score(id, "BODY")).score;
-  const refusedQuestId = "11111111-1111-4111-8111-111111111111";
   const res = await request(a)
     .post("/api/logs")
     .set(auth(token))
@@ -174,6 +175,31 @@ test("floor_session log scores the normal BODY delta (2.5 at streak 0) and track
     .send({ clientId: "f2", domain: "BODY", logType: "floor_session", data: { routineId: "push_floor", minutes: 13 } });
   assert.equal(plain.status, 201);
   assert.equal((await db!.select().from(analyticsEvents).where(eq(analyticsEvents.name, "floor_completed"))).length, 1);
+});
+
+test("floor_completed needs refusedQuestId to be a quest this user refused", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const other = await setup(a, { email: "bob@example.com", username: "bob_1" });
+  const mine = await mkQuest(id, "BODY", "Push Day");
+  const active = await mkQuest(id, "BODY", "Pull Day");
+  const theirs = await mkQuest(other.id, "BODY", "Leg Day");
+  assert.equal((await refuse(a, token, mine.id, { reason: "later" })).status, 200);
+  assert.equal((await refuse(a, other.token, theirs.id, { reason: "later" })).status, 200);
+  const floor = (clientId: string, refusedQuestId: unknown) =>
+    request(a)
+      .post("/api/logs")
+      .set(auth(token))
+      .send({ clientId, domain: "BODY", logType: "floor_session", data: { routineId: "push_floor", minutes: 13, refusedQuestId } });
+  const tracked = async () => (await db!.select().from(analyticsEvents).where(eq(analyticsEvents.name, "floor_completed"))).length;
+  // random UUID, an unrefused (active) quest, another user's refused quest, a non-UUID and a non-string: scored, not tracked
+  for (const [i, bad] of [crypto.randomUUID(), active.id, theirs.id, "not-a-uuid", 42].entries()) {
+    const r = await floor(`bad-${i}`, bad);
+    assert.equal(r.status, 201);
+  }
+  assert.equal(await tracked(), 0);
+  assert.equal((await floor("good", mine.id)).status, 201);
+  assert.equal(await tracked(), 1);
 });
 
 const baseCtx: PromptContext = {

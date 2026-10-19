@@ -194,6 +194,11 @@ export default function Dashboard() {
   const activeQuests = quests.filter(q => q.status === "active");
   const completedToday = quests.filter(q => q.status === "complete").length;
   const missed = missedSlotQuest(quests, clock, computedAt, accountTz);
+  // A refuse failure belongs to the banner it was raised from: when the banner's quest changes or the banner goes, so does the line.
+  const missedId = missed?.id ?? null;
+  React.useEffect(() => {
+    setRefuseError(null);
+  }, [missedId]);
 
   const confirmRefuse = async (reason: string) => {
     if (!refusing || refuseBusy) return;
