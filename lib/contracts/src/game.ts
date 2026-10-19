@@ -294,7 +294,7 @@ export type GameState = z.infer<typeof GameStateSchema>;
 const ClientIdSchema = z.string().min(1).max(200);
 
 /** clientId prefixes only the server writes on logs (recurring income `recurring:<id>:<month>`, goal contributions `goal:<id>:<key>`). */
-export const RESERVED_CLIENT_ID_PREFIXES = ["recurring:", "goal:"] as const;
+export const RESERVED_CLIENT_ID_PREFIXES = ["recurring:", "goal:", "gym:"] as const;
 
 /** A client-chosen log clientId: never one of the server-reserved prefixes, so a client cannot pre-empt a server log. */
 export const UserLogClientIdSchema = ClientIdSchema.refine((v) => !RESERVED_CLIENT_ID_PREFIXES.some((p) => v.startsWith(p)), {
