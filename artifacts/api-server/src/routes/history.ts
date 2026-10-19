@@ -245,6 +245,8 @@ router.get("/history/scores", async (req, res) => {
     .orderBy(asc(dailySnapshots.localDate));
   const body: ScoreHistory = {
     days: win.days,
+    from: win.from,
+    to: win.to,
     maxDays: win.maxDays,
     items: rows.map((r) => ({ date: r.date, rank: r.rank, scores: r.scores as Record<string, number> })),
   };
@@ -278,6 +280,8 @@ router.get("/history/quests", async (req, res) => {
     .orderBy(asc(quests.resolvedLocalDate));
   const body: QuestTrend = {
     days: win.days,
+    from: win.from,
+    to: win.to,
     maxDays: win.maxDays,
     items: rows.map((r) => ({ date: r.date!, completed: r.completed, resolved: r.resolved })),
   };

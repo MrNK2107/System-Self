@@ -39,6 +39,7 @@ export const profiles = pgTable("profiles", {
   codename: text("codename").notNull(),
   onboardedAt: ts("onboarded_at").defaultNow().notNull(),
   onboardingRatings: jsonb("onboarding_ratings").notNull(),
+  // DEPRECATED (kept so migrations stay additive): Rank Freeze state lives in `rank_freezes`; nothing reads or writes these two.
   rankFreezeUntil: date("rank_freeze_until", { mode: "string" }),
   rankFreezeUsedMonth: text("rank_freeze_used_month"), // YYYY-MM
   /** Home path (Tier I): BODY quests are home sessions until `homeSessions` reaches the unlock count. */
@@ -237,7 +238,7 @@ export const dailySnapshots = pgTable(
 /**
  * Rank Freeze history (PRO): one row per freeze. `month` is the user's local YYYY-MM of `startedOn`, so a freeze that
  * runs into the next month still counts for the month it started; the unique index enforces once per month.
- * `untilOn` is inclusive (startedOn + 6). profiles.rankFreezeUntil mirrors the newest row for the rollover.
+ * `untilOn` is inclusive (startedOn + 6). It is the only freeze source (profiles.rankFreezeUntil / rankFreezeUsedMonth are deprecated).
  */
 export const rankFreezes = pgTable(
   "rank_freezes",

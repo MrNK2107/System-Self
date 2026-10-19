@@ -246,7 +246,7 @@ test("rank freeze blocks demotion (and decay); without it the rank drops", { ski
   [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
   assert.equal(p!.rank, "D");
   assert.match(p!.codename, /^VECTOR \/\/ /);
-  assert.equal((await eventsOf(id, "decay")).length, 5);
+  assert.equal((await eventsOf(id, "decay")).length, 0); // the ramp paused: D0+2 reads 1 inactive day, not 3
   const rc = await noticesOf(id, "rank_change");
   assert.deepEqual(rc[0]!.payload, { from: "C", to: "D", kind: "demotion", newCodename: p!.codename });
 });
@@ -274,6 +274,63 @@ test("a user frozen through 7 below-threshold days is not demoted; the window pa
   await ensureRolledOver(db!, id, at(addDays(D0, 14)));
   [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
   assert.equal(p!.rank, "D");
+});
+
+test("promotion is paused by a freeze too: an idle frozen user near the floor is not promoted during or because of it", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  await db!.update(profiles).set({ rank: "D" }).where(eq(profiles.userId, id));
+  await setScores(id, 45); // hidden 45: tier C, above D
+  await seedSnapshots(id, range(addDays(D0, -13), 13), 45, "D"); // 13 of the 14 days promotion needs
+  const until = addDays(D0, 6);
+  await db!.insert(rankFreezes).values({ userId: id, startedOn: D0, untilOn: until, month: D0.slice(0, 7), reason: "t" });
+
+  await ensureRolledOver(db!, id, at(addDays(D0, 7))); // rolls D0..D0+6, all frozen
+  let [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.rank, "D");
+  assert.equal((await noticesOf(id, "rank_change")).length, 0);
+
+  // The window resumes after the freeze: the 14th counted day is D0+7.
+  await ensureRolledOver(db!, id, at(addDays(D0, 8)));
+  [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.rank, "C");
+});
+
+test("the decay ramp pauses during a freeze and resumes where it stopped", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  await db!.insert(rankFreezes).values({ userId: id, startedOn: addDays(D0, 2), untilOn: addDays(D0, 4), month: D0.slice(0, 7), reason: "t" });
+  await ensureRolledOver(db!, id, at(addDays(D0, 6))); // rolls D0..D0+5
+  const decays = await eventsOf(id, "decay");
+  assert.deepEqual([...new Set(decays.map((e) => e.localDate))].sort(), [addDays(D0, 1), addDays(D0, 5)]);
+  // D0+5 has 6 inactive days, 3 of them frozen: the ramp reads 3 (0.3), not 6 (0.6).
+  assert.deepEqual(decays.filter((e) => e.localDate === addDays(D0, 5)).map((e) => e.delta), [-0.3, -0.3, -0.3, -0.3, -0.3]);
+});
+
+test("a pre-freeze below-floor run resumes after the freeze ends (paused, not reset)", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  await db!.update(profiles).set({ rank: "C" }).where(eq(profiles.userId, id));
+  await setScores(id, 30);
+  await seedSnapshots(id, range(addDays(D0, -3), 3), 30, "C"); // 3 below-floor days before the freeze
+  await db!.insert(rankFreezes).values({ userId: id, startedOn: D0, untilOn: addDays(D0, 6), month: D0.slice(0, 7), reason: "t" });
+  await ensureRolledOver(db!, id, at(addDays(D0, 10))); // through D0+9: 3 + 3 counted days
+  let [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.rank, "C");
+  await ensureRolledOver(db!, id, at(addDays(D0, 11))); // D0+10: the 7th counted day
+  [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.rank, "D");
+});
+
+test("a freeze covering the collapse date skips the collapsed decay step; one elsewhere in the span does not", { skip }, async () => {
+  const covered = await onboardAtD0({ email: "c1@example.com", username: "cover_1" });
+  await db!.insert(rankFreezes).values({ userId: covered.id, startedOn: addDays(D0, 5), untilOn: addDays(D0, 11), month: D0.slice(0, 7), reason: "t" });
+  const apart = await onboardAtD0({ email: "c2@example.com", username: "apart_1" });
+  await db!.insert(rankFreezes).values({ userId: apart.id, startedOn: addDays(D0, 2), untilOn: addDays(D0, 4), month: D0.slice(0, 7), reason: "t" });
+  await ensureRolledOver(db!, covered.id, at(addDays(D0, 40)));
+  await ensureRolledOver(db!, apart.id, at(addDays(D0, 40)));
+  const collapseDate = addDays(D0, 9);
+  assert.equal((await eventsOf(covered.id, "decay")).filter((e) => e.localDate === collapseDate).length, 0);
+  assert.equal((await eventsOf(apart.id, "decay")).filter((e) => e.localDate === collapseDate).length, 5);
+  // Frozen days after the collapse never decay.
+  assert.equal((await eventsOf(covered.id, "decay")).filter((e) => e.localDate > collapseDate && e.localDate <= addDays(D0, 11)).length, 0);
 });
 
 test("shadow activates after 5 inactive days, at the end of that date during a catch-up", { skip }, async () => {

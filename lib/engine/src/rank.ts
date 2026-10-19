@@ -57,12 +57,11 @@ export function tierProgress(hidden: number, rank: Rank): number {
 
 const rankIndex = (rank: Rank) => RANKS.indexOf(rank);
 
+/** `snapshots` are the days that count: the caller drops Rank Freeze days, so both windows pause during a freeze. */
 export function evaluateRankTransition(
   rank: Rank,
   snapshots: Snapshot[],
   freezeActive: boolean,
-  /** Snapshots that count towards demotion (default: `snapshots`). The caller drops Rank Freeze days: they pause the window. */
-  demotionSnapshots: Snapshot[] = snapshots,
 ): { kind: "promotion" | "demotion"; to: Rank } | null {
   const idx = rankIndex(rank);
 
@@ -73,8 +72,8 @@ export function evaluateRankTransition(
     }
   }
 
-  if (idx > 0 && !freezeActive && demotionSnapshots.length >= DEMOTION_WINDOW) {
-    const last = demotionSnapshots.slice(-DEMOTION_WINDOW);
+  if (idx > 0 && !freezeActive && snapshots.length >= DEMOTION_WINDOW) {
+    const last = snapshots.slice(-DEMOTION_WINDOW);
     if (last.every((s) => s.hidden < FLOORS[rank])) {
       return { kind: "demotion", to: RANKS[idx - 1]! };
     }

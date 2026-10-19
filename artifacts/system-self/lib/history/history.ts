@@ -51,16 +51,6 @@ export function checkFreezeReason(text: string): string | null {
   return null;
 }
 
-/** SVG path for a 0-100 series laid out across `width` x `height` (y grows downward). One point draws a dot-length segment. */
-export function linePath(values: readonly number[], width: number, height: number): string {
-  if (values.length === 0) return "";
-  const step = values.length > 1 ? width / (values.length - 1) : 0;
-  const y = (v: number) => height - (Math.max(0, Math.min(100, v)) / 100) * height;
-  const pts = values.map((v, i) => `${(i * step).toFixed(1)} ${y(v).toFixed(1)}`);
-  if (pts.length === 1) pts.push(`${Math.max(1, width).toFixed(1)} ${y(values[0]!).toFixed(1)}`);
-  return `M${pts.join(" L")}`;
-}
-
 /** Where the rank changed between consecutive days: the marker sits on the first day of the new rank. */
 export function rankChanges(items: readonly { rank: string }[]): { index: number; from: string; to: string }[] {
   const out: { index: number; from: string; to: string }[] = [];
@@ -70,19 +60,56 @@ export function rankChanges(items: readonly { rank: string }[]): { index: number
   return out;
 }
 
-/** The score series of one domain (a day missing the domain reads 0). */
-export function domainSeries(items: ScoreHistory["items"], domain: string): number[] {
-  return items.map((i) => i.scores[domain] ?? 0);
+/** Whole days from `from` to `date` (both `YYYY-MM-DD`, UTC arithmetic so DST never skews it). */
+export function dayOffset(from: string, date: string): number {
+  const ms = (d: string) => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)));
+  return Math.round((ms(date) - ms(from)) / 86_400_000);
+}
+
+const xFor = (offset: number, span: number, width: number) => (span > 1 ? (offset * width) / (span - 1) : 0);
+
+/**
+ * SVG path for dated 0-100 points over a window of `span` days starting at `from`: x is the day offset, so a day with
+ * no snapshot is a gap (the stroke breaks) instead of the line joining its neighbours.
+ */
+export function seriesPath(points: readonly { date: string; value: number }[], from: string, span: number, width: number, height: number): string {
+  const y = (v: number) => height - (Math.max(0, Math.min(100, v)) / 100) * height;
+  const parts: string[] = [];
+  let prev = Number.NEGATIVE_INFINITY;
+  for (const p of points) {
+    const o = dayOffset(from, p.date);
+    const pt = `${xFor(o, span, width).toFixed(1)} ${y(p.value).toFixed(1)}`;
+    parts.push(o - prev === 1 ? `L${pt}` : `M${pt}`);
+    prev = o;
+  }
+  // A lone point (a break on both sides) still draws as a zero-length segment so it is visible.
+  return parts.map((part, i) => (part.startsWith("M") && (i === parts.length - 1 || parts[i + 1]!.startsWith("M")) ? `${part} L${part.slice(1)}` : part)).join(" ");
+}
+
+/** One bar per day with resolved quests: height is the completion rate, placed by day offset. */
+export function barRects(items: readonly { date: string; completed: number; resolved: number }[], from: string, span: number, width: number, height: number) {
+  const step = span > 1 ? width / (span - 1) : width;
+  const barW = Math.max(2, Math.min(10, step * 0.6));
+  return items.map((i) => {
+    const h = i.resolved > 0 ? (i.completed / i.resolved) * height : 0;
+    return { x: xFor(dayOffset(from, i.date), span, width) - barW / 2, y: height - h, width: barW, height: h };
+  });
+}
+
+/** The dated score series of one domain (a day missing the domain reads 0). */
+export function domainSeries(items: ScoreHistory["items"], domain: string): { date: string; value: number }[] {
+  return items.map((i) => ({ date: i.date, value: i.scores[domain] ?? 0 }));
 }
 
 /** The freeze card's state: an active freeze shows the PRD line; PRO can start one; the month may already be used. */
 export type FreezeView =
   | { kind: "active"; line: string; until: string }
-  | { kind: "used"; availableFrom: string }
+  | { kind: "wait"; availableFrom: string }
   | { kind: "available" };
 
 export function freezeView(status: RankFreezeStatus | undefined): FreezeView {
   if (status?.active && status.until) return { kind: "active", line: RANK_FREEZE_ACTIVE_LINE, until: status.until };
-  if (status?.usedThisMonth && status.availableFrom) return { kind: "used", availableFrom: status.availableFrom };
+  // A non-null availableFrom is the earliest day a freeze can start (month used, or the 7-day gap after the last one).
+  if (status?.availableFrom) return { kind: "wait", availableFrom: status.availableFrom };
   return { kind: "available" };
 }

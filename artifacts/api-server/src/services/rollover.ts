@@ -83,13 +83,20 @@ async function currentScores(tx: Tx, userId: string): Promise<Record<RankedDomai
 }
 
 /** Consecutive local days up to and including `date` without a single log row. */
-async function inactiveDays(tx: Tx, userId: string, date: string, onboardDate: string): Promise<number> {
+async function inactiveDays(tx: Tx, userId: string, date: string, onboardDate: string, freezes: FreezeRange[]): Promise<number> {
   const [row] = await tx
     .select({ last: max(logs.localDate) })
     .from(logs)
     .where(and(eq(logs.userId, userId), lte(logs.localDate, date), notSystemLog));
   const lastActive = row?.last ?? addDays(onboardDate, -1);
-  return Math.max(0, daysBetween(lastActive, date));
+  // Frozen days do not count: the decay ramp pauses during a Rank Freeze and resumes where it stopped.
+  let frozen = 0;
+  for (const f of freezes) {
+    const from = f.startedOn > addDays(lastActive, 1) ? f.startedOn : addDays(lastActive, 1);
+    const to = f.untilOn < date ? f.untilOn : date;
+    if (from <= to) frozen += daysBetween(from, to) + 1;
+  }
+  return Math.max(0, daysBetween(lastActive, date) - frozen);
 }
 
 /**
@@ -204,7 +211,7 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   }
 
   // 3. Decay.
-  const k = await inactiveDays(tx, userId, date, localDate(profile.onboardedAt, tz));
+  const k = await inactiveDays(tx, userId, date, localDate(profile.onboardedAt, tz), freezes);
   const decay = decayPerDomain(k);
   if (decay > 0 && !freezeActive) out.push(...(await applyChanges(tx, userId, decayChanges(decay), opts)).notices);
 
@@ -250,13 +257,11 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   // Windows restart after every rank change: only snapshots dated after the rankSince local date count.
   const rankSinceDate = localDate(profile.rankSince, tz);
   const sinceRank = snapshots.filter((s) => s.date > rankSinceDate);
-  // Rank Freeze pauses the demotion window: frozen days neither count as below-threshold days nor reset the run.
-  // Promotion still sees every day.
+  // Rank Freeze pauses both windows: frozen days neither count towards a promotion or demotion run nor reset it.
   const transition = evaluateRankTransition(
     rank,
-    sinceRank,
-    freezeActive,
     sinceRank.filter((s) => !frozenOn(freezes, s.date)),
+    freezeActive,
   );
   if (transition) {
     // The last instant of D (or now), so rankSince's local date is D and the next window starts on D+1.

@@ -2,7 +2,7 @@
 // Lines and marker labels use the readable accent text (colors.primary); accentFill is for the confirm button's fill only.
 import React, { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import Svg, { Line, Path, Text as SvgText } from "react-native-svg";
+import Svg, { Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "@/lib/api/client";
 import { useColors } from "@/hooks/useColors";
@@ -21,7 +21,11 @@ import {
   fetchScoreHistory,
   freezeView,
   isProRequired,
-  linePath,
+  barRects,
+  dayOffset,
+  fetchQuestTrend,
+  questTrendKey,
+  seriesPath,
   rankChanges,
   rankFreezeKey,
   scoreHistoryKey,
@@ -43,7 +47,18 @@ export function HistoryPanel() {
   });
   const items = historyQ.data?.items ?? [];
   const changes = useMemo(() => rankChanges(items), [items]);
-  const xAt = (i: number) => (items.length > 1 ? (i * CHART_W) / (items.length - 1) : 0);
+  const from = historyQ.data?.from ?? "";
+  const span = historyQ.data?.days ?? 0;
+  const xAt = (i: number) => {
+    const o = dayOffset(from, items[i]!.date);
+    return span > 1 ? (o * CHART_W) / (span - 1) : 0;
+  };
+  const trendQ = useQuery({
+    queryKey: questTrendKey(userId, days),
+    queryFn: () => fetchQuestTrend(api, days),
+    enabled: !!userId,
+  });
+  const bars = trendQ.data ? barRects(trendQ.data.items, trendQ.data.from, trendQ.data.days, CHART_W, CHART_H) : [];
 
   return (
     <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -65,7 +80,7 @@ export function HistoryPanel() {
               {changes.map((c) => (
                 <Line key={`l${c.index}`} x1={xAt(c.index)} x2={xAt(c.index)} y1={0} y2={CHART_H} stroke={colors.mutedForeground} strokeWidth={1} strokeDasharray="2 3" />
               ))}
-              <Path d={linePath(domainSeries(items, d), CHART_W, CHART_H)} stroke={colors.primary} strokeWidth={1.5} fill="none" />
+              <Path d={seriesPath(domainSeries(items, d), from, span, CHART_W, CHART_H)} stroke={colors.primary} strokeWidth={1.5} fill="none" />
               {changes.map((c) => (
                 <SvgText key={`t${c.index}`} x={Math.min(xAt(c.index) + 3, CHART_W - 8)} y={CHART_H + 10} fontSize={9} fontWeight="700" fill={colors.primary}>
                   {c.to}
@@ -74,6 +89,17 @@ export function HistoryPanel() {
             </Svg>
           </View>
         ))
+      )}
+      {bars.length > 0 && (
+        <View style={s.row} accessible accessibilityLabel="Quest completion trend">
+          <Text style={[s.domain, { color: colors.foreground }]}>QUEST COMPLETION</Text>
+          <Svg width={CHART_W} height={CHART_H}>
+            <Line x1={0} x2={CHART_W} y1={CHART_H} y2={CHART_H} stroke={colors.border} strokeWidth={1} />
+            {bars.map((b, i) => (
+              <Rect key={i} x={b.x} y={b.y} width={b.width} height={b.height} fill={colors.primary} />
+            ))}
+          </Svg>
+        </View>
       )}
       {!pro && <ProLock label="FULL HISTORY" />}
     </View>
@@ -107,6 +133,7 @@ export function RankFreezeCard() {
       if (isProRequired(err)) setMessage("Rank Freeze is PRO.");
       else if (err instanceof ApiError && err.code === "freeze_used") setMessage("Already used this month.");
       else if (err instanceof ApiError && err.code === "freeze_active") setMessage("A freeze is already active.");
+      else if (err instanceof ApiError && err.code === "freeze_cooldown") setMessage("Too soon after the last freeze.");
       else setMessage("The System is out of reach. Try again.");
       void qc.invalidateQueries({ queryKey: rankFreezeKey(userId) });
     },
@@ -132,8 +159,8 @@ export function RankFreezeCard() {
           <Text style={[s.line, { color: colors.primary }]}>{view.line}</Text>
           <Text style={[s.note, { color: colors.mutedForeground }]}>Through {view.until}.</Text>
         </>
-      ) : view.kind === "used" ? (
-        <Text style={[s.note, { color: colors.mutedForeground }]}>Used this month. Available from {view.availableFrom}.</Text>
+      ) : view.kind === "wait" ? (
+        <Text style={[s.note, { color: colors.mutedForeground }]}>Available from {view.availableFrom}.</Text>
       ) : !open ? (
         <>
           <Text style={[s.note, { color: colors.mutedForeground }]}>Pause decay and demotion for 7 days, once a month. Promotion is not paused.</Text>

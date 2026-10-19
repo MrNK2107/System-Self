@@ -6,6 +6,7 @@ import { closeTestDb, resetDb } from "@workspace/db/testing";
 import { dailySnapshots, idempotencyKeys, profiles, quests, rankFreezes } from "@workspace/db";
 import {
   FREEZE_ACTIVE_CODE,
+  FREEZE_COOLDOWN_CODE,
   FREEZE_USED_CODE,
   ProRequiredSchema,
   QuestTrendSchema,
@@ -71,8 +72,6 @@ test("PRO: freeze covers 7 local days inclusive of today; status reflects it; re
   const [row] = await db!.select().from(rankFreezes).where(eq(rankFreezes.userId, u.id));
   assert.equal(row!.reason, "trip abroad");
   assert.equal(row!.startedOn, "2026-03-10");
-  const [p] = await db!.select().from(profiles).where(eq(profiles.userId, u.id));
-  assert.equal(p!.rankFreezeUntil, "2026-03-16");
 
   const now = await status(u);
   assert.deepEqual(now.body, { active: true, until: "2026-03-16", usedThisMonth: true, availableFrom: "2026-04-01" });
@@ -115,12 +114,58 @@ test("Review Focus 4: a freeze started on the 30th into next month counts for it
   assert.equal(during.status, 409);
   assert.equal(during.body.code, FREEZE_ACTIVE_CODE);
   const st = await status(u);
-  assert.deepEqual(st.body, { active: true, until: "2026-04-05", usedThisMonth: false, availableFrom: null });
+  assert.deepEqual(st.body, { active: true, until: "2026-04-05", usedThisMonth: false, availableFrom: "2026-04-13" });
 
+  // April is unused but a freeze may not stack straight onto the last one: 7 unfrozen days must separate them.
   setClock("2026-04-06T08:00:00Z");
+  const stacked = await freeze(u, "april");
+  assert.equal(stacked.status, 409);
+  assert.equal(stacked.body.code, FREEZE_COOLDOWN_CODE);
+  setClock("2026-04-12T08:00:00Z");
+  assert.equal((await freeze(u, "april")).body.code, FREEZE_COOLDOWN_CODE);
+  setClock("2026-04-13T08:00:00Z");
   const next = await freeze(u, "april");
   assert.equal(next.status, 200);
-  assert.deepEqual(next.body, { until: "2026-04-12" });
+  assert.deepEqual(next.body, { until: "2026-04-19" });
+});
+
+// GET availableFrom is the earliest day a POST succeeds: it works that day and fails the day before.
+async function probeAvailable(startClock: string, laterClock: string, expectFrom: string, expectCode: string) {
+  setClock(startClock);
+  const u = await mk(true);
+  assert.equal((await freeze(u)).status, 200);
+  setClock(laterClock);
+  const st = await status(u);
+  assert.equal(st.body.availableFrom, expectFrom);
+  setClock(`${addDays(expectFrom, -1)}T08:00:00Z`);
+  const early = await freeze(u, "early");
+  assert.equal(early.status, 409);
+  assert.equal(early.body.code, expectCode);
+  setClock(`${expectFrom}T08:00:00Z`);
+  const ok = await freeze(u, "on time");
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+}
+
+test("availableFrom is honoured by POST: month used", { skip }, async () => {
+  await probeAvailable("2026-03-10T08:00:00Z", "2026-03-20T08:00:00Z", "2026-04-01", FREEZE_USED_CODE);
+});
+
+test("availableFrom is honoured by POST: cooldown after a freeze that ran into the next month", { skip }, async () => {
+  await probeAvailable("2026-03-30T08:00:00Z", "2026-04-03T08:00:00Z", "2026-04-13", FREEZE_COOLDOWN_CODE);
+});
+
+test("availableFrom is honoured by POST: cooldown wins over an unused month", { skip }, async () => {
+  await probeAvailable("2026-03-25T08:00:00Z", "2026-04-02T08:00:00Z", "2026-04-08", FREEZE_COOLDOWN_CODE);
+});
+
+test("POST before onboarding finishes is 409 not_onboarded and writes nothing", { skip }, async () => {
+  setClock("2026-03-10T08:00:00Z");
+  const u = await mk(true);
+  await db!.delete(profiles).where(eq(profiles.userId, u.id));
+  const res = await freeze(u);
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, "not_onboarded");
+  assert.equal((await db!.select().from(rankFreezes)).length, 0);
 });
 
 test("the local month decides: 23:00 UTC on 31 March is already 1 April in Asia/Kolkata", { skip }, async () => {
@@ -176,6 +221,8 @@ test("history scores: free requesting 90 days gets 14 (200); PRO gets 90; hidden
   assert.equal(f.status, 200);
   assertContract(ScoreHistorySchema, f.body);
   assert.equal(f.body.days, 14);
+  assert.equal(f.body.from, "2026-02-25");
+  assert.equal(f.body.to, "2026-03-10");
   assert.equal(f.body.items.length, 14);
   assert.equal(f.body.items[0].date, "2026-02-25"); // ascending
   assert.equal(f.body.items[13].date, "2026-03-10");
