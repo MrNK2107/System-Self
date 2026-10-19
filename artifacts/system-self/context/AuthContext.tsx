@@ -4,6 +4,7 @@ import { api, onSessionExpired } from "@/lib/api/client";
 import { clearLocalData, handleSignIn } from "@/lib/api/query";
 import { secureTokenStore, type PublicUser } from "@/lib/api/session";
 import { createAuthActions, type SignUpInput } from "@/lib/auth/actions";
+import { settingsActions } from "@/lib/settings/instance";
 
 export type AuthStatus = "loading" | "signed_out" | "signed_in";
 
@@ -16,6 +17,12 @@ export interface AuthContextValue {
   requestPasswordReset(email: string): Promise<void>;
   resetPassword(email: string, code: string, newPassword: string): Promise<void>;
   refreshUser(): Promise<void>;
+  /** Confirms the emailed code; the signed-in user becomes email-verified. */
+  verifyEmail(code: string): Promise<void>;
+  /** The server revokes every old token and returns a fresh session, which replaces the stored one. */
+  changePassword(currentPassword: string, newPassword: string): Promise<void>;
+  /** Deletes the account (wrong password rejects), wipes local data and signs out. */
+  deleteAccount(password: string): Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -109,6 +116,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       requestPasswordReset: actions.requestPasswordReset,
       resetPassword: actions.resetPassword,
       refreshUser,
+      async verifyEmail(code) {
+        setUser(await settingsActions.verifyEmail(code));
+      },
+      async changePassword(currentPassword, newPassword) {
+        setUser(await settingsActions.changePassword(currentPassword, newPassword));
+      },
+      async deleteAccount(password) {
+        try {
+          await settingsActions.deleteAccount(password);
+        } catch (e) {
+          // A rejected delete (wrong password, offline) keeps the session. Only a wipe failure after the server
+          // erased the account leaves no session behind; the UI must leave signed-in screens then too.
+          if ((await secureTokenStore.get().catch(() => null)) === null) signedOut();
+          throw e;
+        }
+        signedOut();
+      },
     }),
     [status, user, signedOut, refreshUser],
   );

@@ -11,7 +11,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
-import { useAuth } from "@/context/AuthContext";
 import { useApp, ACHIEVEMENT_DEFS, MILESTONE_TITLES, type Domain, type MilestoneTier } from "@/context/AppContext";
 import { DomainBar } from "@/components/DomainBar";
 import { RankBadge } from "@/components/RankBadge";
@@ -35,19 +34,6 @@ export default function StatsScreen() {
     tierProgress,
     achievements, milestones, getShadowPhase,
   } = useApp();
-  const { signOut } = useAuth();
-  const [signingOut, setSigningOut] = useState(false);
-  const handleSignOut = async () => {
-    if (signingOut) return;
-    setSigningOut(true);
-    try {
-      await signOut();
-    } catch {
-      // The session is already cleared; the signed-out guard routes to sign-in.
-    } finally {
-      setSigningOut(false);
-    }
-  };
   const userId = useGameUserId();
   const [showAchievements, setShowAchievements] = useState(false);
   const [showMilestones, setShowMilestones] = useState(false);
@@ -515,19 +501,6 @@ export default function StatsScreen() {
             <Text style={[styles.settingLabel, { color: colors.foreground }]}>Nightly Debrief</Text>
             <Text style={[styles.settingValue, { color: colors.mutedForeground }]}>{user.nightlyTime}</Text>
           </View>
-          <View style={[styles.separator, { backgroundColor: colors.border }]} />
-          <TouchableOpacity
-            style={styles.settingRow}
-            onPress={() => void handleSignOut()}
-            disabled={signingOut}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: signingOut, busy: signingOut }}
-          >
-            <Feather name="log-out" size={14} color={colors.mutedForeground} />
-            <Text style={[styles.settingLabel, { color: colors.foreground }]}>Sign Out</Text>
-            <Feather name="chevron-right" size={14} color={colors.mutedForeground} />
-          </TouchableOpacity>
         </View>
       </ScrollView>
     </View>

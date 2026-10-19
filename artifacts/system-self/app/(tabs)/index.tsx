@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
@@ -247,6 +248,14 @@ export default function Dashboard() {
               </View>
             )}
             <RankBadge rank={rank} size="md" />
+            <TouchableOpacity
+              onPress={() => router.push("/settings")}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Settings"
+            >
+              <Feather name="settings" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
           </View>
         </View>
 

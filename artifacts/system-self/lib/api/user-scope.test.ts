@@ -8,6 +8,7 @@ import {
   type Persister,
 } from "@tanstack/react-query-persist-client";
 import { createOutbox, type KeyValueStorage } from "./outbox";
+import { activeKey } from "../game/gym";
 import { LAST_USER_KEY, createLocalDataManager } from "./user-scope";
 
 function memoryStorage(): KeyValueStorage {
@@ -98,4 +99,29 @@ test("a missing last-user marker counts as a different user and clears leftovers
   assert.deepEqual(s.outbox.pending(), []);
   assert.equal(s.queryClient.getQueryData(["state"]), undefined);
   assert.equal(await s.storage.getItem(LAST_USER_KEY), "A");
+});
+
+test("clearLocalData removes the signed-out users persisted gym session, and only theirs", async () => {
+  const s = setup("A");
+  await s.storage.setItem(activeKey("A"), "{}");
+  await s.storage.setItem(activeKey("B"), "{}");
+  await s.mgr.clearLocalData("A");
+  assert.equal(await s.storage.getItem(activeKey("A")), null);
+  assert.equal(await s.storage.getItem(activeKey("B")), "{}");
+});
+
+test("clearLocalData without an id uses the last signed-in user", async () => {
+  const s = setup("A");
+  await s.mgr.handleSignIn("A");
+  await s.storage.setItem(activeKey("A"), "{}");
+  await s.mgr.clearLocalData();
+  assert.equal(await s.storage.getItem(activeKey("A")), null);
+});
+
+test("switching users drops the previous users gym session", async () => {
+  const s = setup("A");
+  await s.mgr.handleSignIn("A");
+  await s.storage.setItem(activeKey("A"), "{}");
+  await s.mgr.handleSignIn("B");
+  assert.equal(await s.storage.getItem(activeKey("A")), null);
 });

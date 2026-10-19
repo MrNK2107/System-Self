@@ -23,7 +23,7 @@ export interface AuthActionDeps {
   /** Wipes local data when the account on this device changed. Runs before the new session is stored. */
   handleSignIn: (userId: string) => Promise<void>;
   /** Wipes the query cache and outbox. Runs on explicit sign-out before the session is cleared. */
-  clearLocalData: () => Promise<void>;
+  clearLocalData: (userId?: string) => Promise<void>;
 }
 
 const MeSchema = z.object({ user: PublicUserSchema });
@@ -90,8 +90,11 @@ export function createAuthActions(deps: AuthActionDeps) {
     /** Best-effort server logout, then local wipe, then the session. Never throws on a network failure. */
     async signOut(): Promise<void> {
       let refreshToken: string | null = null;
+      let userId: string | undefined;
       try {
-        refreshToken = (await tokens.get())?.refreshToken ?? null;
+        const current = await tokens.get();
+        refreshToken = current?.refreshToken ?? null;
+        userId = current?.user.id;
       } catch {
         refreshToken = null;
       }
@@ -103,7 +106,7 @@ export function createAuthActions(deps: AuthActionDeps) {
         }
       }
       try {
-        await deps.clearLocalData();
+        await deps.clearLocalData(userId);
       } finally {
         // Whatever happened to the local wipe, the session must go: signing out never leaves the user signed in.
         await tokens.set(null);

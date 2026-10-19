@@ -16,7 +16,7 @@ export default function LegalScreen() {
   return (
     <AuthShell tag="LEGAL" title={title} back>
       <View style={[styles.draft, { borderColor: colors.border }]}>
-        <Text style={[styles.draftText, { color: colors.mutedForeground }]}>DRAFT</Text>
+        <Text style={[styles.draftText, { color: colors.mutedForeground }]}>DRAFT — pending legal review</Text>
       </View>
       <Text style={[styles.body, { color: colors.mutedForeground }]}>
         This document is not published yet. The final text will appear here before launch.
@@ -28,6 +28,6 @@ export default function LegalScreen() {
 
 const styles = StyleSheet.create({
   draft: { borderWidth: 1, borderRadius: 4, paddingVertical: 24, alignItems: "center" },
-  draftText: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 6, fontFamily: "monospace" },
+  draftText: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 2, textAlign: "center" as const, fontFamily: "monospace" },
   body: { fontSize: 13, lineHeight: 20 },
 });

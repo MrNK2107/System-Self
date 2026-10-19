@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { activeKey } from "../game/gym";
 import type { KeyValueStorage, Outbox } from "./outbox";
 
 export const LAST_USER_KEY = "system_self.last_user_id";
@@ -17,7 +18,13 @@ export function createLocalDataManager(deps: {
   queryClient: QueryClient;
   persister: ClientPersister;
 }) {
-  async function clearLocalData(): Promise<void> {
+  /**
+   * `userId` is the account being signed out (its persisted gym session goes too); without it the last
+   * signed-in user on this device is assumed.
+   */
+  async function clearLocalData(userId?: string): Promise<void> {
+    const owner = userId ?? (await deps.storage.getItem(LAST_USER_KEY));
+    if (owner) await deps.storage.removeItem(activeKey(owner));
     deps.queryClient.clear();
     await deps.persister.removeClient();
     await deps.outbox.reset();

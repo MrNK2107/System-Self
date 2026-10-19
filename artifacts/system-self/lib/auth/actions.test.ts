@@ -44,7 +44,7 @@ function setup(handler: (call: Call) => { status: number; body?: unknown }, init
     api,
     tokens,
     handleSignIn: async (id) => void events.push(`handleSignIn:${id}:${stored === null ? "no-session" : "session"}`),
-    clearLocalData: async () => void events.push(`clear:${stored === null ? "no-session" : "session"}`),
+    clearLocalData: async (userId) => void events.push(`clear:${stored === null ? "no-session" : "session"}:${userId ?? "none"}`),
   });
   return { actions, api, calls, events, stored: () => stored };
 }
@@ -89,14 +89,14 @@ test("signOut calls logout, clears local data while the session still exists, th
   await t.actions.signOut();
   assert.equal(t.calls[0]!.url, "http://x/api/auth/logout");
   assert.deepEqual(t.calls[0]!.body, { refreshToken: "rt" });
-  assert.deepEqual(t.events, ["clear:session"]);
+  assert.deepEqual(t.events, ["clear:session:u1"]);
   assert.equal(t.stored(), null);
 });
 
 test("signOut still wipes everything when the logout request fails", async () => {
   const t = setup(() => ({ status: 503 }), session);
   await t.actions.signOut();
-  assert.deepEqual(t.events, ["clear:session"]);
+  assert.deepEqual(t.events, ["clear:session:u1"]);
   assert.equal(t.stored(), null);
 });
 

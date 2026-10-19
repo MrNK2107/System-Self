@@ -12,35 +12,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { IDENTITY_OPTIONS, type IdentitySetting } from "@/constants/identity";
 import { useColors } from "@/hooks/useColors";
-
-type IdentitySetting = "anonymous" | "semi-public" | "public";
-
-const IDENTITY_OPTIONS: {
-  value: IdentitySetting;
-  label: string;
-  description: string;
-  icon: "eye-off" | "eye" | "globe";
-}[] = [
-  {
-    value: "anonymous",
-    label: "GHOST",
-    description: "Codename only. No external affiliation visible. Maximum privacy.",
-    icon: "eye-off",
-  },
-  {
-    value: "semi-public",
-    label: "OPERATIVE",
-    description: "Username visible to your clan only. Rivals see a codename. Recommended.",
-    icon: "eye",
-  },
-  {
-    value: "public",
-    label: "OPEN",
-    description: "Full username visible everywhere. Full accountability.",
-    icon: "globe",
-  },
-];
 
 function StepBadge({ step }: { step: number }) {
   return (
