@@ -9,6 +9,7 @@ import {
   fallbackLine,
   fetchBriefing,
   fetchQuietHours,
+  localWeekday,
   quietChips,
   quietHint,
   submitCrowdReport,
@@ -118,4 +119,12 @@ test("submitCrowdReport sends nothing while queued logs cannot flush, and omits 
   const open = fakeApi(() => ({ ok: true, weekday: 1, hour: 18 }));
   await submitCrowdReport(open.api, { flushBeforeMutation: async () => true }, "packed", undefined, "c2");
   assert.deepEqual(open.calls[0]!.opts.body, { level: "packed", clientId: "c2" });
+});
+
+test("localWeekday is the account timezone's weekday (0 = Sunday), else the device's", () => {
+  const instant = new Date("2026-10-18T20:00:00Z"); // Sunday in New York, Monday 01:30 in Kolkata
+  assert.equal(localWeekday(instant, "Asia/Kolkata"), 1);
+  assert.equal(localWeekday(instant, "America/New_York"), 0);
+  assert.equal(localWeekday(instant, "Mars/Olympus"), instant.getDay());
+  assert.equal(localWeekday(instant, undefined), instant.getDay());
 });

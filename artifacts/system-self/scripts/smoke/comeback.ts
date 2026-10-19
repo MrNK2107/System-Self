@@ -97,7 +97,7 @@ async function main() {
   assert.deepEqual(await fetchComeback(api), { active: null, returnerCount: 0 });
 
   // Kinds filtering: only the requested kinds come back and page.
-  const present = [...new Set((await fetchNotices(api)).items.map((n) => n.kind))];
+  const present = [...new Set((await api.request("GET", "/api/notices", { schema: LooseList })).items.map((n) => n.kind))];
   assert.ok(present.length > 0, "the logs above left at least one notice");
   const kind = present[0]!;
   const only = await api.request("GET", `/api/notices?kinds=${kind}`, { schema: LooseList });

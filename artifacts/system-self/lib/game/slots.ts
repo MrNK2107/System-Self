@@ -33,19 +33,44 @@ export function buildSlot(start: string, durationMin: number): { slotStart: stri
 export const slotLabel = (q: Pick<Quest, "slotStart" | "slotEnd">): string | null =>
   q.slotStart && q.slotEnd ? `${q.slotStart}\u2013${q.slotEnd}` : null;
 
-export const nowHHMM = (now: Date): string => toHHMM(now.getHours() * 60 + now.getMinutes());
+/**
+ * The wall clock of `now` in `tz` (the account timezone, as the server judges slots); the device's own when `tz`
+ * is empty or unknown.
+ */
+function wallClock(now: Date, tz?: string | null): { day: string; minutes: number } {
+  if (tz) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(now);
+      const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+      return { day: `${get("year")}-${get("month")}-${get("day")}`, minutes: (Number(get("hour")) % 24) * 60 + Number(get("minute")) };
+    } catch {
+      // unknown zone: the device clock below
+    }
+  }
+  return { day: `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`, minutes: now.getHours() * 60 + now.getMinutes() };
+}
 
-const localDay = (d: Date): string => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+export const nowHHMM = (now: Date, tz?: string | null): string => toHHMM(wallClock(now, tz).minutes);
+
+const localDay = (d: Date, tz?: string | null): string => wallClock(d, tz).day;
 
 /**
  * The first active daily BODY quest whose chosen slot has passed. The server's slotState (computed when the list
- * was fetched, at `computedAt`) is the source of truth. The device clock may only move upcoming/open to missed,
- * and only on the same device-local date the state was computed for; after midnight nothing is trusted until a
- * refetch. A resolved quest never counts.
+ * was fetched, at `computedAt`) is the source of truth. The local clock (in `tz`, the account timezone; else the
+ * device's) may only move upcoming/open to missed, and only on the same local date the state was computed for;
+ * after midnight nothing is trusted until a refetch. A resolved quest never counts.
  */
-export function missedSlotQuest(quests: readonly Quest[], now: Date, computedAt: Date): Quest | null {
-  if (localDay(now) !== localDay(computedAt)) return null;
-  const t = nowHHMM(now);
+export function missedSlotQuest(quests: readonly Quest[], now: Date, computedAt: Date, tz?: string | null): Quest | null {
+  if (localDay(now, tz) !== localDay(computedAt, tz)) return null;
+  const t = nowHHMM(now, tz);
   return (
     quests.find(
       (q) =>
@@ -59,7 +84,9 @@ export function missedSlotQuest(quests: readonly Quest[], now: Date, computedAt:
   );
 }
 
-/** True when the device-local date has moved on since the quest list was computed (time to refetch). */
-export const slotStateStale = (now: Date, computedAt: Date): boolean => localDay(now) !== localDay(computedAt);
+/** True when the local date (in `tz`, else the device's) has moved on since the quest list was computed (time to refetch). */
+export const slotStateStale = (now: Date, computedAt: Date, tz?: string | null): boolean =>
+  localDay(now, tz) !== localDay(computedAt, tz);
 
-export const missedSlotLine = (slotStart: string, now: Date): string => `You chose ${slotStart}. It is ${nowHHMM(now)}.`;
+export const missedSlotLine = (slotStart: string, now: Date, tz?: string | null): string =>
+  `You chose ${slotStart}. It is ${nowHHMM(now, tz)}.`;

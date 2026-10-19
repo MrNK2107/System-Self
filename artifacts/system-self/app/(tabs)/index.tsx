@@ -14,6 +14,7 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useAuth } from "@/context/AuthContext";
 import { ALL_DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
 import { DomainBar } from "@/components/DomainBar";
 import { RankBadge } from "@/components/RankBadge";
@@ -33,6 +34,7 @@ import { FloorQuestCard } from "@/components/FloorQuestCard";
 import { ComebackCard } from "@/components/ComebackCard";
 import { shadowTallyLine } from "@/lib/game/adherence";
 import { missedSlotLine, missedSlotQuest, slotStateStale } from "@/lib/game/slots";
+import { refuseFailureLine } from "@/lib/game/guards";
 import type { Quest, RefuseOutcome } from "@/context/AppContext";
 
 function localDateString(now: Date = new Date()): string {
@@ -172,11 +174,14 @@ export default function Dashboard() {
   const [refusing, setRefusing] = useState<Quest | null>(null);
   const [refuseBusy, setRefuseBusy] = useState(false);
   const [floorOffer, setFloorOffer] = useState<RefuseOutcome | null>(null);
-  // The banner re-checks the device clock once a minute so a slot that lapses while the app is open shows up.
+  const [refuseError, setRefuseError] = useState<string | null>(null);
+  // The banner re-checks the clock once a minute so a slot that lapses while the app is open shows up. Times and
+  // dates are read in the account timezone (as the server judges slots), else the device's.
   // When the local date changes, the cached slot states are stale: refetch instead of trusting them.
+  const accountTz = useAuth().user?.timezone;
   const [clock, setClock] = useState(() => new Date());
   const computedAt = new Date(questsUpdatedAt || clock.getTime());
-  const dateChanged = slotStateStale(clock, computedAt);
+  const dateChanged = slotStateStale(clock, computedAt, accountTz);
   React.useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 60_000);
     return () => clearInterval(t);
@@ -188,14 +193,16 @@ export default function Dashboard() {
   const rank = user?.rank ?? "E";
   const activeQuests = quests.filter(q => q.status === "active");
   const completedToday = quests.filter(q => q.status === "complete").length;
-  const missed = missedSlotQuest(quests, clock, computedAt);
+  const missed = missedSlotQuest(quests, clock, computedAt, accountTz);
 
   const confirmRefuse = async (reason: string) => {
     if (!refusing || refuseBusy) return;
     setRefuseBusy(true);
+    setRefuseError(null);
     try {
       const r = await refuseQuest(refusing.id, reason);
       if (r.ok) setFloorOffer(r.value.floor ? r.value : null);
+      else setRefuseError(refuseFailureLine(r));
       setRefusing(null);
     } finally {
       setRefuseBusy(false);
@@ -301,7 +308,7 @@ export default function Dashboard() {
           <View style={[styles.slotBanner, { borderColor: colors.destructive + "60", backgroundColor: colors.card }]}>
             <Text style={[styles.sectionLabel, { color: colors.destructive }]}>SLOT MISSED</Text>
             <Text style={[styles.slotLine, { color: colors.foreground }]}>
-              {missedSlotLine(missed.slotStart!, clock)}
+              {missedSlotLine(missed.slotStart!, clock, accountTz)}
             </Text>
             <Text style={[styles.questTitle, { color: colors.mutedForeground }]} numberOfLines={1}>{missed.title}</Text>
             <View style={styles.slotButtons}>
@@ -325,6 +332,9 @@ export default function Dashboard() {
               </TouchableOpacity>
             </View>
           </View>
+        )}
+        {refuseError && (
+          <Text style={[styles.refuseError, { color: colors.destructive }]} accessibilityLiveRegion="polite">{refuseError}</Text>
         )}
 
         {season && (
@@ -598,6 +608,7 @@ const styles = StyleSheet.create({
   },
   slotBanner: { borderWidth: 1, borderRadius: 4, padding: 16, gap: 8 },
   slotLine: { fontSize: 15, fontWeight: "700" as const, letterSpacing: 0.5 },
+  refuseError: { fontSize: 11, lineHeight: 17, letterSpacing: 0.3 },
   slotButtons: { flexDirection: "row", gap: 8, marginTop: 4 },
   slotBtn: { flex: 1, borderWidth: 1, borderRadius: 2, paddingVertical: 12, alignItems: "center" },
   slotBtnText: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 2 },

@@ -15,14 +15,14 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type ChainTemplate, type Domain, type Quest } from "@/context/AppContext";
-import { ApiError } from "@/lib/api/client";
-import { hasApiCode, isoWeekKey } from "@/lib/game/guards";
+import { useAuth } from "@/context/AuthContext";
+import { hasApiCode, isStaleFailure, isoWeekKey, mutationFailureLine, refuseFailureLine } from "@/lib/game/guards";
 import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
 import { QuestCard } from "@/components/QuestCard";
 import { SlotPicker } from "@/components/SlotPicker";
 import { FloorQuestCard } from "@/components/FloorQuestCard";
 import { useQuietHours } from "@/hooks/useDungeon";
-import { quietChips, quietHint } from "@/lib/game/dungeon";
+import { localWeekday, quietChips, quietHint } from "@/lib/game/dungeon";
 import { shadowTallyLine } from "@/lib/game/adherence";
 import type { RefuseOutcome } from "@/context/AppContext";
 import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
@@ -124,6 +124,8 @@ export default function QuestsScreen() {
     loading, loadError, questsLoadError, refresh, offline,
   } = useApp();
   const { generating, triggerGeneration } = useQuestScheduler();
+  // Quiet-hours chips are for the account's weekday (its timezone, as the server records reports), else the device's.
+  const accountTz = useAuth().user?.timezone;
 
   const [refreshing, setRefreshing] = React.useState(false);
   const [showChainCatalog, setShowChainCatalog] = useState(false);
@@ -160,16 +162,8 @@ export default function QuestsScreen() {
     }
   };
 
-  /** One SYSTEM-voice line for a failed request; sync_pending is explained by the OFFLINE bar as well. */
-  const describeFailure = (r: { ok: false; reason: "sync_pending" } | { ok: false; reason: "error"; error: unknown }): string => {
-    if (r.reason === "sync_pending") return "Sync pending. Queued logs must land first.";
-    if (r.error instanceof ApiError && r.error.kind === "network") return "No connection. Nothing was sent.";
-    return "Request failed. Try again.";
-  };
-
-  /** not_active: it was already resolved (another tap, another device). The refetch that follows shows it. */
-  const isStale = (r: { ok: false; reason: "sync_pending" } | { ok: false; reason: "error"; error: unknown }) =>
-    r.reason === "error" && hasApiCode(r.error, "not_active");
+  const describeFailure = mutationFailureLine;
+  const isStale = isStaleFailure;
 
   const onComplete = async (id: string) => {
     if (inFlight.current.has(id)) return;
@@ -194,9 +188,9 @@ export default function QuestsScreen() {
       if (r.ok) {
         setFloorOffer(r.value.floor ? r.value : null);
       } else {
+        // The limit shows as the rule under the list (and disables Refuse); every other failure is a notice line.
         if (r.reason === "error" && hasApiCode(r.error, "refusal_limit")) setLimitMark({ userId, week: isoWeekKey(new Date()) });
-        else if (r.reason === "error" && hasApiCode(r.error, "reason_required")) setNotice("A reason is required.");
-        else if (!isStale(r)) setNotice(describeFailure(r));
+        else setNotice(refuseFailureLine(r));
       }
       setRefusing(null);
     } finally {
@@ -629,7 +623,7 @@ export default function QuestsScreen() {
         visible={slotting !== null}
         questTitle={slotting?.title ?? ""}
         current={slotting?.slotStart && slotting.slotEnd ? { slotStart: slotting.slotStart, slotEnd: slotting.slotEnd } : null}
-        suggestions={quiet.data ? quietChips(quiet.data.suggestions, new Date().getDay()) : undefined}
+        suggestions={quiet.data ? quietChips(quiet.data.suggestions, localWeekday(new Date(), accountTz)) : undefined}
         hint={quietHint(quiet.data)}
         busy={slotBusy}
         onCancel={() => setSlotting(null)}

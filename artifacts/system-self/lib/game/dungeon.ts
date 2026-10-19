@@ -8,7 +8,9 @@ import {
 } from "@workspace/contracts";
 import type { ApiClient } from "../api/client";
 import type { Outbox } from "../api/outbox";
+import { WEEKDAYS } from "../../features/gym/model/constants";
 import { afterOutbox, type MutationResult } from "./actions";
+import { weekdayOf } from "./gym";
 
 export type BriefingBlock = GymBriefing["blocks"][number];
 export type CrowdLevel = "quiet" | "normal" | "packed";
@@ -49,6 +51,11 @@ export function quietChips(
   return suggestions
     .filter((s) => s.weekday === weekday)
     .map((s) => ({ label: `${pad(s.hour)}:00`, start: `${pad(s.hour)}:00` }));
+}
+
+/** The weekday (0 = Sunday, as quiet-hours suggestions number it) of `now` in `tz`, the account timezone; else the device's. */
+export function localWeekday(now: Date, tz?: string | null): number {
+  return WEEKDAYS.indexOf(weekdayOf(now, tz ?? undefined));
 }
 
 /** "{needed} more scout reports needed" while the user has too few reports; otherwise null. */

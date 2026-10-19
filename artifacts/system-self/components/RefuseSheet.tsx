@@ -5,7 +5,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { normalizeReason } from "@/lib/game/adherence";
 
-export const REFUSAL_RULE = "First refusal this week is logged. The second costs 1.5 DISCIPLINE. There is no third.";
+import { REFUSAL_RULE } from "@/lib/game/guards";
+
+export { REFUSAL_RULE };
 
 interface Props {
   visible: boolean;
