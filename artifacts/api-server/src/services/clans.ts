@@ -116,10 +116,34 @@ export async function blockedWithMember(db: Reader, userId: string, clanId: stri
   return !!row;
 }
 
-/** Whether the member `userId` is dead weight right now (see deadWeightSql). */
+/** SQL: the user logged today (local), a non-forbidden log. */
+export function loggedTodaySql(userIdCol: unknown, tzCol: unknown, now: Date): SQL<boolean> {
+  return sql<boolean>`exists (select 1 from ${logs} l where l.user_id = ${userIdCol} and l.local_date = ${localToday(tzCol, now)} and not l.forbidden)`;
+}
+
+/**
+ * SQL: the leader may remove the member now: dead weight by the window rule, and no non-forbidden log today. A
+ * member who shows up today cannot be removed today, although flagging keeps the window that ends yesterday.
+ */
+export function removableSql(userIdCol: unknown, joinedAtCol: unknown, tzCol: unknown, now: Date): SQL<boolean> {
+  return sql<boolean>`(${deadWeightSql(userIdCol, joinedAtCol, tzCol, now)} and not ${loggedTodaySql(userIdCol, tzCol, now)})`;
+}
+
+/** Whether the member `userId` is dead weight right now by the window rule (see deadWeightSql). */
 export async function isDeadWeight(db: Reader, userId: string, now: Date): Promise<boolean> {
   const [row] = await db
     .select({ dead: deadWeightSql(clanMembers.userId, clanMembers.joinedAt, users.timezone, now) })
+    .from(clanMembers)
+    .innerJoin(users, eq(users.id, clanMembers.userId))
+    .where(eq(clanMembers.userId, userId))
+    .limit(1);
+  return !!row?.dead;
+}
+
+/** Whether the leader may remove the member `userId` right now (see removableSql). */
+export async function isRemovable(db: Reader, userId: string, now: Date): Promise<boolean> {
+  const [row] = await db
+    .select({ dead: removableSql(clanMembers.userId, clanMembers.joinedAt, users.timezone, now) })
     .from(clanMembers)
     .innerJoin(users, eq(users.id, clanMembers.userId))
     .where(eq(clanMembers.userId, userId))
@@ -173,7 +197,7 @@ export async function toClanDto(db: Reader, c: ClanRow, myRole: ClanRole): Promi
 
 /**
  * The members as a clanmate sees them: the clanmate projection (usernames always, PRD 16), role, the dead-weight
- * flag (only while still dead weight) and the 30-day quest completion %. Leader first, then by join time.
+ * flag (only while the member is removable: still dead weight and no log today) and the 30-day quest completion %. Leader first, then by join time.
  */
 export async function clanMembersView(db: Reader, clanId: string, viewerId: string, now: Date): Promise<ClanMember[]> {
   const rows = await db
@@ -181,7 +205,7 @@ export async function clanMembersView(db: Reader, clanId: string, viewerId: stri
       userId: clanMembers.userId,
       role: clanMembers.role,
       flaggedAt: clanMembers.flaggedAt,
-      dead: deadWeightSql(clanMembers.userId, clanMembers.joinedAt, users.timezone, now),
+      removable: removableSql(clanMembers.userId, clanMembers.joinedAt, users.timezone, now),
       resolved: sql<number>`(select count(*)::int from ${quests} q where q.user_id = ${clanMembers.userId} and q.status in ('complete', 'failed', 'refused') and q.resolved_local_date >= ((${now.toISOString()}::timestamptz at time zone ${users.timezone})::date - 29))`,
       completed: sql<number>`(select count(*)::int from ${quests} q where q.user_id = ${clanMembers.userId} and q.status = 'complete' and q.resolved_local_date >= ((${now.toISOString()}::timestamptz at time zone ${users.timezone})::date - 29))`,
     })
@@ -199,7 +223,7 @@ export async function clanMembersView(db: Reader, clanId: string, viewerId: stri
       isSelf: r.userId === viewerId,
       profile: projectUser(s, "clanmate"),
       role: r.role as ClanRole,
-      flagged: r.flaggedAt !== null && r.dead,
+      flagged: r.flaggedAt !== null && r.removable,
       questCompletionRate30d: r.resolved > 0 ? Math.round((r.completed / r.resolved) * 100) : null,
     });
   }

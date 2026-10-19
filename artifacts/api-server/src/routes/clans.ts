@@ -18,6 +18,7 @@ import {
   blockedWithMember,
   clanMembersView,
   isDeadWeight,
+  isRemovable,
   lockClan,
   membershipOf,
   newInviteCode,
@@ -218,9 +219,10 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
         .limit(1);
       if (!t) return memberNotFound();
       if (!t.flaggedAt) return err(409, "not_flagged", "Only members flagged as dead weight can be removed");
-      if (!(await isDeadWeight(tx, t.userId, now))) {
-        // Active again (or not in the clan for the whole window): the flag no longer holds.
-        await tx.update(clanMembers).set({ flaggedAt: null }).where(eq(clanMembers.userId, t.userId));
+      if (!(await isRemovable(tx, t.userId, now))) {
+        // Active again in the window (or not in the clan for all of it): the flag no longer holds. A member who
+        // only logged today keeps the flag (the window ends yesterday) but cannot be removed today.
+        if (!(await isDeadWeight(tx, t.userId, now))) await tx.update(clanMembers).set({ flaggedAt: null }).where(eq(clanMembers.userId, t.userId));
         return err(409, "not_flagged", "Only members flagged as dead weight can be removed");
       }
       await tx.delete(clanMembers).where(eq(clanMembers.userId, t.userId));

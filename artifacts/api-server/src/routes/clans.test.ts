@@ -346,6 +346,29 @@ test("a flagged member who logged again is no longer removable (flag cleared)", 
   assert.equal((await db!.select().from(clanMembers).where(eq(clanMembers.userId, u.id)))[0]!.flaggedAt, null);
 });
 
+test("a flagged member who logs today (non-forbidden) cannot be removed today; a forbidden log does not count", { skip }, async () => {
+  clock = new Date();
+  const l = await mk("lead_1");
+  await makePro(l);
+  const c = await create(l);
+  const u = await mk("mem_1");
+  assert.equal((await join(u, c.id)).status, 204);
+  await ageMembership(u.id);
+  const flag = () => db!.update(clanMembers).set({ flaggedAt: new Date() }).where(eq(clanMembers.userId, u.id));
+  await flag();
+  const today = localDate(clock, TZ);
+  // a forbidden log today is not activity: still removable
+  await db!.insert(logs).values({ userId: u.id, clientId: "forbidden-today", domain: "BODY", logType: "x", forbidden: true, occurredAt: clock, localDate: today });
+  assert.equal((await mine(l)).members.find((m) => m.userId === u.id)!.flagged, true);
+  // a normal log today: not removable today, shown as not removable
+  await addLog(u.id, today);
+  assert.equal((await mine(l)).members.find((m) => m.userId === u.id)!.flagged, false);
+  const res = await request(a()).post(`/api/clans/members/${u.id}/remove`).set(auth(l.token)).send({});
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, "not_flagged");
+  assert.equal((await db!.select().from(clanMembers).where(eq(clanMembers.userId, u.id))).length, 1);
+});
+
 test("a fresh joiner with no logs is not dead weight (flag job and remove use the join date)", { skip }, async () => {
   const now = new Date("2026-10-19T00:31:00Z");
   clock = now;
