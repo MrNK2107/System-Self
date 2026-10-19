@@ -12,6 +12,7 @@ import {
   QuestGenerateResponseSchema,
   QuestListResponseSchema,
   QuestRefuseResponseSchema,
+  QuestShameResponseSchema,
   QuestSlotResponseSchema,
   type ComebackResponse,
   type GameLog,
@@ -209,6 +210,17 @@ export function setQuestSlot(
       body: { ...(slot ?? { slotStart: null }), clientId },
       idempotencyKey: clientId,
       schema: QuestSlotResponseSchema,
+    }),
+  );
+}
+
+/** PRO Shame Mode for one active quest (needs a clan; the server answers 402 pro_required / 409 not_in_clan). */
+export function setQuestShame(api: ApiClient, outbox: Guard, questId: string, enabled: boolean, clientId: string) {
+  return afterOutbox(outbox, () =>
+    api.request("PATCH", `/api/quests/${encodeURIComponent(questId)}/shame`, {
+      body: { enabled, clientId },
+      idempotencyKey: clientId,
+      schema: QuestShameResponseSchema,
     }),
   );
 }

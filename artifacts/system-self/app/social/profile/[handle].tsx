@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { RankBadge } from "@/components/RankBadge";
+import { ChallengeComposer } from "@/components/ChallengeComposer";
 import { ReportSheet } from "@/components/ReportSheet";
 import { SettingsCard } from "@/components/SettingsParts";
 import { useColors } from "@/hooks/useColors";
@@ -106,6 +107,8 @@ export default function SocialProfileScreen() {
             ) : (
               <AuthButton label="FOLLOW" loading={busy} onPress={() => void run(() => actions.follow(handle))} />
             )}
+
+            {view.following ? <ChallengeComposer opponent={view.profile.handle} /> : null}
 
             {confirmBlock ? (
               <View style={s.confirm}>

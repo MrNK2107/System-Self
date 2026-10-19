@@ -603,6 +603,14 @@ export default function RivalsScreen() {
           </View>
           <View style={styles.headerRight}>
             <TouchableOpacity
+              onPress={() => router.push("/challenges")}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Challenges"
+            >
+              <Feather name="crosshair" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+            <TouchableOpacity
               onPress={() => router.push("/social/search")}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               accessibilityRole="button"

@@ -8,6 +8,7 @@ import { assignClanRanks, computeClanScores, repairClans, updateDeadWeightFlags 
 import type { AiDeps } from "../lib/ai";
 import { dueRaidGroups, resolveRaidGroup, startRaidWeek } from "../services/raids";
 import { raidWeekOf } from "@workspace/engine";
+import { resolveNamedChallenges } from "../services/challenges";
 import { ensureAssignments, usersWithExpiredSlots } from "../services/rivals";
 import { withUserLock } from "../services/user-lock";
 
@@ -17,6 +18,7 @@ export const RIVAL_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:riva
 export const CLAN_SCORE_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:clan-scores" } as const;
 export const DEAD_WEIGHT_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:dead-weight" } as const;
 export const RAID_START_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:raid-start" } as const;
+export const CHALLENGE_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:challenges" } as const;
 export const RAID_RESOLVE_JOB_LOCK = { namespace: JOB_LOCK_NAMESPACE, key: "social:raid-resolve" } as const;
 /** Clans scored per batch (one hidden-score batch query per batch). */
 export const CLAN_SCORE_BATCH = 100;
@@ -199,13 +201,15 @@ export async function runSocialJobs(
   raidResolve: number | "not_due" | "skipped";
   raidStart: number | "not_due" | "skipped";
   rivalRefresh: number | "skipped";
+  challenges: number | "skipped";
   deadWeight: { flagged: number; cleared: number } | "not_due" | "skipped";
   clanScores: number | "not_due" | "skipped";
 }> {
   const raidResolve = await withJobLock(db, RAID_RESOLVE_JOB_LOCK, () => resolveWeeklyRaids(db, now, { ai }));
   const raidStart = await withJobLock(db, RAID_START_JOB_LOCK, () => startWeeklyRaids(db, now));
   const rivalRefresh = await withJobLock(db, RIVAL_JOB_LOCK, () => refreshExpiredRivals(db, now));
+  const challenges = await withJobLock(db, CHALLENGE_JOB_LOCK, () => resolveNamedChallenges(db, now));
   const deadWeight = await withJobLock(db, DEAD_WEIGHT_JOB_LOCK, () => flagDeadWeight(db, now));
   const clanScores = await withJobLock(db, CLAN_SCORE_JOB_LOCK, () => recomputeClanScores(db, now));
-  return { raidResolve, raidStart, rivalRefresh, deadWeight, clanScores };
+  return { raidResolve, raidStart, rivalRefresh, challenges, deadWeight, clanScores };
 }

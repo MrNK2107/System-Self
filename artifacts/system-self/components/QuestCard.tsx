@@ -15,6 +15,8 @@ interface QuestCardProps {
   onSlot?: (quest: Quest) => void;
   /** Opens today's dungeon briefing (shown for active BODY quests). */
   onBriefing?: (quest: Quest) => void;
+  /** PRO Shame Mode toggle, offered on active quests when the user is in a clan. */
+  onShame?: (quest: Quest, enabled: boolean) => void;
   /** The weekly refusal allowance is used up (server 409 refusal_limit). */
   refuseDisabled?: boolean;
   /** A request for this quest is in flight. */
@@ -27,7 +29,7 @@ const TYPE_LABELS: Record<string, string> = {
   arc: "ARC",
 };
 
-export function QuestCard({ quest, onComplete, onRefuse, onSlot, onBriefing, refuseDisabled = false, busy = false }: QuestCardProps) {
+export function QuestCard({ quest, onComplete, onRefuse, onSlot, onBriefing, onShame, refuseDisabled = false, busy = false }: QuestCardProps) {
   const colors = useColors();
   const domainColor = DOMAIN_COLORS[quest.domain] ?? colors.primary;
   const isActive = quest.status === "active";
@@ -108,6 +110,23 @@ export function QuestCard({ quest, onComplete, onRefuse, onSlot, onBriefing, ref
         >
           <Feather name="map" size={12} color={domainColor} />
           <Text style={[styles.slotText, { color: domainColor }]}>BRIEFING</Text>
+        </TouchableOpacity>
+      )}
+
+      {isActive && onShame && (
+        <TouchableOpacity
+          onPress={() => onShame(quest, !quest.shameMode)}
+          disabled={busy}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: !!quest.shameMode, disabled: busy }}
+          accessibilityLabel="Shame Mode"
+          style={[styles.slotRow, { borderColor: quest.shameMode ? colors.destructive : colors.border, opacity: busy ? 0.5 : 1 }]}
+          activeOpacity={0.7}
+        >
+          <Feather name="alert-triangle" size={12} color={quest.shameMode ? colors.destructive : colors.mutedForeground} />
+          <Text style={[styles.slotText, { color: quest.shameMode ? colors.foreground : colors.mutedForeground }]}>
+            {quest.shameMode ? "SHAME MODE ON" : "SHAME MODE OFF"}
+          </Text>
         </TouchableOpacity>
       )}
 

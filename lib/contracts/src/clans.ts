@@ -125,7 +125,7 @@ export const RaidStandingSchema = z.object({
 });
 export type RaidStanding = z.infer<typeof RaidStandingSchema>;
 
-/** The viewer's clan's raid this week: live standings until the raid resolves (Sunday 23:59 UTC). */
+/** The viewer's clan's raid this week: live standings until the raid resolves at the next Monday 00:00 UTC. */
 export const RaidSummarySchema = z.object({
   weekKey: z.string(),
   week: z.number().int(),

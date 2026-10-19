@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, gte, inArray, lte, max } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, max, ne } from "drizzle-orm";
 import {
   achievements,
+  clanMembers,
   dailySnapshots,
   domainScores,
   logs,
@@ -36,6 +37,7 @@ import {
 } from "@workspace/engine";
 import type { Notice, NoticePayload } from "@workspace/contracts";
 import { logger } from "../lib/logger";
+import { resolveDueForUser } from "./challenges";
 import { abandonChain } from "./quests";
 import { expireAssignments, rivalRollover } from "./rivals";
 import { applyChanges, insertNotice, toShadowState, type ScoreChange } from "./scoring";
@@ -82,6 +84,26 @@ async function inactiveDays(tx: Tx, userId: string, date: string, onboardDate: s
   return Math.max(0, daysBetween(lastActive, date));
 }
 
+/**
+ * Shame Mode (PRD 11 layer 3): a quest the owner opted in per quest failed, so every clanmate gets one `shame` notice
+ * with the owner's username (clan-internal) and the quest title. The quest content is shared ONLY for these explicit
+ * opt-ins. Each quest fails exactly once (the status flip above is conditional), so this runs once per quest. Only
+ * notices are written for the clanmates (no lock on them is needed).
+ */
+async function notifyShame(tx: Tx, userId: string, username: string, titles: readonly string[], now: Date): Promise<void> {
+  if (titles.length === 0) return;
+  const [mine] = await tx.select({ clanId: clanMembers.clanId }).from(clanMembers).where(eq(clanMembers.userId, userId)).limit(1);
+  if (!mine) return;
+  const mates = await tx
+    .select({ userId: clanMembers.userId })
+    .from(clanMembers)
+    .where(and(eq(clanMembers.clanId, mine.clanId), ne(clanMembers.userId, userId)))
+    .orderBy(asc(clanMembers.userId));
+  for (const questTitle of titles) {
+    for (const m of mates) await insertNotice(tx, m.userId, "shame", { handle: username, questTitle }, now);
+  }
+}
+
 function decayChanges(perDomain: number): ScoreChange[] {
   return RANKED_DOMAINS.map((domain) => ({ domain, delta: -perDomain, bonus: false, activity: false, reason: "decay" }));
 }
@@ -114,6 +136,7 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
     .orderBy(asc(quests.expiresAt), asc(quests.createdAt));
   const failChanges: ScoreChange[] = [];
   const failNotices: NoticePayload<"quest_failed">[] = [];
+  const shamed: string[] = [];
   for (const q of expired) {
     const [failed] = await tx
       .update(quests)
@@ -125,9 +148,11 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
     const penalty = QUEST_FAIL_PENALTY[q.type as QuestType];
     failChanges.push({ domain: "DISCIPLINE", delta: -penalty, bonus: false, activity: false, reason: "quest_failed", refId: q.id });
     failNotices.push({ questId: q.id, title: q.title, type: q.type as QuestType, penalty });
+    if (q.shameMode) shamed.push(q.title);
   }
   if (failChanges.length > 0) out.push(...(await applyChanges(tx, userId, failChanges, opts)).notices);
   for (const payload of failNotices) out.push(await insertNotice(tx, userId, "quest_failed", payload, now));
+  await notifyShame(tx, userId, user.username, shamed, now);
 
   // 2. Streak breaks.
   const rows = await tx.select().from(domainScores).where(eq(domainScores.userId, userId));
@@ -267,6 +292,9 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
 
   // 7. Rivals: ghost drift for `date`, rival pressure, rival challenges whose window ended.
   out.push(...(await rivalRollover(tx, userId, date, now)));
+
+  // 8. Named challenges whose window ended by `date` (both players' locks; may defer, see services/challenges).
+  out.push(...(await resolveDueForUser(tx, userId, date, now)));
 
   await tx.update(userDayState).set({ lastRolledDate: date }).where(eq(userDayState.userId, userId));
   return out;

@@ -11,11 +11,13 @@ import {
   pickFloorRoutine,
   refusalOutcome,
 } from "@workspace/engine";
-import { QuestRefuseRequestSchema, QuestSlotRequestSchema } from "@workspace/contracts";
+import { QuestRefuseRequestSchema, QuestShameRequestSchema, QuestSlotRequestSchema } from "@workspace/contracts";
 import type { AiDeps } from "../lib/ai";
 import { generateQuestsRequestSchema } from "../lib/schemas";
 import { findReplay, readKey, withIdempotency, type HandlerResult } from "../services/idempotency";
 import { rollOverBeforeToday } from "../services/rollover";
+import { requirePro } from "../services/entitlements";
+import { membershipOf } from "../services/clans";
 import { abandonChain, activeBoard, createQuests, hasActiveChain, slotStateOf, toQuestDto } from "../services/quests";
 import { track } from "../services/analytics";
 import { applyChanges, insertNotice } from "../services/scoring";
@@ -294,6 +296,49 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
       return { status: 200, body: { quest: toQuestDto(updated, slotStateOf(updated, now, tz)) } };
     });
   });
+
+  /**
+   * PRO Shame Mode, opt-in per quest (PRD 11): when this quest fails the clan is told its title (see rollover).
+   * Enabling needs PRO and a clan; disabling is always allowed (a lapsed subscriber can turn it off).
+   */
+  const proToEnable = requirePro(db, clock);
+  router.patch(
+    "/quests/:id/shame",
+    (req, res, next) => ((req.body as { enabled?: unknown } | undefined)?.enabled === false ? next() : proToEnable(req, res, next)),
+    async (req, res) => {
+      const questId = String(req.params.id);
+      const userId = req.user!.id;
+      const body = QuestShameRequestSchema.parse(req.body ?? {});
+      if (!UUID.test(questId)) {
+        res.status(404).json({ error: "Quest not found" });
+        return;
+      }
+      await withIdempotency(db, req, res, `PATCH /quests/${questId}/shame`, async (tx) => {
+        const now = clock();
+        await rollOverBeforeToday(tx, userId, now);
+        const [quest] = await tx
+          .select()
+          .from(quests)
+          .where(and(eq(quests.id, questId), eq(quests.userId, userId)))
+          .limit(1);
+        if (!quest) return { status: 404, body: { error: "Quest not found" } };
+        if (quest.status !== "active" || quest.expiresAt.getTime() <= now.getTime()) {
+          return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+        }
+        if (body.enabled && !(await membershipOf(tx, userId))) {
+          return { status: 409, body: { error: "Join a clan to use Shame Mode", code: "not_in_clan" } };
+        }
+        const [updated] = await tx
+          .update(quests)
+          .set({ shameMode: body.enabled })
+          .where(and(eq(quests.id, quest.id), eq(quests.status, "active")))
+          .returning();
+        if (!updated) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+        const tz = (await userTimezone(tx, userId))!;
+        return { status: 200, body: { quest: toQuestDto(updated, slotStateOf(updated, now, tz)) } };
+      });
+    },
+  );
 
   router.post("/quests/:id/refuse", async (req, res) => {
     const questId = String(req.params.id);

@@ -51,6 +51,9 @@ test("NOTICE_ORDER covers every server notice kind exactly once", () => {
     "rival_challenge_result",
     "rival_passed",
     "raid_result",
+    "challenge_received",
+    "challenge_result",
+    "shame",
   ]);
   // The kinds filter sent with every notice read is exactly this list.
   assert.equal(NOTICE_KINDS_PARAM, NOTICE_ORDER.join(","));
@@ -274,4 +277,36 @@ test("raid_result renders as a SYSTEM modal with the dispatch line", () => {
     title: "WEEK 44: POSITION 2 OF 3",
     body: line,
   });
+});
+
+test("named challenge and shame notices render as SYSTEM modals; shame notices share one modal", () => {
+  const received = { id: id(80), kind: "challenge_received", payload: { challengeId: id(81), handle: "USER // ASH-3", domain: "MIND", days: 7 }, createdAt: at() };
+  const result = (n: number, outcome: string, delta: number) => ({
+    id: id(n),
+    kind: "challenge_result",
+    payload: { challengeId: id(81), handle: "yuri_1", domain: "BODY", days: 3, outcome, myGain: 4.25, theirGain: -1, delta },
+    createdAt: at(),
+  });
+  const shame = (n: number, handle: string, questTitle: string) => ({ id: id(n), kind: "shame", payload: { handle, questTitle }, createdAt: at() });
+
+  const rcv = noticeView(nextNoticeGroup(parseNotices([received]).notices, new Set())!);
+  assert.deepEqual([rcv.modal, (rcv as { label: string }).label, (rcv as { title: string }).title], ["system", "CHALLENGE RECEIVED", "USER // ASH-3 challenged you."]);
+
+  const win = noticeView(nextNoticeGroup(parseNotices([result(82, "win", 3)]).notices, new Set())!) as { label: string; body: string };
+  assert.equal(win.label, "CHALLENGE WON");
+  assert.equal(win.body, "BODY gain: you +4.3, yuri_1 -1.0. +3.0 DISCIPLINE. Logged.");
+  const loss = noticeView(nextNoticeGroup(parseNotices([result(83, "loss", -1.5)]).notices, new Set())!) as { label: string; body: string };
+  assert.equal(loss.label, "CHALLENGE LOST");
+  assert.ok(loss.body.endsWith("-1.5 DISCIPLINE. Logged."));
+  const draw = noticeView(nextNoticeGroup(parseNotices([result(84, "draw", 0)]).notices, new Set())!) as { label: string; body: string };
+  assert.equal(draw.label, "CHALLENGE DRAWN");
+  assert.ok(draw.body.endsWith("No score change. Logged."));
+
+  const one = nextNoticeGroup(parseNotices([shame(85, "uma_1", "Run 5k")]).notices, new Set())!;
+  assert.equal((noticeView(one) as { title: string }).title, "uma_1 failed to complete: Run 5k. Logged.");
+  const many = nextNoticeGroup(parseNotices([shame(86, "uma_1", "Run 5k"), shame(87, "mal_1", "Read")]).notices, new Set())!;
+  assert.equal(many.notices.length, 2);
+  const m = noticeView(many) as { title: string; body: string };
+  assert.equal(m.title, "2 CLANMATES FAILED");
+  assert.equal(m.body, "uma_1 failed to complete: Run 5k. Logged.\nmal_1 failed to complete: Read. Logged.");
 });

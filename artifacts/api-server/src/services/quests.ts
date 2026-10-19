@@ -65,6 +65,7 @@ export function toQuestDto(q: typeof quests.$inferSelect, slotState: SlotState =
     refusalReason: q.refusalReason,
     slotStart: q.slotStart,
     slotEnd: q.slotEnd,
+    shameMode: q.shameMode,
     slotState,
     createdAt: q.createdAt.toISOString(),
   };

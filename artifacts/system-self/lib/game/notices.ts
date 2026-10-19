@@ -18,6 +18,9 @@ export const NOTICE_ORDER: readonly NoticeKind[] = [
   "rival_challenge_result",
   "rival_passed",
   "raid_result",
+  "challenge_received",
+  "challenge_result",
+  "shame",
 ];
 
 /** Sent as `?kinds=` / `?noticeKinds=` with every notice read: the server returns and pages only kinds this build renders. */
@@ -54,7 +57,7 @@ export function mergeNotices(...lists: readonly Notice[][]): Notice[] {
 
 export interface NoticeGroup {
   kind: NoticeKind;
-  /** One notice, or every waiting quest_failed / rival_passed notice (each batch shares one modal). */
+  /** One notice, or every waiting quest_failed / rival_passed / shame notice (each batch shares one modal). */
   notices: Notice[];
 }
 
@@ -66,10 +69,18 @@ export function nextNoticeGroup(notices: readonly Notice[], acknowledged: Readon
   for (const kind of NOTICE_ORDER) {
     const ofKind = waiting.filter((n) => n.kind === kind);
     if (ofKind.length === 0) continue;
-    return { kind, notices: kind === "quest_failed" || kind === "rival_passed" ? ofKind : [ofKind[0]!] };
+    return { kind, notices: kind === "quest_failed" || kind === "rival_passed" || kind === "shame" ? ofKind : [ofKind[0]!] };
   }
   return null;
 }
+
+/** `{handle} failed to complete: {questTitle}. Logged.` */
+export const shameLine = (p: { handle: string; questTitle: string }): string => `${p.handle} failed to complete: ${p.questTitle}. Logged.`;
+
+const gainSigned = (n: number): string => {
+  const r = Math.round(n * 10) / 10;
+  return r > 0 ? `+${r.toFixed(1)}` : r.toFixed(1);
+};
 
 export interface FailureItem {
   title: string;
@@ -211,6 +222,28 @@ export function noticeView(group: NoticeGroup): NoticeView {
         title: `WEEK ${p.week}: POSITION ${p.position} OF ${p.count}`,
         body: p.line,
       };
+    }
+    case "challenge_received": {
+      const p = first.payload;
+      return {
+        modal: "system",
+        tone: "alert",
+        label: "CHALLENGE RECEIVED",
+        title: `${p.handle} challenged you.`,
+        body: `${p.domain} // ${p.days} days. Highest domain gain wins: winner +3.0 DISCIPLINE, loser -1.5. Answer within 48 hours or it is ignored. Logged.`,
+      };
+    }
+    case "challenge_result": {
+      const p = first.payload;
+      const gains = `${p.domain} gain: you ${gainSigned(p.myGain)}, ${p.handle} ${gainSigned(p.theirGain)}.`;
+      if (p.outcome === "win") return { modal: "system", tone: "info", label: "CHALLENGE WON", title: `You beat ${p.handle}.`, body: `${gains} +${p.delta.toFixed(1)} DISCIPLINE. Logged.` };
+      if (p.outcome === "loss") return { modal: "system", tone: "alert", label: "CHALLENGE LOST", title: `${p.handle} beat you.`, body: `${gains} ${p.delta.toFixed(1)} DISCIPLINE. Logged.` };
+      return { modal: "system", tone: "info", label: "CHALLENGE DRAWN", title: `You and ${p.handle} finished level.`, body: `${gains} No score change. Logged.` };
+    }
+    case "shame": {
+      const lines = group.notices.flatMap((n) => (n.kind === "shame" ? [shameLine(n.payload)] : []));
+      if (lines.length === 1) return { modal: "system", tone: "alert", label: "SHAME MODE", title: lines[0]!, body: "They put it on the record. It stays there." };
+      return { modal: "system", tone: "alert", label: "SHAME MODE", title: `${lines.length} CLANMATES FAILED`, body: lines.join("\n") };
     }
     case "quest_failed":
       return {

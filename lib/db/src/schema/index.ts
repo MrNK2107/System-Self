@@ -25,3 +25,4 @@ export * from "./social";
 export * from "./rivals";
 export * from "./entitlements";
 export * from "./clans";
+export * from "./challenges";

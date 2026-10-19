@@ -15,7 +15,7 @@ export const RAID_TYPE_TITLE: Record<RaidType, string> = {
 export const RAID_TYPE_RULE: Record<RaidType, string> = {
   domain: "Total MIND logs across the clan.",
   discipline: "Clan-wide quest completion rate.",
-  body: "BODY logs and gym sessions across the clan.",
+  body: "BODY logs (gym sessions included) across the clan.",
   score: "Net hidden score movement of the clan.",
 };
 

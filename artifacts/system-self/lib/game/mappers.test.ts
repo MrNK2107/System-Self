@@ -170,6 +170,7 @@ const quest = (over: Partial<GameQuest> = {}): GameQuest => ({
   slotStart: null,
   slotEnd: null,
   slotState: "none" as const,
+  shameMode: false,
   createdAt: "2026-10-19T00:00:00.000Z",
   ...over,
 });

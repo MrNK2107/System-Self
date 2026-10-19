@@ -65,6 +65,8 @@ export interface Quest {
   slotStart?: string;
   slotEnd?: string;
   slotState?: "none" | "upcoming" | "open" | "missed";
+  /** PRO Shame Mode is on for this quest (the clan is told if it fails). */
+  shameMode?: boolean;
 }
 
 export interface QuestChain {

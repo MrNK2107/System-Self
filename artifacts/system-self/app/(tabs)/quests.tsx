@@ -19,6 +19,10 @@ import { useAuth } from "@/context/AuthContext";
 import { hasApiCode, isStaleFailure, isoWeekKey, mutationFailureLine, refuseFailureLine } from "@/lib/game/guards";
 import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
 import { QuestCard } from "@/components/QuestCard";
+import { ProLock } from "@/components/ProLock";
+import { useMyClanQuery } from "@/hooks/useClan";
+import { isProRequired } from "@/lib/api/pro";
+import { describeChallengeError } from "@/lib/challenges/challenges";
 import { SlotPicker } from "@/components/SlotPicker";
 import { FloorQuestCard } from "@/components/FloorQuestCard";
 import { useQuietHours } from "@/hooks/useDungeon";
@@ -119,7 +123,7 @@ export default function QuestsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    quests, completeQuest, refuseQuest, setQuestSlot, shadowSelf, getWeakestDomain,
+    quests, completeQuest, refuseQuest, setQuestSlot, setQuestShame, shadowSelf, getWeakestDomain,
     questChains, chainTemplates, startQuestChain, user, tierProgress,
     loading, loadError, questsLoadError, refresh, offline,
   } = useApp();
@@ -151,6 +155,9 @@ export default function QuestsScreen() {
   };
   const [startingKey, setStartingKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // PRO Shame Mode: offered on active quests only for clan members; a free account's toggle shows the PRO lock.
+  const inClan = !!useMyClanQuery().data?.clan;
+  const [shamePro, setShamePro] = useState(false);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const onRefresh = async () => {
@@ -196,6 +203,21 @@ export default function QuestsScreen() {
     } finally {
       setBusy(id, false);
       setRefuseBusy(false);
+    }
+  };
+
+  const onShame = async (quest: Quest, enabled: boolean) => {
+    if (inFlight.current.has(quest.id)) return;
+    setBusy(quest.id, true);
+    setNotice(null);
+    try {
+      const r = await setQuestShame(quest.id, enabled);
+      if (r.ok || isStale(r)) return;
+      if (r.reason === "error" && isProRequired(r.error)) setShamePro(true);
+      else if (r.reason === "error") setNotice(describeChallengeError(r.error));
+      else setNotice(describeFailure(r));
+    } finally {
+      setBusy(quest.id, false);
     }
   };
 
@@ -426,6 +448,7 @@ export default function QuestsScreen() {
         )}
 
         {notice && <Text style={[styles.notice, { color: colors.destructive }]}>{notice}</Text>}
+        {shamePro && <ProLock label="SHAME MODE" />}
 
         {showLoading && (
           <View style={[styles.emptyCard, { borderColor: colors.border }]}>
@@ -461,7 +484,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeDailies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} onBriefing={openBriefing} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} onBriefing={openBriefing} onShame={inClan ? onShame : undefined} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
                 ))}
                 {refusalLimit && (
                   <Text style={[styles.refusalNote, { color: colors.destructive }]}>{REFUSAL_RULE}</Text>
@@ -479,7 +502,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeWeeklies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} onBriefing={openBriefing} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} onBriefing={openBriefing} onShame={inClan ? onShame : undefined} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
                 ))}
               </View>
             )}
@@ -494,7 +517,7 @@ export default function QuestsScreen() {
                   </View>
                 </View>
                 {activeArcs.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} busy={busyIds.has(q.id)} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onShame={inClan ? onShame : undefined} busy={busyIds.has(q.id)} />
                 ))}
               </View>
             )}

@@ -96,6 +96,9 @@ export const NOTICE_KINDS = [
   "rival_passed",
   "rival_challenge_result",
   "raid_result",
+  "challenge_received",
+  "challenge_result",
+  "shame",
 ] as const;
 export const NoticeKindSchema = z.enum(NOTICE_KINDS);
 export type NoticeKind = z.infer<typeof NoticeKindSchema>;
@@ -152,6 +155,30 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
     bonus: z.number(),
     line: z.string(),
   }),
+  /** Someone challenged the user (PRO named challenge). `handle` is the challenger as the user may see them. */
+  challenge_received: z.object({
+    challengeId: z.string(),
+    handle: z.string(),
+    domain: RankedDomainSchema,
+    days: z.number().int(),
+  }),
+  /** A named challenge resolved. Gains are domain-score gains in the challenged domain; `delta` is the DISCIPLINE change (0 for a draw). */
+  challenge_result: z.object({
+    challengeId: z.string(),
+    handle: z.string(),
+    domain: RankedDomainSchema,
+    days: z.number().int(),
+    outcome: z.enum(["win", "loss", "draw"]),
+    myGain: z.number(),
+    theirGain: z.number(),
+    delta: z.number(),
+  }),
+  /**
+   * A clanmate's Shame Mode quest failed. `handle` is their username (clan-internal) and `questTitle` the quest's
+   * title: quest content is shared only for quests the owner opted in, per quest. Rendered `{handle} failed to
+   * complete: {questTitle}. Logged.`
+   */
+  shame: z.object({ handle: z.string(), questTitle: z.string() }),
 } as const satisfies Record<NoticeKind, z.ZodTypeAny>;
 
 const noticeOf = <K extends NoticeKind>(kind: K) =>
@@ -172,6 +199,9 @@ export const NoticeSchema = z.discriminatedUnion("kind", [
   noticeOf("rival_passed"),
   noticeOf("rival_challenge_result"),
   noticeOf("raid_result"),
+  noticeOf("challenge_received"),
+  noticeOf("challenge_result"),
+  noticeOf("shame"),
 ]);
 export type Notice = z.infer<typeof NoticeSchema>;
 export type NoticePayload<K extends NoticeKind> = z.infer<(typeof NOTICE_PAYLOAD_SCHEMAS)[K]>;
@@ -307,6 +337,8 @@ export const QuestSchema = z.object({
   refusalReason: z.string().nullable(),
   slotStart: z.string().nullable(),
   slotEnd: z.string().nullable(),
+  /** PRO Shame Mode opted in for this quest (the clan is told if it fails). */
+  shameMode: z.boolean(),
   /** Computed from the user's local now on GET /quests; "none" everywhere else. */
   slotState: z.enum(["none", "upcoming", "open", "missed"]),
   createdAt: z.string(),

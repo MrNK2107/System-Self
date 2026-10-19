@@ -97,7 +97,7 @@ test("refuseQuest sends the required trimmed reason and returns the floor offer"
     quest: {
       id: "q1", type: "daily", title: "Push Day", description: "d", domain: "BODY", status: "refused",
       expiresAt: "2026-10-19T20:00:00.000Z", resolvedAt: "2026-10-19T10:00:00.000Z", chainId: null, chainStep: null,
-      chainTotal: null, refusalReason: "tomorrow", slotStart: null, slotEnd: null, slotState: "none", createdAt: "2026-10-19T00:00:00.000Z",
+      chainTotal: null, refusalReason: "tomorrow", slotStart: null, slotEnd: null, slotState: "none", shameMode: false, createdAt: "2026-10-19T00:00:00.000Z",
     },
     penalty: 0,
     results: [],

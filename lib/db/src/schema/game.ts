@@ -134,6 +134,8 @@ export const quests = pgTable(
     refusalReason: text("refusal_reason"),
     slotStart: text("slot_start"), // HH:MM local, set by hand (Lock the Slot); never changes when the quest fails
     slotEnd: text("slot_end"),
+    /** PRO Shame Mode (PRD 11): when this quest fails the clan is told its title. Explicit per-quest opt-in. */
+    shameMode: boolean("shame_mode").notNull().default(false),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
   (t) => [index("quests_user_status_expires_idx").on(t.userId, t.status, t.expiresAt)],

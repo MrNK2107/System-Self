@@ -5,6 +5,7 @@ import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from "react
 import { RANKED_DOMAINS } from "@workspace/engine";
 import type { ClanMember } from "@workspace/contracts";
 import { AuthNotice, AuthShell } from "@/components/AuthShell";
+import { ChallengeComposer } from "@/components/ChallengeComposer";
 import { RankBadge } from "@/components/RankBadge";
 import { useColors } from "@/hooks/useColors";
 import { useClanActions, useMyClanQuery } from "@/hooks/useClan";
@@ -36,6 +37,7 @@ function MemberCard({
 }) {
   const colors = useColors();
   const p = m.profile;
+  const [challenging, setChallenging] = useState(false);
   return (
     <View style={[s.card, { backgroundColor: colors.card, borderColor: m.flagged ? "#E0555560" : colors.border }]}>
       <View style={s.head}>
@@ -62,6 +64,15 @@ function MemberCard({
             </View>
           ))}
         </View>
+      ) : null}
+      {!m.isSelf ? (
+        challenging ? (
+          <ChallengeComposer opponent={p.handle} />
+        ) : (
+          <TouchableOpacity onPress={() => setChallenging(true)} accessibilityRole="button" style={[s.action, { borderColor: colors.primary, alignSelf: "flex-start" }]}>
+            <Text style={[s.actionText, { color: colors.primary }]}>CHALLENGE</Text>
+          </TouchableOpacity>
+        )
       ) : null}
       {canRemove || canTransfer ? (
         <View style={s.actions}>

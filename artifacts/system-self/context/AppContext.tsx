@@ -28,6 +28,7 @@ import {
   newClientId,
   refuseQuest as refuseQuestRequest,
   setQuestSlot as setQuestSlotRequest,
+  setQuestShame as setQuestShameRequest,
   setHomePath as setHomePathRequest,
   retryFailedEntries,
   startChain,
@@ -131,6 +132,8 @@ interface AppContextType {
   refuseQuest: (questId: string, reason: string) => Promise<GameMutationResult<RefuseOutcome>>;
   /** Lock the Slot for an active quest; null clears it. */
   setQuestSlot: (questId: string, slot: { slotStart: string; slotEnd: string } | null) => Promise<GameMutationResult>;
+  /** PRO Shame Mode for an active quest (clan members only). */
+  setQuestShame: (questId: string, enabled: boolean) => Promise<GameMutationResult>;
   /** Opt in to or out of the home path (Tier I home sessions before the gym). */
   setHomePath: (active: boolean) => Promise<GameMutationResult>;
   /** Schedules a season (from tomorrow, 1-14 days). */
@@ -286,6 +289,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       runGuarded("quest-slot", (id) => setQuestSlotRequest(api, getOutbox(), questId, slot, id)),
     [runGuarded],
   );
+  const setQuestShame = useCallback(
+    (questId: string, enabled: boolean) =>
+      runGuarded("quest-shame", (id) => setQuestShameRequest(api, getOutbox(), questId, enabled, id)),
+    [runGuarded],
+  );
   const setHomePath = useCallback(
     (active: boolean) =>
       runGuarded("home-path", async (id) => {
@@ -361,6 +369,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       completeQuest,
       refuseQuest,
       setQuestSlot,
+      setQuestShame,
       setHomePath,
       scheduleSeason,
       cancelSeason,
@@ -376,7 +385,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
       state, stateQ.isError, stateQ.error, questsQ.data, questsQ.dataUpdatedAt, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
-      getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
+      getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, setQuestShame, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
       pendingCount, outboxSnap.failed.length, retryFailed, discardFailed,
     ],
   );
