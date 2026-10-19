@@ -5,17 +5,20 @@ const int = (min: number, max: number) => z.number().int().min(min).max(max);
 const money = z.number().positive().finite().max(1e12);
 const text = (max: number) => z.string().trim().min(1).max(max);
 const note = z.string().max(200).optional();
+/** Optional text: blank counts as absent, so a one-tap form never 400s on it. */
+const optText = (max: number) =>
+  z.string().trim().max(max).transform((v) => (v === "" ? undefined : v)).optional();
 
 /** The old untyped log and the special sessions keep free-form data (the 4 KB request limit still applies). */
 const Free = z.record(z.string(), z.unknown());
 
-const Workout = z.object({ kind: text(40), minutes: int(1, 600), intensity: int(1, 5) });
+const Workout = z.object({ kind: optText(40), minutes: int(1, 600), intensity: int(1, 5) });
 const Sleep = z.object({
   hours: z.number().min(0).max(16).multipleOf(0.25),
   quality: int(1, 5),
 });
-const Meal = z.object({ description: text(120), quality: int(1, 5) });
-const Focus = z.object({ minutes: int(1, 600), distraction: int(1, 5), subject: text(60) });
+const Meal = z.object({ description: optText(120), quality: int(1, 5) });
+const Focus = z.object({ minutes: int(1, 600), distraction: int(1, 5), subject: optText(60) });
 const Reading = z.object({ pages: int(1, 2000) });
 const Learning = z.object({ minutes: int(1, 600) });
 const Journal = z.object({ words: int(1, 20000) });
@@ -59,5 +62,6 @@ export function parseLogData(domain: RankedDomain, logType: string, data: unknow
       issues: parsed.error.issues.map((i) => ({ path: ["data", ...i.path].join("."), message: i.message })),
     };
   }
-  return { ok: true, data: parsed.data as Record<string, unknown> };
+  const out = Object.fromEntries(Object.entries(parsed.data as Record<string, unknown>).filter(([, v]) => v !== undefined));
+  return { ok: true, data: out };
 }

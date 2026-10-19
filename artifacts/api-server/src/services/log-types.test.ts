@@ -47,6 +47,10 @@ test("parseLogData: bounds from the PRD", () => {
   assert.ok(!ok("SOCIAL", "speaking", { minutes: 301 }));
   assert.ok(!ok("DISCIPLINE", "routine", { label: "x".repeat(81) }));
   assert.ok(ok("MIND", "generic", {}));
+  assert.ok(ok("BODY", "workout", { kind: "", minutes: 10, intensity: 3 }));
+  assert.ok(ok("BODY", "meal", { description: "", quality: 3 }));
+  assert.ok(ok("MIND", "focus", { minutes: 10, distraction: 1, subject: "" }));
+  assert.deepEqual(parseLogData("BODY", "meal", { description: "", quality: 3 }), { ok: true, data: { quality: 3 } });
 });
 
 test("a validated payload scores through logChanges", () => {

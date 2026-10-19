@@ -354,3 +354,28 @@ test("generic and session logs still score the plain base", { skip }, async () =
     assert.equal(res.body.results[0].actualDelta, Math.round((Math.min(100, before + delta) - before) * 10) / 10);
   }
 });
+
+test("sleep 8h quality 2 at streak 5: base with bonus, then -0.5; streak +1 once", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const today = localDate(new Date(), TZ);
+  await db!
+    .update(domainScores)
+    .set({ score: 50, streak: 5, lastLogDate: addDays(today, -1) })
+    .where(and(eq(domainScores.userId, id), eq(domainScores.domain, "BODY")));
+  const res = await post(a, token, { clientId: "s8", domain: "BODY", logType: "sleep", data: { hours: 8, quality: 2 } });
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assertContract(LogResponseSchema, res.body);
+  assert.deepEqual(res.body.results.map((r: { actualDelta: number }) => r.actualDelta), [3.8, -0.5]);
+  const row = await score(id, "BODY");
+  assert.equal(row.score, 53.3);
+  assert.equal(row.streak, 6);
+});
+
+test("empty optional text in typed data is accepted and dropped", { skip }, async () => {
+  const a = app();
+  const { token } = await setup(a);
+  const res = await post(a, token, { clientId: "e1", domain: "BODY", logType: "workout", data: { kind: "", minutes: 20, intensity: 3 } });
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assert.deepEqual(res.body.log.data, { minutes: 20, intensity: 3 });
+});

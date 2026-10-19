@@ -45,7 +45,10 @@ test("sleep tiers and quality", () => {
   assert.deepEqual(one("BODY", "sleep", { hours: 5, quality: 4 }), { domain: "BODY", delta: -1, bonus: false, activity: true });
   assert.deepEqual(one("BODY", "sleep", { hours: 5, quality: 2 }), { domain: "BODY", delta: -1.5, bonus: false, activity: true });
   assert.deepEqual(one("BODY", "sleep", { hours: 6.5, quality: 1 }), { domain: "BODY", delta: 0.5, bonus: false, activity: true });
-  assert.deepEqual(one("BODY", "sleep", { hours: 8, quality: 2 }), { domain: "BODY", delta: 2, bonus: false, activity: true });
+  assert.deepEqual(logChanges("BODY", "sleep", { hours: 8, quality: 2 }, false), [
+    { domain: "BODY", delta: 2.5, bonus: true, activity: true },
+    { domain: "BODY", delta: -0.5, bonus: false, activity: false },
+  ]);
 });
 
 test("sleep 5h at streak 9: -1.0 (not multiplied) and the streak still increments", () => {
@@ -58,6 +61,10 @@ test("sleep 5h at streak 9: -1.0 (not multiplied) and the streak still increment
   assert.equal(r.actualDelta, -1);
   assert.equal(r.next.streak, 10);
   assert.equal(r.next.lastLogDate, "2026-10-19");
+});
+
+test("optional-looking text fields may be empty in data (scoring ignores them)", () => {
+  assert.equal(one("BODY", "workout", { kind: "", minutes: 30, intensity: 4 }).delta, 2.5);
 });
 
 test("meal quality", () => {

@@ -78,9 +78,12 @@ export function logChanges(domain: RankedDomain, logType: string, data: unknown,
       const quality = num(d.quality);
       if (hours === null || quality === null) break;
       const penalty = quality <= 2 ? 0.5 : 0;
-      if (hours >= 7 && penalty === 0) return scaled(1);
-      const tier = hours >= 7 ? base : hours >= 6 ? 1 : -1;
-      return flat(round1(tier - penalty));
+      if (hours >= 7) {
+        // Full base with the streak bonus; a poor night then costs a separate flat 0.5 that is not activity.
+        const main = scaled(1);
+        return penalty === 0 ? main : [...main, { domain, delta: -penalty, bonus: false, activity: false }];
+      }
+      return flat(round1((hours >= 6 ? 1 : -1) - penalty));
     }
     case "workout": {
       const intensity = num(d.intensity);

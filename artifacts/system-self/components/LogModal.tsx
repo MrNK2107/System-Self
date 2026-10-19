@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, getStreakMultiplier, getStreakTier, type Domain } from "@/context/AppContext";
 import { ALL_DOMAINS, DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
-import { FORBIDDEN_DISCIPLINE_DELTA, FORBIDDEN_DOMAIN_DELTA } from "@workspace/engine";
+import { FORBIDDEN_DISCIPLINE_DELTA, FORBIDDEN_DOMAIN_DELTA, logChanges } from "@workspace/engine";
 import {
   checkLogForm,
   defaultTypeFor,
@@ -162,6 +162,9 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const bonusDelta = isForbidden ? FORBIDDEN_DOMAIN_DELTA : previewDelta(selectedDomain, selectedType, previewData, streak);
   const bonusGain = Math.round((bonusDelta - baseDelta) * 10) / 10;
   const tierColor = TIER_COLORS[tier] ?? config.color;
+  // The streak multiplier line only applies when at least one of the log's changes takes the streak bonus.
+  const takesBonus = !isForbidden && logChanges(selectedDomain, selectedType, previewData, false).some(c => c.bonus);
+  const shownTier = takesBonus ? tier : "none";
 
   const bannerOpacity = useRef(new Animated.Value(1)).current;
   const bannerTranslate = useRef(new Animated.Value(0)).current;
@@ -383,9 +386,9 @@ export function LogModal({ visible, onClose }: LogModalProps) {
               styles.multiplierBanner,
               {
                 borderColor: isForbidden ? "#9B000050" :
-                  tier === "none" ? colors.border : tierColor + "50",
+                  shownTier === "none" ? colors.border : tierColor + "50",
                 backgroundColor: isForbidden ? "#9B000010" :
-                  tier === "none" ? "transparent" : tierColor + "0E",
+                  shownTier === "none" ? "transparent" : tierColor + "0E",
                 opacity: bannerOpacity,
                 transform: [{ translateY: bannerTranslate }],
                 marginBottom: 24,
@@ -401,12 +404,12 @@ export function LogModal({ visible, onClose }: LogModalProps) {
               <View>
                 <Text style={[
                   styles.multiplierMain,
-                  { color: isForbidden ? "#9B0000" : tier === "none" ? colors.mutedForeground : tierColor },
+                  { color: isForbidden ? "#9B0000" : shownTier === "none" ? colors.mutedForeground : tierColor },
                 ]}>
                   {isForbidden
                     ? "FORBIDDEN  ·  RISK ACTIVE"
-                    : tier === "none"
-                    ? "NO STREAK  ·  BASE"
+                    : shownTier === "none"
+                    ? (takesBonus ? "NO STREAK  ·  BASE" : "FLAT  ·  NO STREAK BONUS")
                     : `×${multiplier.toFixed(1)}  ·  ${streak}D  ·  ${TIER_LABELS[tier]}`
                   }
                 </Text>
@@ -418,7 +421,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
             <View style={styles.multiplierRight}>
               <Text style={[
                 styles.multiplierPts,
-                { color: isForbidden ? "#9B0000" : tier === "none" ? colors.mutedForeground : tierColor },
+                { color: isForbidden ? "#9B0000" : shownTier === "none" ? colors.mutedForeground : tierColor },
               ]}>
                 {signed(bonusDelta)}
               </Text>
@@ -538,7 +541,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
           <Text style={styles.submitPts}>
             {isForbidden
               ? `${FORBIDDEN_GAIN} pts / ${FORBIDDEN_PENALTY} DISC`
-              : `${signed(bonusDelta)} pts${tier !== "none" && tier !== "low" ? `  ×${multiplier.toFixed(1)}` : ""}`
+              : `${signed(bonusDelta)} pts${shownTier !== "none" && shownTier !== "low" ? `  ×${multiplier.toFixed(1)}` : ""}`
             }
           </Text>
         </TouchableOpacity>

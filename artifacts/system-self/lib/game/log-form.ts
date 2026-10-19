@@ -17,13 +17,13 @@ const amount: FieldSpec = { key: "amount", label: "AMOUNT", kind: "number", deci
 
 /** The fields of each structured log type, in form order. Types without fields (home_session) have none. */
 export const LOG_FIELDS: Record<string, FieldSpec[]> = {
-  workout: [{ key: "kind", label: "KIND", kind: "text", max: 40 }, minutes(), intensity("INTENSITY")],
+  workout: [{ key: "kind", label: "KIND", kind: "text", max: 40, optional: true }, minutes(), intensity("INTENSITY")],
   sleep: [{ key: "hours", label: "HOURS", kind: "number", decimal: true, suffix: "h" }, quality("QUALITY")],
-  meal: [{ key: "description", label: "WHAT", kind: "text", max: 120 }, quality("QUALITY")],
+  meal: [{ key: "description", label: "WHAT", kind: "text", max: 120, optional: true }, quality("QUALITY")],
   focus: [
     minutes(),
     { key: "distraction", label: "DISTRACTION", kind: "scale", min: 1, max: 5, lowLabel: "locked in", highLabel: "scattered" },
-    { key: "subject", label: "SUBJECT", kind: "text", max: 60 },
+    { key: "subject", label: "SUBJECT", kind: "text", max: 60, optional: true },
   ],
   reading: [{ key: "pages", label: "PAGES", kind: "number" }],
   learning: [minutes()],
@@ -100,9 +100,13 @@ export function checkLogForm(domain: Domain, type: string, values: FormValues): 
   return { ok: false, message: label ? `Check ${label}: ${first!.message}` : (first?.message ?? "Check the entry.") };
 }
 
-/** The score a log is expected to give at this streak (preview only: the server applies the real one). */
+/** The total score a log is expected to give at this streak, summed over its changes (preview only: the server applies the real one). */
 export function previewDelta(domain: Domain, type: string, data: unknown, streak: number): number {
-  const c = logChanges(domain, type, data, false)[0]!;
-  const raw = c.bonus && c.delta > 0 ? c.delta * streakMultiplier(streak) : c.delta;
-  return Math.round(raw * 10) / 10;
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  return round1(
+    logChanges(domain, type, data, false).reduce(
+      (sum, c) => sum + round1(c.bonus && c.delta > 0 ? c.delta * streakMultiplier(streak) : c.delta),
+      0,
+    ),
+  );
 }

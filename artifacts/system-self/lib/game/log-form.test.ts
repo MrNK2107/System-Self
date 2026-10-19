@@ -47,5 +47,14 @@ test("previewDelta matches the engine, with the streak bonus only where it appli
   assert.equal(previewDelta("BODY", "workout", { kind: "x", minutes: 10, intensity: 5 }, 0), 2.8);
   assert.equal(previewDelta("BODY", "workout", { kind: "x", minutes: 10, intensity: 4 }, 5), 3.8); // 2.5 * 1.5
   assert.equal(previewDelta("BODY", "sleep", { hours: 5, quality: 4 }, 9), -1);
+  assert.equal(previewDelta("BODY", "sleep", { hours: 8, quality: 2 }, 5), 3.3); // 2.5*1.5=3.75 -> 3.8, then -0.5
+  assert.equal(previewDelta("BODY", "sleep", { hours: 6.5, quality: 1 }, 5), 0.5);
   assert.equal(previewDelta("WEALTH", "expense", { amount: 5, category: "x" }, 9), 0.5);
+});
+
+test("empty text fields that the server treats as absent pass the check", () => {
+  assert.ok(checkLogForm("BODY", "workout", { kind: "", minutes: 30, intensity: 4 }).ok);
+  assert.ok(checkLogForm("BODY", "meal", { description: " ", quality: 3 }).ok);
+  assert.ok(checkLogForm("MIND", "focus", { minutes: 30, distraction: 2, subject: "" }).ok);
+  assert.ok(!checkLogForm("WEALTH", "expense", { amount: 5, category: "" }).ok);
 });
