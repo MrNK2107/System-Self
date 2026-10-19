@@ -401,10 +401,28 @@ test("quest completion after 6 empty days -> comeback notice (first) and row", {
   assert.equal(rows[0]!.startedOn, TODAY);
 });
 
-test("a backdated return starts today's comeback, judged from the activity's own date", { skip }, async () => {
+test("a backdated return to a date already rolled over scores but starts no comeback", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, addDays(TODAY, -8)); // yesterday is already rolled
+  const res = await request(a)
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "bd0", domain: "BODY", logType: "workout", data: { kind: "Run", minutes: 30, intensity: 4 }, occurredAt: new Date(NOW.getTime() - 30 * 3600_000).toISOString() });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.log.isRetroactive, true);
+  assert.ok(res.body.results[0].actualDelta > 0);
+  assert.equal(res.body.notices.some((x: { kind: string }) => x.kind === "comeback"), false);
+  assert.equal((await db!.select().from(comebacks).where(eq(comebacks.userId, id))).length, 0);
+  const [day] = await db!.select().from(userDayState).where(eq(userDayState.userId, id));
+  assert.equal(day!.lastActivityDate, addDays(TODAY, -8));
+});
+
+test("a backdated return to a date not yet rolled starts today's comeback, judged from the activity's own date", { skip }, async () => {
   const a = clockApp();
   const { token, id } = await setup(a);
   await seed(id, addDays(TODAY, -8));
+  await db!.update(userDayState).set({ lastRolledDate: addDays(TODAY, -3) }).where(eq(userDayState.userId, id));
   const res = await request(a)
     .post("/api/logs")
     .set(auth(token))

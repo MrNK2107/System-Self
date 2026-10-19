@@ -118,6 +118,8 @@ export interface LogInput {
   intensity?: number;
   /** Extra log data (for example a floor session's routine). */
   data?: Record<string, unknown>;
+  /** When it happened (ISO); default now. The log modal's date chooser sets it for a past day. */
+  occurredAt?: string;
 }
 
 /** The outbox entry for one log. The clientId is the server's idempotency key. */
@@ -130,7 +132,7 @@ export function buildLogRequest(input: LogInput, clientId: string, now: Date = n
     data: { ...input.data, ...(input.intensity === undefined ? {} : { intensity: input.intensity }) },
     ...(note ? { freeText: note.slice(0, 2000) } : {}),
     forbidden: input.forbidden ?? false,
-    occurredAt: now.toISOString(),
+    occurredAt: input.occurredAt ?? now.toISOString(),
   });
   return { clientId, method: "POST", path: "/api/logs", body };
 }

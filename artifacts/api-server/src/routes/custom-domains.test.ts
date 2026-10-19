@@ -224,6 +224,21 @@ test("a custom log is +2.5 with the domain's own streak multiplier and answers {
   clock = at("2026-03-10T08:00:00Z");
 });
 
+test("custom logs follow the PRO-aware retroactive window", { skip }, async () => {
+  const free = await mk("rfree");
+  const pro = await mk("rpro");
+  await grantEntitlement(db!, pro.id, "pro", null, clock);
+  const df = (await create(free, { name: "Words" })).body.domain;
+  const dp = (await create(pro, { name: "Words" })).body.domain;
+  const ago = (ms: number) => new Date(clock.getTime() - ms).toISOString();
+  assert.equal((await logTo(free, df.id, { occurredAt: ago(47 * 3600_000) })).status, 201);
+  assert.equal((await logTo(free, df.id, { occurredAt: ago(49 * 3600_000) })).status, 422);
+  assert.equal((await logTo(pro, dp.id, { occurredAt: ago(49 * 3600_000) })).status, 201);
+  const old = await logTo(pro, dp.id, { occurredAt: ago(31 * 24 * 3600_000) });
+  assert.equal(old.status, 422);
+  assert.equal(old.body.code, "retroactive_limit");
+});
+
 test("custom log rules: validation, 48h retroactive limit, future, archived, ownership", { skip }, async () => {
   const u = await mk();
   const other = await mk("other");

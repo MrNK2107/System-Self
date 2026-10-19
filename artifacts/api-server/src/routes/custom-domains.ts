@@ -13,7 +13,7 @@ import {
 import { activeCustomCount, customDomainDetail, customLimit, latestValues, toCustomDomainDto, userToday } from "../services/custom-domains";
 import { isPro, proRequiredResult } from "../services/entitlements";
 import { withIdempotency } from "../services/idempotency";
-import { occurredAtError } from "../services/retroactive";
+import { checkOccurredAt } from "../services/retroactive";
 import type { Tx } from "../services/user-lock";
 
 // CUSTOM domains (PRD 8): user-defined stats with a separate 0-100 score. RULING: a custom log is NOT ranked activity.
@@ -146,7 +146,7 @@ export function customDomainsRoutes(db: Db, clock: () => Date = () => new Date()
         const occurredAt = body.occurredAt ? new Date(body.occurredAt) : now;
         const domain = await ownDomain(tx, userId, id);
         if (!domain) return NOT_FOUND;
-        const badTime = occurredAtError(now, occurredAt);
+        const badTime = await checkOccurredAt(tx, userId, now, occurredAt);
         if (badTime) return badTime;
         const [user] = await tx.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
         const today = localDate(now, user!.tz);

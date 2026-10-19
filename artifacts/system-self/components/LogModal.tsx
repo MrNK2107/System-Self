@@ -14,6 +14,10 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CustomLogSection } from "@/components/CustomLogSection";
+import { ProLock } from "@/components/ProLock";
+import { useCustomDomainsQuery } from "@/hooks/useCustom";
+import { deviceTimezone, useAuth } from "@/context/AuthContext";
+import { FREE_DAYS_BACK, dayOptions, occurredAtFor } from "@/lib/game/log-date";
 import { FreeFormLog } from "@/components/FreeFormLog";
 import type { LogProposalDto } from "@workspace/contracts";
 import { proposalToFormValues } from "@/lib/freeform/freeform";
@@ -152,6 +156,13 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const [isForbidden, setIsForbidden] = useState(false);
   const [showForbiddenWarning, setShowForbiddenWarning] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Which day the entry is dated: 0 = today. Free users reach 2 days back, PRO users 30 (the server enforces it).
+  const [daysBack, setDaysBack] = useState(0);
+  const [showOlder, setShowOlder] = useState(false);
+  const accountTz = useAuth().user?.timezone;
+  // PRO as the server last reported it; unknown counts as free here, so the chooser never offers a day the server may refuse.
+  const pro = useCustomDomainsQuery().data?.isPro === true;
+  const days = dayOptions(new Date(), accountTz, pro, deviceTimezone());
 
   const config = LOG_CONFIGS.find(c => c.domain === selectedDomain)!;
 
@@ -256,7 +267,14 @@ export function LogModal({ visible, onClose }: LogModalProps) {
 
     try {
       // Queued in the outbox: it is kept on the device and sent when there is a connection.
-      await addLog({ domain: selectedDomain, type: selectedType, forbidden: isForbidden, note, data: check.data });
+      await addLog({
+        domain: selectedDomain,
+        type: selectedType,
+        forbidden: isForbidden,
+        note,
+        data: check.data,
+        ...(daysBack > 0 ? { occurredAt: occurredAtFor(new Date(), daysBack, pro) } : {}),
+      });
     } catch {
       setSubmitError("The entry could not be recorded on this device. Sign in again, then retry.");
       setSubmitting(false);
@@ -264,6 +282,8 @@ export function LogModal({ visible, onClose }: LogModalProps) {
     }
 
     setNote("");
+    setDaysBack(0);
+    setShowOlder(false);
     selectType(selectedDomain, selectedType);
     setIsForbidden(false);
     setShowForbiddenWarning(false);
@@ -509,6 +529,67 @@ export function LogModal({ visible, onClose }: LogModalProps) {
               onChange={v => setValue(field.key, v)}
             />
           ))}
+
+          {/* Day: today by default; yesterday and 2 days back for everyone, older days (to 30) for PRO */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DAY</Text>
+            <View style={styles.typeRow}>
+              {days.slice(0, FREE_DAYS_BACK + 1).map(d => {
+                const on = daysBack === d.daysBack;
+                const activeColor = isForbidden ? "#9B0000" : config.color;
+                return (
+                  <TouchableOpacity
+                    key={d.date}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Log for ${d.label}`}
+                    style={[styles.typeBtn, { borderColor: on ? activeColor : colors.border, backgroundColor: on ? activeColor + "20" : "transparent" }]}
+                    onPress={() => { Haptics.selectionAsync(); setDaysBack(d.daysBack); setSubmitError(null); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.typeLabel, { color: on ? activeColor : colors.mutedForeground }]}>{d.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {pro ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Pick an older day"
+                  style={[styles.typeBtn, { borderColor: daysBack > FREE_DAYS_BACK ? config.color : colors.border }]}
+                  onPress={() => setShowOlder(o => !o)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.typeLabel, { color: daysBack > FREE_DAYS_BACK ? config.color : colors.mutedForeground }]}>
+                    {daysBack > FREE_DAYS_BACK ? days[daysBack]!.label : "Older"}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {!pro ? <ProLock label="Older days" /> : null}
+            {pro && showOlder ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeRow}>
+                {days.slice(FREE_DAYS_BACK + 1).map(d => {
+                  const on = daysBack === d.daysBack;
+                  return (
+                    <TouchableOpacity
+                      key={d.date}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Log for ${d.label}`}
+                      style={[styles.typeBtn, { borderColor: on ? config.color : colors.border, backgroundColor: on ? config.color + "20" : "transparent" }]}
+                      onPress={() => { Haptics.selectionAsync(); setDaysBack(d.daysBack); setShowOlder(false); setSubmitError(null); }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.typeLabel, { color: on ? config.color : colors.mutedForeground }]}>{d.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
+            {daysBack > 0 ? (
+              <Text style={[styles.forbiddenSub, { color: colors.mutedForeground }]}>
+                Dated {days[daysBack]!.label}. Scores, but a day already closed keeps its streak.
+              </Text>
+            ) : null}
+          </View>
 
           {/* Note */}
           <View style={styles.section}>

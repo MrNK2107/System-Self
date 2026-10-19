@@ -1,6 +1,6 @@
 import express, { Router, type IRouter, type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import { and, desc, eq, lt, or } from "drizzle-orm";
-import { logs, profiles, quests, users, type Db } from "@workspace/db";
+import { logs, profiles, quests, userDayState, users, type Db } from "@workspace/db";
 import { PARSE_LIMIT_PER_DAY, VOICE_LIMIT_PER_DAY, localDate, logChanges } from "@workspace/engine";
 import {
   AI_UNAVAILABLE_CODE,
@@ -20,7 +20,8 @@ import { rollOverDue } from "../services/rollover";
 import { track } from "../services/analytics";
 import { applyActivityChanges } from "../services/activity";
 import { countHomeSession } from "../services/comeback";
-import { occurredAtError } from "../services/retroactive";
+import { checkOccurredAt } from "../services/retroactive";
+import { logger } from "../lib/logger";
 
 /** A stored log as the API returns it (also used by routes that record logs of their own, e.g. finance). */
 export function toLogDto(l: typeof logs.$inferSelect) {
@@ -118,7 +119,11 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date(), ai: AiD
       if (out.code === "audio_too_long") res.status(422).json({ error: "Recording is longer than 120 seconds", code: "audio_too_long" });
       else {
         // Our side failed, not the user's: the call does not count against the day (audio_too_long and successes do).
-        await refundDailyCall(db, req.user!.id, "voice_call", now);
+        try {
+          await refundDailyCall(db, req.user!.id, "voice_call", now);
+        } catch (err) {
+          logger.error({ err: (err as Error).message }, "Voice limit refund failed");
+        }
         res.status(503).json({ error: "Voice logging is unavailable", code: AI_UNAVAILABLE_CODE });
       }
       return;
@@ -144,7 +149,7 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date(), ai: AiD
     await withIdempotency(db, req, res, "POST /logs", async (tx) => {
       const now = clock();
       const occurredAt = body.occurredAt ? new Date(body.occurredAt) : now;
-      const tooOld = occurredAtError(now, occurredAt);
+      const tooOld = await checkOccurredAt(tx, userId, now, occurredAt);
       if (tooOld) return tooOld;
 
       const [user] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -183,8 +188,14 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date(), ai: AiD
         })
         .returning();
 
+      // A log for a date that has already rolled over still scores, but it is not activity: its streak, decay and
+      // demotion were settled at rollover, so it must not repair a streak, move lastLogDate/lastActivityDate back,
+      // or trigger a comeback (PRO's 30-day window must not buy rank).
+      const [day] = await tx.select({ rolled: userDayState.lastRolledDate }).from(userDayState).where(eq(userDayState.userId, userId)).limit(1);
+      const rolledOver = day?.rolled != null && day.rolled >= logDate;
       const changes = logChanges(body.domain, body.logType, data, forbidden).map((c) => ({
         ...c,
+        activity: rolledOver ? false : c.activity,
         reason: forbidden ? ("forbidden" as const) : ("log" as const),
         refId: log!.id,
       }));
