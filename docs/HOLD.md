@@ -25,7 +25,7 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 
 ## H-04 🟨 Payments (RevenueCat + store products)
 **Need:** a RevenueCat project, API keys, and store products for PRO (₹499/month, ₹3,999/year per the PRD).
-**Doing instead:** server-side entitlements (`entitlements` table), a RevenueCat webhook endpoint that verifies a shared secret, and a paywall screen. Without keys the purchase button shows "unavailable", and an admin endpoint can grant PRO for testing ([docs/RUNBOOK.md](RUNBOOK.md#grant-pro-for-support)).
+**Doing instead:** server-side entitlements (`entitlements` table), a RevenueCat webhook endpoint that verifies a shared secret, and a paywall screen. Without keys the purchase button shows "unavailable", and an admin endpoint can grant PRO for testing ([docs/RUNBOOK.md](RUNBOOK.md#grant-pro-for-support)). The webhook is tested against all 20 of RevenueCat's published sample events (`artifacts/api-server/src/routes/fixtures/revenuecat-sample-events.json`): every one is accepted, a sample purchase grants PRO and a sample expiration revokes it. Still untested: a real sandbox purchase on a store build.
 **Transfers:** `TRANSFER` webhook events (a restore moving a purchase to another account) are only applied when `REVENUECAT_API_KEY` (the secret v1 REST key) is set; without it they are logged and change nothing.
 **Resolution:**
 
@@ -57,6 +57,7 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 ## H-10 🟨 Hands-on device QA in Expo Go
 **Need:** someone to open the app in Expo Go on a real phone (iOS and Android) and walk through sign-up → onboarding → logging → quests → gym → settings, reporting anything that looks or behaves wrong.
 **Why I can't:** I can't operate a phone, and the browser automation tools failed to connect in this session.
+**Done so far (2026-10-20):** a full walk-through in Expo Go on an Android 17 emulator (Medium_Phone): sign-up → onboarding (ratings, objective, identity, life context, schedule) → home → free-form log (two entries confirmed, scores and streaks updated) → quest complete and refuse → stats and history → settings → legal → data export (share sheet) → account deletion (back to sign-in). Zero server errors. Six defects it found are fixed (keyboard covering sheets, prompt text shown as copy, invisible single-day history, unlabeled tabs, raw identity label, UTC export date). Still needed: iOS in Expo Go and a store build on real hardware.
 **Doing instead:** every screen is verified by typecheck, a full Android bundle export (`expo export`), unit tests, and node smoke scripts that drive the same API calls the screens make against a real local server. Run it yourself with: `docker compose up -d postgres`, migrate, `pnpm --filter @workspace/api-server dev` (and `dev:worker`), then, with `EXPO_PUBLIC_API_URL=http://<LAN IP>:3001`, `pnpm exec expo start --go --lan` in `artifacts/system-self` and scan the QR code (`--go` is required: `expo-dev-client` is installed for EAS development builds, and without the flag the dev server serves a dev-client bundle that Expo Go cannot open). Step by step: [README.md](../README.md#dev-quick-start).
 **Resolution:**
 
