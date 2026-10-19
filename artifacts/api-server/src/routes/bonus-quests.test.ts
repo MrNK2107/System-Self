@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { achievements, analyticsEvents, clanMembers, clans, comebacks, dailySnapshots, notices, quests, scoreEvents, userDayState } from "@workspace/db";
+import { achievements, analyticsEvents, domainScores, clanMembers, clans, comebacks, dailySnapshots, notices, quests, scoreEvents, userDayState } from "@workspace/db";
 import { localDate } from "@workspace/engine";
 import { QuestCompleteResponseSchema, QuestListResponseSchema, QuestRefuseResponseSchema, QuestSchema } from "@workspace/contracts";
 import { app, assertContract, assertStoredNoticesMatchContract, auth, db, score, setup, skip, TZ } from "./game-test-helpers";
@@ -244,10 +244,13 @@ test("bonus quests do not move the clan member %, the raid discipline metric, ac
 test("the rollover snapshot hidden score ignores bonus quests (twin user comparison)", { skip }, async () => {
   const x = await pro("twin_x");
   const y = await pro("twin_y");
-  const today = localDate(clock, TZ);
+  // Non-zero scores (the hidden score is a weighted sum) and at least 5 resolved quests mostly failed: without the
+  // filter the completion rate is 1/7 < 0.5, so the multiplier drops to 0.85 and the hidden score differs.
+  for (const u of [x, y]) await db!.update(domainScores).set({ score: 50 }).where(eq(domainScores.userId, u.id));
   await db!.insert(quests).values([
-    row(x.id, { status: "failed", resolvedLocalDate: today }), row(x.id, { status: "failed", resolvedLocalDate: today }),
-    row(x.id, { status: "refused", refusalReason: "x", resolvedLocalDate: today }), row(x.id, { status: "failed", resolvedLocalDate: today }),
+    row(x.id, { status: "complete" }),
+    ...Array.from({ length: 5 }, () => row(x.id, { status: "failed" })),
+    row(x.id, { status: "refused", refusalReason: "x" }),
   ]);
   const later = new Date(clock.getTime() + 2 * 86_400_000);
   await ensureRolledOver(db!, x.id, later);
@@ -256,11 +259,12 @@ test("the rollover snapshot hidden score ignores bonus quests (twin user compari
   const sx = await snap(x.id);
   const sy = await snap(y.id);
   assert.equal(sx.localDate, sy.localDate);
+  assert.ok(sy.hidden > 0, "a non-zero hidden score, so the multiplier matters");
   assert.equal(sx.hidden, sy.hidden);
 });
 
 test("a floor_session log cannot complete a floor offer through a refused bonus quest id", { skip }, async () => {
-  const { token, id } = await pro();
+  const { token } = await pro();
   const bonusId = (await bonus(token)).body.quest.id as string;
   const refused = await request(a()).post(`/api/quests/${bonusId}/refuse`).set(auth(token)).send({ reason: "no" });
   assert.equal(refused.status, 200);
@@ -269,5 +273,4 @@ test("a floor_session log cannot complete a floor offer through a refused bonus 
   });
   assert.equal(res.status, 201, JSON.stringify(res.body));
   assert.equal((await db!.select().from(analyticsEvents).where(eq(analyticsEvents.name, "floor_completed"))).length, 0);
-  void id;
 });
