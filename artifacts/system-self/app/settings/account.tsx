@@ -200,7 +200,7 @@ export default function AccountScreen() {
               autoComplete="current-password"
               editable={!deleteBusy}
             />
-            <AuthButton label="DELETE MY ACCOUNT" loading={deleteBusy} onPress={() => void submitDelete()} />
+            <AuthButton label="DELETE MY ACCOUNT" destructive loading={deleteBusy} onPress={() => void submitDelete()} />
             {deleteError ? <AuthNotice message={deleteError} /> : null}
           </>
         ) : null}

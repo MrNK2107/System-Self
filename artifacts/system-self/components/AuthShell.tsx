@@ -77,9 +77,11 @@ interface AuthButtonProps {
   onPress: () => void;
   loading?: boolean;
   disabled?: boolean;
+  /** Irreversible actions (account deletion) render in the destructive colour. */
+  destructive?: boolean;
 }
 
-export function AuthButton({ label, onPress, loading, disabled }: AuthButtonProps) {
+export function AuthButton({ label, onPress, loading, disabled, destructive }: AuthButtonProps) {
   const colors = useColors();
   const inactive = disabled || loading;
   return (
@@ -89,12 +91,12 @@ export function AuthButton({ label, onPress, loading, disabled }: AuthButtonProp
       activeOpacity={0.85}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!inactive, busy: !!loading }}
-      style={[s.button, { backgroundColor: inactive ? colors.muted : colors.accentFill }]}
+      style={[s.button, { backgroundColor: inactive ? colors.muted : destructive ? colors.destructive : colors.accentFill }]}
     >
       {loading ? (
-        <ActivityIndicator color={colors.primaryForeground} />
+        <ActivityIndicator color={destructive ? colors.destructiveForeground : colors.primaryForeground} />
       ) : (
-        <Text style={[s.buttonText, { color: inactive ? colors.subtle : colors.primaryForeground }]}>{label}</Text>
+        <Text style={[s.buttonText, { color: inactive ? colors.subtle : destructive ? colors.destructiveForeground : colors.primaryForeground }]}>{label}</Text>
       )}
     </TouchableOpacity>
   );

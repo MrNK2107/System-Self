@@ -25,6 +25,7 @@ import { ScreenStatus } from "@/components/ScreenStatus";
 import { StreakCalendar } from "@/components/StreakCalendar";
 import { HistoryPanel, RankFreezeCard } from "@/components/HistoryPanel";
 import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
+import { IDENTITY_OPTIONS } from "@/constants/identity";
 
 const MILESTONE_TIERS: MilestoneTier[] = [60, 70, 80, 90, 100];
 
@@ -563,7 +564,7 @@ export default function StatsScreen() {
             <Feather name="eye" size={14} color={colors.mutedForeground} />
             <Text style={[styles.settingLabel, { color: colors.foreground }]}>Identity</Text>
             <Text style={[styles.settingValue, { color: colors.mutedForeground }]}>
-              {user.identitySetting.toUpperCase()}
+              {IDENTITY_OPTIONS.find((o) => o.value === user.identitySetting)?.label ?? user.identitySetting.toUpperCase()}
             </Text>
           </View>
           <View style={[styles.separator, { backgroundColor: colors.border }]} />

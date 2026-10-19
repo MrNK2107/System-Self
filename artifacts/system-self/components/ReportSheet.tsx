@@ -1,6 +1,6 @@
 // "Report a player" sheet. The reason is required (1-500 characters) and goes to admin review.
 import React, { useEffect, useState } from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { REPORT_REASON_MAX, normalizeReportReason } from "@/lib/social/social";
@@ -26,7 +26,7 @@ export function ReportSheet({ visible, handle, busy, error, onCancel, onConfirm 
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.fill}>
+      <KeyboardAvoidingView behavior="padding" style={s.fill}>
         <Pressable style={s.backdrop} onPress={busy ? undefined : onCancel} />
         <View style={[s.sheet, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: insets.bottom + 16 }]}>
           <Text style={[s.label, { color: colors.destructive }]}>REPORT PLAYER</Text>

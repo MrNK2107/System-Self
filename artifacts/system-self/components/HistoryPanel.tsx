@@ -83,7 +83,7 @@ export function HistoryPanel() {
               {changes.map((c) => (
                 <Line key={`l${c.index}`} x1={xAt(c.index)} x2={xAt(c.index)} y1={0} y2={CHART_H} stroke={colors.mutedForeground} strokeWidth={1} strokeDasharray="2 3" />
               ))}
-              <Path d={seriesPath(domainSeries(items, d), from, span, CHART_W, CHART_H)} stroke={colors.primary} strokeWidth={1.5} fill="none" />
+              <Path d={seriesPath(domainSeries(items, d), from, span, CHART_W, CHART_H)} stroke={colors.primary} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
               {changes.map((c) => (
                 <SvgText key={`t${c.index}`} x={Math.min(xAt(c.index) + 3, CHART_W - 8)} y={CHART_H + 10} fontSize={9} fontWeight="700" fill={colors.primary}>
                   {c.to}

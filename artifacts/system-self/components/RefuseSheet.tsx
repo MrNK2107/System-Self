@@ -1,6 +1,6 @@
 // "Why not today?" sheet shown before a quest is refused. The reason is required (1-200 characters).
 import React, { useEffect, useState } from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { normalizeReason } from "@/lib/game/adherence";
@@ -29,7 +29,7 @@ export function RefuseSheet({ visible, questTitle, busy, onCancel, onConfirm }: 
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.fill}>
+      <KeyboardAvoidingView behavior="padding" style={styles.fill}>
         <Pressable style={styles.backdrop} onPress={busy ? undefined : onCancel} />
         <View
           style={[

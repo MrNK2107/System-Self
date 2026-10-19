@@ -171,3 +171,14 @@ test("export is rate limited per user", { skip }, async () => {
   // Another user is not affected by the first user's bucket.
   assert.equal((await request(a).get("/api/account/export").set(auth(other.token))).status, 200);
 });
+
+test("the export filename uses the account's own date, not UTC's", { skip }, async () => {
+  // 20:30 UTC on 4 March is already 5 March in Asia/Kolkata (UTC+5:30).
+  const late = new Date("2026-03-04T20:30:00Z");
+  const a = app({ now: () => late });
+  const me = await setup(a);
+  await db!.update(s.users).set({ timezone: "Asia/Kolkata" }).where(eq(s.users.id, me.id));
+  const res = await request(a).get("/api/account/export").set(auth(me.token));
+  assert.equal(res.status, 200);
+  assert.equal(res.headers["content-disposition"], 'attachment; filename="system-self-export-2026-03-05.json"');
+});

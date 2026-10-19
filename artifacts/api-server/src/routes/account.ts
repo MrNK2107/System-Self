@@ -1,18 +1,30 @@
 import { Router, type IRouter, type Response } from "express";
 import rateLimit from "express-rate-limit";
-import type { Db } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { users, type Db } from "@workspace/db";
+import { localDate } from "@workspace/engine";
 import { buildExport } from "../services/export";
 
 export const EXPORT_RATE_LIMIT_MAX = 3;
 export const EXPORT_RATE_LIMIT_WINDOW_MS = 60 * 60_000;
 
+/** The export's date in the account's own timezone (UTC when unknown), so the filename matches the user's calendar. */
+export async function exportDate(db: Db, userId: string, at: Date): Promise<string> {
+  const [row] = await db.select({ timezone: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
+  try {
+    return localDate(at, row?.timezone ?? "UTC");
+  } catch {
+    return at.toISOString().slice(0, 10);
+  }
+}
+
 /** Sends an export document as the JSON attachment both the user and the admin export routes return. */
-export function sendExport(res: Response, json: string, at: Date): void {
+export function sendExport(res: Response, json: string, date: string): void {
   res
     .status(200)
     .set({
       "Content-Type": "application/json; charset=utf-8",
-      "Content-Disposition": `attachment; filename="system-self-export-${at.toISOString().slice(0, 10)}.json"`,
+      "Content-Disposition": `attachment; filename="system-self-export-${date}.json"`,
       "Cache-Control": "no-store",
     })
     .send(json);
@@ -38,7 +50,7 @@ export function accountRoutes(db: Db, now: () => Date = () => new Date()): IRout
     const { json, redacted } = await buildExport(db, req.user!.id, at);
     if (redacted > 0) req.log.warn({ event: "export_redacted", redacted }, "export_safety_net");
     req.log.info({ event: "account_export", bytes: Buffer.byteLength(json) }, "account_event");
-    sendExport(res, json, at);
+    sendExport(res, json, await exportDate(db, req.user!.id, at));
   });
 
   return router;

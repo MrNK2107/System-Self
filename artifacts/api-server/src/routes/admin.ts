@@ -9,7 +9,7 @@ import { toPublicUser } from "../lib/auth/public-user";
 import { buildExport } from "../services/export";
 import { deleteAccount } from "../services/account";
 import { withIdempotency } from "../services/idempotency";
-import { sendExport } from "./account";
+import { exportDate, sendExport } from "./account";
 
 const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
@@ -99,7 +99,7 @@ export function adminRoutes(db: Db, clock: () => Date = () => new Date()): IRout
     const at = clock();
     const { json, redacted } = await buildExport(db, id, at);
     if (redacted > 0) req.log.warn({ event: "export_redacted", redacted }, "export_safety_net");
-    sendExport(res, json, at);
+    sendExport(res, json, await exportDate(db, id, at));
   });
 
   /**

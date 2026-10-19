@@ -43,6 +43,8 @@ export default function TabLayout() {
         <Tabs.Screen
           name="index"
           options={{
+            title: "Home",
+            tabBarAccessibilityLabel: "Home",
             tabBarIcon: ({ color, size }) => (
               <Feather name="grid" size={size} color={color} />
             ),
@@ -51,6 +53,8 @@ export default function TabLayout() {
         <Tabs.Screen
           name="log"
           options={{
+            title: "Log",
+            tabBarAccessibilityLabel: "Log",
             tabBarIcon: ({ color, size }) => (
               <Feather name="plus-circle" size={size} color={color} />
             ),
@@ -59,6 +63,8 @@ export default function TabLayout() {
         <Tabs.Screen
           name="quests"
           options={{
+            title: "Quests",
+            tabBarAccessibilityLabel: "Quests",
             tabBarIcon: ({ color, size }) => (
               <Feather name="target" size={size} color={color} />
             ),
@@ -67,6 +73,8 @@ export default function TabLayout() {
         <Tabs.Screen
           name="gym"
           options={{
+            title: "Gym",
+            tabBarAccessibilityLabel: "Gym",
             tabBarIcon: ({ color, size }) => (
               <Feather name="activity" size={size} color={color} />
             ),
@@ -75,6 +83,8 @@ export default function TabLayout() {
         <Tabs.Screen
           name="rivals"
           options={{
+            title: "Rivals",
+            tabBarAccessibilityLabel: "Rivals",
             tabBarIcon: ({ color, size }) => (
               <Feather name="users" size={size} color={color} />
             ),
@@ -83,6 +93,8 @@ export default function TabLayout() {
         <Tabs.Screen
           name="clan"
           options={{
+            title: "Clan",
+            tabBarAccessibilityLabel: "Clan",
             tabBarIcon: ({ color, size }) => (
               <Feather name="shield" size={size} color={color} />
             ),
@@ -91,6 +103,8 @@ export default function TabLayout() {
         <Tabs.Screen
           name="stats"
           options={{
+            title: "Stats",
+            tabBarAccessibilityLabel: "Stats",
             tabBarIcon: ({ color, size }) => (
               <Feather name="bar-chart-2" size={size} color={color} />
             ),
