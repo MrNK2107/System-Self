@@ -8,9 +8,13 @@ Targets (single API instance, local Postgres):
 | `POST /api/logs` | 50 req/s for 60 s | p95 < 300 ms |
 | both | | zero 5xx |
 
-**Result: both targets were met before any tuning and are still met after it, with a wide margin.** The tuning
-made `GET /api/state` about 20% faster under load (p95 96 to 73 ms) and halved its idle service time (13 to 6 ms).
-It also fixed three query plans that scale with the whole table instead of with one user.
+**Result: each scenario run alone met its target before any tuning and still does after it, with a wide margin.**
+The tuning made `GET /api/state` about 20% faster under load (p95 96 to 73 ms) and halved its idle service time
+(13 to 6 ms). It also fixed three query plans that scale with the whole table instead of with one user.
+
+**The mixed run (both scenarios at once) sits right at the state target with plain autocannon pacing.** Its state p95
+was 250.0 ms, so it fails `< 250`. With the same average rates spread over each second (`--stagger 10`), its p95s were
+28.8 ms (state) and 48.1 ms (logs). See "Mixed load" below.
 
 ## Machine
 
@@ -55,7 +59,36 @@ Latencies are client-side, in ms, from every response (exact percentiles, not au
 | After, scale check | 1,000 | 63.6 / 73.7 / 87.5 | 108.1 / 144.9 / 166.0 | 0 | 0 |
 
 Every run achieved its full rate: 6,000 `GET /state` responses (all 200) and 3,000 `POST /logs` responses (all 201) in
-60 s.
+60 s. A run passes only if p95 is under target, there are no 5xx and no errors, and the achieved rate is at least 95% of
+the target.
+
+Fix round 1 (reads capped at 4 connections per request, see below) reran the state-only scenario: p50 / p95 / p99
+63.7 / **77.3** / 111.5 ms, 6,000 × 200, PASS.
+
+### Mixed load (state 100 req/s and logs 50 req/s at once, 60 s, 200 users, fix-round-1 build)
+
+| Pacing | State p50 / p95 / p99 | Logs p50 / p95 / p99 | 5xx / errors | Verdict |
+|---|---|---|---|---|
+| autocannon `overallRate` (default, `--stagger 1`) | 95.3 / **250.0** / 278.3 | 130.0 / **179.7** / 220.4 | 0 / 0 | state FAIL (at the limit), logs PASS |
+| Same, `DB_POOL_MAX=20` (diagnostic) | 96.1 / 258.6 / 288.4 | 157.6 / 196.4 / 229.6 | 0 / 0 | state FAIL, logs PASS |
+| Same rates, `--stagger 10` (diagnostic) | 12.8 / **28.8** / 47.4 | 38.5 / **48.1** / 53.7 | 0 / 0 | PASS / PASS |
+
+Both rates were achieved in full: 6,000 × 200 and 3,000 × 201.
+
+**Why the default mixed run fails.** With `overallRate`, all 150 requests of each second leave together at the start of
+that second, so one Node event loop starts the second with a queue of 150. A CPU profile of the API during a mixed
+run, taken over the inspector, showed:
+- **62% idle on average.** About 380 ms of CPU per second.
+- **CPU per request about 2.5 ms.** Most of it is drizzle query building and row mapping: drizzle's `is()` entity
+  check alone was 5.7% of all samples, and `buildQueryFromSourceParams`, `buildSelection` and `mapFromDriverValue`
+  follow. Socket and log writes (`writev`) were 6%.
+
+The last requests of each burst wait out the queue, and that is what puts the state p95 at 250 ms. Doubling the pool
+made no difference, so this is not pool starvation. When the same 150 req/s arrive as 10 smaller bursts per second,
+p95 drops by almost 10x. Real clients do not synchronize on second boundaries, so the staggered figure is closer to
+production. The default figure is a worst-case burst test, and the API survives it with zero errors. Raising the
+burst margin would mean cutting per-request CPU (drizzle's query building and mapping is the largest part), or
+running more than one API instance.
 
 Idle service time of one `GET /state` (curl, warm): **about 13 ms before, about 6 ms after.**
 
@@ -111,8 +144,9 @@ large production table, build them with `CREATE INDEX CONCURRENTLY` by hand befo
    every call ran BEGIN, the lock, 3 reads and COMMIT. The worker keeps `ensureRolledOver`, because it must rewrite
    its lease. A stale schedule with nothing due is left for the worker to fix. Tests are in `services/rollover.test.ts`.
 2. **`buildGameState` issues independent reads together** (`lib/reads.ts`). It used to make 11 sequential queries;
-   now it makes two waves: 8 reads in parallel, then the hidden-score pair plus seasons. On the pool they use
-   separate connections. Inside a transaction (onboarding, profile, AI context) they still run one at a time,
+   now it makes two waves: 8 reads, then the hidden-score pair plus seasons. On the pool, at most
+   **4 reads per request** (`READS_MAX_CONCURRENCY`) hold a connection at once, so one request cannot drain the
+   default 10-connection pool. Inside a transaction (onboarding, profile, AI context) they still run one at a time,
    because node-postgres deprecates overlapping queries on one client.
 3. The single-user snapshot read is bounded (see the plans table).
 
@@ -126,9 +160,12 @@ large production table, build them with `CREATE INDEX CONCURRENTLY` by hand befo
 - The indexes fix plans that grow with the size of the table or the length of a user's history. The worst was the
   deadline job's full index scan over every quest. The notices plan is also data-dependent: the planner picked the
   global `created_at` scan for some users and not for others.
-- The production build loads `@opentelemetry/api` (pulled in by `@workspace/db`) as an external package. The Docker
-  image provides it through `pnpm deploy`. Running `dist/index.mjs` straight from the repo needs
-  `NODE_PATH=lib/db/node_modules`; this is a local-run quirk only.
+- **Image boot bug (fixed in fix round 1).** `@opentelemetry/api` is externalized by `build.mjs` and required at load by
+  `prom-client`, but it was only a dependency of `@workspace/db`. So `pnpm --filter @workspace/api-server --prod deploy`
+  left it out, and the image's API and worker crashed at boot with `MODULE_NOT_FOUND`. Running `dist/index.mjs` from the
+  repo failed the same way. It is now a direct dependency of `@workspace/api-server`. The rebuilt image boots:
+  `ROLE=migrate` applied the migrations, `ROLE=api` answered `/api/healthz` 200 and `/api/readyz` 200, and
+  `ROLE=worker` started and ran a tick without `MODULE_NOT_FOUND`.
 
 ## The load-test switch (`RATE_LIMIT_DISABLED` / `LOAD_TEST`)
 
@@ -153,7 +190,7 @@ pnpm --filter @workspace/scripts load:seed            # --users 200 --days 30 --
 # 2. Build and start the API in production mode against the load DB.
 pnpm --filter @workspace/api-server build
 cd artifacts/api-server
-NODE_PATH=../../lib/db/node_modules NODE_ENV=production PORT=3901 \
+NODE_ENV=production PORT=3901 \
   DATABASE_URL=postgres://system_self:system_self@localhost:5432/system_self_load \
   CORS_ORIGIN=http://localhost:8081 JWT_SECRET=$LOAD_JWT_SECRET REVENUECAT_WEBHOOK_SECRET=<any> MAILER=log \
   RATE_LIMIT_DISABLED=1 LOAD_TEST=1 node dist/index.mjs > /tmp/api.log &
@@ -161,7 +198,8 @@ cd -
 
 # 3. Run both scenarios (exit code 1 if a target is missed). Results land in scripts/load/results/ (gitignored).
 LOAD_BASE_URL=http://127.0.0.1:3901 pnpm --filter @workspace/scripts load:run --label mine
-#   --scenario state|logs|all  --duration 60  --state-rate 100  --logs-rate 50  --connections 32  --warmup 5
+#   --scenario state|logs|all|mixed  --duration 60  --state-rate 100  --logs-rate 50  --connections 32  --warmup 5
+#   --stagger k   split each rate over k generators started 1000/k ms apart (default 1: plain overallRate bursts)
 ```
 
 The `system_self_load` database is left in place after a run. Drop it with

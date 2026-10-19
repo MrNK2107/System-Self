@@ -75,6 +75,9 @@ importers:
       '@node-rs/argon2':
         specifier: ^2.2.2
         version: 2.2.2
+      '@opentelemetry/api':
+        specifier: ^1.9.1
+        version: 1.9.1
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod

@@ -2,11 +2,12 @@
  * Load runner (autocannon) against a running API seeded by seed.ts:
  *   - state: GET /api/state at 100 req/s for 60 s (target p95 < 250 ms)
  *   - logs:  POST /api/logs at 50 req/s for 60 s (target p95 < 300 ms), unique clientId + Idempotency-Key each
+ *   - mixed: both at once (state 100 req/s + logs 50 req/s), each judged against its own target
  * Requests rotate over the seeded users' tokens. Prints p50/p95/p99, error and status counts, and writes JSON
  * results to scripts/load/results/.
  *
- *   LOAD_BASE_URL=http://127.0.0.1:3001 pnpm --filter @workspace/scripts load:run [--scenario state|logs|all]
- *     [--duration 60] [--state-rate 100] [--logs-rate 50] [--connections 32] [--label baseline]
+ *   LOAD_BASE_URL=http://127.0.0.1:3001 pnpm --filter @workspace/scripts load:run [--scenario state|logs|all|mixed]
+ *     [--duration 60] [--state-rate 100] [--logs-rate 50] [--connections 32] [--stagger 1] [--label baseline]
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -62,36 +63,62 @@ function request(name: Scenario["name"]): autocannon.Request {
 const pct = (sorted: number[], p: number) => (sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]!);
 const round = (n: number) => Math.round(n * 10) / 10;
 
+/**
+ * autocannon's overallRate is a per-second quota per connection, spent as soon as each second starts, so a whole
+ * second's requests arrive as one burst. With --stagger k the rate is split over k generators started 1000/k ms apart:
+ * the same average rate, in k smaller bursts spread over the second. Default 1 (plain autocannon).
+ */
+const STAGGER = Math.max(1, Number(argValue("stagger") ?? 1));
+
+function fireOne(s: Scenario, duration: number, rate: number, connections: number, latencies: number[], statuses: Record<string, number>) {
+  return new Promise<autocannon.Result>((resolve, reject) => {
+    const instance = autocannon(
+      { url: BASE, connections, overallRate: rate, duration, timeout: 10, requests: [request(s.name)] },
+      (err, res) => (err ? reject(err) : resolve(res)),
+    );
+    instance.on("response", (_client, statusCode, _bytes, responseTime) => {
+      latencies.push(responseTime);
+      statuses[statusCode] = (statuses[statusCode] ?? 0) + 1;
+    });
+  });
+}
+
 async function fire(s: Scenario, duration: number, rate: number) {
   const latencies: number[] = [];
   const statuses: Record<string, number> = {};
-  let done!: (r: autocannon.Result) => void;
-  let fail!: (e: unknown) => void;
-  const finished = new Promise<autocannon.Result>((resolve, reject) => ((done = resolve), (fail = reject)));
-  const instance = autocannon(
-    { url: BASE, connections: CONNECTIONS, overallRate: rate, duration, timeout: 10, requests: [request(s.name)] },
-    (err, res) => (err ? fail(err) : done(res)),
+  const k = Math.min(STAGGER, rate);
+  const parts = await Promise.all(
+    Array.from({ length: k }, async (_, i) => {
+      if (i > 0) await new Promise((r) => setTimeout(r, Math.round((i * 1000) / k)));
+      const share = Math.floor(rate / k) + (i < rate % k ? 1 : 0);
+      return fireOne(s, duration, share, Math.max(1, Math.ceil(CONNECTIONS / k)), latencies, statuses);
+    }),
   );
-  instance.on("response", (_client, statusCode, _bytes, responseTime) => {
-    latencies.push(responseTime);
-    statuses[statusCode] = (statuses[statusCode] ?? 0) + 1;
-  });
-  const result = await finished;
   latencies.sort((a, b) => a - b);
+  const result = {
+    errors: parts.reduce((n, r) => n + r.errors, 0),
+    timeouts: parts.reduce((n, r) => n + r.timeouts, 0),
+    non2xx: parts.reduce((n, r) => n + r.non2xx, 0),
+  };
   return { result, latencies, statuses };
 }
 
-async function runScenario(s: Scenario) {
-  if (WARMUP > 0) await fire(s, WARMUP, Math.max(5, Math.round(s.rate / 4)));
-  const { result, latencies, statuses } = await fire(s, DURATION, s.rate);
+/** A run passes when p95 is under target, nothing 5xx'd or errored, and at least 95% of the requested rate was achieved. */
+const MIN_RATE_SHARE = 0.95;
+
+function summarize(s: Scenario, mode: "alone" | "mixed", run: Awaited<ReturnType<typeof fire>>) {
+  const { result, latencies, statuses } = run;
   const fivexx = Object.entries(statuses).filter(([code]) => code.startsWith("5")).reduce((n, [, c]) => n + c, 0);
   const p95 = round(pct(latencies, 95));
+  const achievedRate = round(latencies.length / DURATION);
   const summary = {
     scenario: s.name,
+    mode,
     targetRate: s.rate,
-    achievedRate: round(latencies.length / DURATION),
+    achievedRate,
     durationSec: DURATION,
     connections: CONNECTIONS,
+    stagger: STAGGER,
     requests: latencies.length,
     latencyMs: {
       p50: round(pct(latencies, 50)),
@@ -106,22 +133,36 @@ async function runScenario(s: Scenario) {
     non2xx: result.non2xx,
     fivexx,
     targetP95Ms: s.targetP95,
-    pass: p95 < s.targetP95 && fivexx === 0 && result.errors === 0,
+    pass: p95 < s.targetP95 && fivexx === 0 && result.errors === 0 && achievedRate >= MIN_RATE_SHARE * s.rate,
   };
   const l = summary.latencyMs;
   console.log(
-    `${s.name.padEnd(5)} ${summary.achievedRate}/${s.rate} req/s  p50 ${l.p50} ms  p95 ${l.p95} ms  p99 ${l.p99} ms  max ${l.max} ms  ` +
+    `${(mode === "mixed" ? `mixed:${s.name}` : s.name).padEnd(11)} ${achievedRate}/${s.rate} req/s  p50 ${l.p50} ms  p95 ${l.p95} ms  p99 ${l.p99} ms  max ${l.max} ms  ` +
       `statuses ${JSON.stringify(statuses)}  errors ${result.errors}  timeouts ${result.timeouts}  ` +
-      `${summary.pass ? "PASS" : "FAIL"} (p95 < ${s.targetP95} ms, zero 5xx)`,
+      `${summary.pass ? "PASS" : "FAIL"} (p95 < ${s.targetP95} ms, zero 5xx, rate >= ${MIN_RATE_SHARE * 100}%)`,
   );
   return summary;
 }
 
+async function runScenario(s: Scenario) {
+  if (WARMUP > 0) await fire(s, WARMUP, Math.max(5, Math.round(s.rate / 4)));
+  return summarize(s, "alone", await fire(s, DURATION, s.rate));
+}
+
+/** Both scenarios at once, each at its own rate on its own connections (the realistic mix). */
+async function runMixed() {
+  if (WARMUP > 0) await Promise.all(SCENARIOS.map((s) => fire(s, WARMUP, Math.max(5, Math.round(s.rate / 4)))));
+  const runs = await Promise.all(SCENARIOS.map((s) => fire(s, DURATION, s.rate)));
+  return SCENARIOS.map((s, i) => summarize(s, "mixed", runs[i]!));
+}
+
+const known = ["state", "logs", "all", "mixed"];
+if (!known.includes(SCENARIO)) throw new Error(`unknown --scenario ${SCENARIO} (state | logs | all | mixed)`);
 const picked = SCENARIOS.filter((s) => SCENARIO === "all" || s.name === SCENARIO);
-if (picked.length === 0) throw new Error(`unknown --scenario ${SCENARIO} (state | logs | all)`);
-console.log(`target ${BASE}, ${tokens.length} users, ${CONNECTIONS} connections, ${DURATION}s per scenario (+${WARMUP}s warmup)`);
+console.log(`target ${BASE}, ${tokens.length} users, ${CONNECTIONS} connections, stagger ${STAGGER}, ${DURATION}s per scenario (+${WARMUP}s warmup)`);
 const results = [];
-for (const s of picked) results.push(await runScenario(s));
+if (SCENARIO === "mixed") results.push(...(await runMixed()));
+else for (const s of picked) results.push(await runScenario(s));
 
 mkdirSync(RESULTS_DIR, { recursive: true });
 const file = path.join(RESULTS_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}-${LABEL}.json`);
