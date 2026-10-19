@@ -8,6 +8,10 @@ export const questsKey = (userId: string | null) => ["quests", userId] as const;
 export const chainsKey = (userId: string | null) => ["chains", userId] as const;
 /** Exercises, plans, recent sessions, PRs and body-part scores (GET /api/gym). */
 export const gymKey = (userId: string | null) => ["gym", userId] as const;
+/** The deferral ledger (GET /api/adherence/deferrals). */
+export const deferralsKey = (userId: string | null) => ["deferrals", userId] as const;
+/** Shadow takeover tally (GET /api/adherence/shadow-takeovers). */
+export const shadowTakeoversKey = (userId: string | null) => ["shadow-takeovers", userId] as const;
 /** Further unseen notices (GET /api/notices), fetched only when the state says there are more. */
 export const noticesKey = (userId: string | null) => ["notices", userId] as const;
 
@@ -27,8 +31,16 @@ export interface Invalidator {
   invalidateQueries(filters: { queryKey: readonly unknown[] }): Promise<void> | void;
 }
 
-/** After any game mutation: refetch state, quests and notices (and the logs / chains views of them). */
+/** After any game mutation: refetch state, quests and notices (and the logs / chains / ledger views of them). */
 export async function invalidateGame(client: Invalidator, userId: string | null): Promise<void> {
-  const keys = [gameStateKey(userId), questsKey(userId), noticesKey(userId), logsKey(userId), chainsKey(userId)];
+  const keys = [
+    gameStateKey(userId),
+    questsKey(userId),
+    noticesKey(userId),
+    logsKey(userId),
+    chainsKey(userId),
+    deferralsKey(userId),
+    shadowTakeoversKey(userId),
+  ];
   await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));
 }

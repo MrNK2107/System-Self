@@ -8,3 +8,4 @@ export * from "./milestones";
 export * from "./debrief";
 export * from "./gym";
 export * from "./chains";
+export * from "./floor";

@@ -11,6 +11,7 @@ import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { type Domain, type ShadowSelf } from "@/context/AppContext";
 import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
+import { shadowTallyLine } from "@/lib/game/adherence";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -19,9 +20,34 @@ interface Props {
   shadowScores: Record<Domain, string | number>;
   shadowRank: string;
   userScores: Record<Domain, number>;
+  /** Sessions the Shadow took from refused BODY quests, newest first. Narrative only: no score effect. */
+  takeovers?: { questTitle: string; localDate: string }[];
 }
 
-export function ShadowSelfCard({ shadow, shadowScores, shadowRank, userScores }: Props) {
+/** The running "SHADOW completed: ..." tally. Also shown as a dormant note while the Shadow is inactive. */
+export function ShadowTakeoverTally({
+  takeovers,
+  dormant = false,
+}: {
+  takeovers: { questTitle: string; localDate: string }[];
+  dormant?: boolean;
+}) {
+  if (takeovers.length === 0) return null;
+  return (
+    <View style={{ gap: 4, opacity: dormant ? 0.6 : 1 }}>
+      <Text style={styles.codenameLabel}>
+        {dormant ? "DORMANT SHADOW" : "TAKEOVERS"} // {takeovers.length}
+      </Text>
+      {takeovers.slice(0, 5).map((t, i) => (
+        <Text key={`${t.localDate}-${i}`} style={styles.takeoverLine}>
+          {shadowTallyLine(t.questTitle)}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+export function ShadowSelfCard({ shadow, shadowScores, shadowRank, userScores, takeovers = [] }: Props) {
   const colors = useColors();
   const pulseAnim = useRef(new Animated.Value(0.3)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
@@ -168,6 +194,8 @@ export function ShadowSelfCard({ shadow, shadowScores, shadowRank, userScores }:
             );
           })}
         </View>
+
+        <ShadowTakeoverTally takeovers={takeovers} />
 
         {/* Daily gain notice */}
         <View style={styles.footer}>
@@ -321,6 +349,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700" as const,
     letterSpacing: 0.5,
+  },
+  takeoverLine: {
+    fontSize: 11,
+    color: "#D0D2DC",
+    lineHeight: 16,
   },
   footer: {
     flexDirection: "row",

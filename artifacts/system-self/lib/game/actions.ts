@@ -16,6 +16,7 @@ import {
 import { z } from "zod";
 import type { ApiClient } from "../api/client";
 import type { Outbox, OutboxEntry } from "../api/outbox";
+import { normalizeReason } from "./adherence";
 import type { Domain } from "./types";
 
 // Notice lists are parsed loosely here: a kind this build does not know must not fail the whole response.
@@ -105,6 +106,8 @@ export interface LogInput {
   forbidden?: boolean;
   note?: string;
   intensity?: number;
+  /** Extra log data (for example a floor session's routine). */
+  data?: Record<string, unknown>;
 }
 
 /** The outbox entry for one log. The clientId is the server's idempotency key. */
@@ -114,7 +117,7 @@ export function buildLogRequest(input: LogInput, clientId: string, now: Date = n
     clientId,
     domain: input.domain,
     logType: input.type,
-    data: input.intensity === undefined ? {} : { intensity: input.intensity },
+    data: { ...input.data, ...(input.intensity === undefined ? {} : { intensity: input.intensity }) },
     ...(note ? { freeText: note.slice(0, 2000) } : {}),
     forbidden: input.forbidden ?? false,
     occurredAt: now.toISOString(),
@@ -171,11 +174,13 @@ export function completeQuest(api: ApiClient, outbox: Guard, questId: string, cl
   );
 }
 
-export function refuseQuest(api: ApiClient, outbox: Guard, questId: string, reason: string | undefined, clientId: string) {
-  const trimmed = reason?.trim().slice(0, 200);
+/** The reason is required (1-200 characters after trim); a blank one throws before anything is sent. */
+export async function refuseQuest(api: ApiClient, outbox: Guard, questId: string, reason: string, clientId: string) {
+  const trimmed = normalizeReason(reason);
+  if (!trimmed) throw new Error("A refusal reason is required");
   return afterOutbox(outbox, () =>
     api.request("POST", `/api/quests/${encodeURIComponent(questId)}/refuse`, {
-      body: { ...(trimmed ? { reason: trimmed } : {}), clientId },
+      body: { reason: trimmed, clientId },
       idempotencyKey: clientId,
       schema: LooseQuestRefuseSchema,
     }),

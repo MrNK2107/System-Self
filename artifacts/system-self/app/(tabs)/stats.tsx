@@ -15,7 +15,8 @@ import { useApp, ACHIEVEMENT_DEFS, MILESTONE_TITLES, type Domain, type Milestone
 import { DomainBar } from "@/components/DomainBar";
 import { RankBadge } from "@/components/RankBadge";
 import { useQuery } from "@tanstack/react-query";
-import { useGameUserId } from "@/hooks/useGameState";
+import { useDeferralsQuery, useGameUserId } from "@/hooks/useGameState";
+import { LEDGER_HEADER, ledgerLine } from "@/lib/game/adherence";
 import { api } from "@/lib/api/client";
 import { completionSummaryKey, debriefKey } from "@/lib/game/keys";
 import { fetchCompletionSummary, fetchDebriefToday } from "@/lib/game/messages";
@@ -40,6 +41,9 @@ export default function StatsScreen() {
   const [showAchievements, setShowAchievements] = useState(false);
   const [showMilestones, setShowMilestones] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+
+  const ledgerQ = useDeferralsQuery(30);
+  const ledger = ledgerQ.data ?? null;
 
   const perfQ = useQuery({
     queryKey: completionSummaryKey(userId, 14),
@@ -488,6 +492,29 @@ export default function StatsScreen() {
         ) : debriefQ.isError ? (
           <Text style={[styles.calendarTeaser, { color: colors.destructive }]}>The System is out of reach.</Text>
         ) : null}
+
+        {/* Deferral ledger: the user's own refusal reasons, newest first. Never shared with rivals or clans. */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{LEDGER_HEADER}</Text>
+          {ledger ? (
+            <>
+              <Text style={[styles.settingValue, { color: colors.foreground }]}>
+                {ledger.countThisWeek === 0
+                  ? "No deferrals this week."
+                  : `You deferred ${ledger.countThisWeek} time${ledger.countThisWeek === 1 ? "" : "s"} this week.`}
+              </Text>
+              {ledger.items.slice(0, 10).map((item, i) => (
+                <Text key={`${item.localDate}-${i}`} style={[styles.settingLabel, { color: colors.mutedForeground }]}>
+                  {ledgerLine(item)}
+                </Text>
+              ))}
+            </>
+          ) : ledgerQ.isError ? (
+            <Text style={[styles.settingValue, { color: colors.destructive }]}>The System is out of reach.</Text>
+          ) : (
+            <Text style={[styles.settingValue, { color: colors.mutedForeground }]}>Reading the ledger.</Text>
+          )}
+        </View>
 
         {/* Settings */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>

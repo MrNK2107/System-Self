@@ -254,3 +254,30 @@ export type Notice = typeof notices.$inferSelect;
 export type DailySnapshot = typeof dailySnapshots.$inferSelect;
 export type UserDayState = typeof userDayState.$inferSelect;
 export type Debrief = typeof debriefs.$inferSelect;
+
+/** A refused BODY quest the Shadow Self "took". Display and narrative only; never feeds any score. */
+export const shadowTakeovers = pgTable(
+  "shadow_takeovers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: userIdCol(),
+    questId: uuid("quest_id").notNull(),
+    questTitle: text("quest_title").notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("shadow_takeovers_user_date_idx").on(t.userId, t.localDate)],
+);
+
+/** Fire-and-forget product analytics. userId is nulled when the account is deleted. */
+export const analyticsEvents = pgTable(
+  "analytics_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    props: jsonb("props").notNull().default(sql`'{}'::jsonb`),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("analytics_events_name_created_idx").on(t.name, t.createdAt)],
+);

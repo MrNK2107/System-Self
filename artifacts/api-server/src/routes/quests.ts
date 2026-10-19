@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, asc, desc, eq, gt, gte, ne } from "drizzle-orm";
-import { generatedQuestBatches, generatedQuests, questChains, quests, users, type Db } from "@workspace/db";
+import { generatedQuestBatches, generatedQuests, questChains, quests, shadowTakeovers, users, type Db } from "@workspace/db";
 import {
   QUEST_COMPLETE_DELTA,
   addDays,
@@ -8,6 +8,7 @@ import {
   endOfLocalDay,
   isoWeekKey,
   localDate,
+  pickFloorRoutine,
   refusalOutcome,
 } from "@workspace/engine";
 import { QuestRefuseRequestSchema } from "@workspace/contracts";
@@ -16,6 +17,7 @@ import { generateQuestsRequestSchema } from "../lib/schemas";
 import { findReplay, readKey, withIdempotency, type HandlerResult } from "../services/idempotency";
 import { rollOverBeforeToday } from "../services/rollover";
 import { abandonChain, activeBoard, createQuests, hasActiveChain, toQuestDto } from "../services/quests";
+import { track } from "../services/analytics";
 import { applyChanges, insertNotice } from "../services/scoring";
 import { withUserLock, type Tx } from "../services/user-lock";
 import {
@@ -253,7 +255,16 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
   router.post("/quests/:id/refuse", async (req, res) => {
     const questId = String(req.params.id);
     const userId = req.user!.id;
-    const body = QuestRefuseRequestSchema.parse(req.body ?? {});
+    const parsed = QuestRefuseRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      // A missing, blank or over-long reason has its own code; anything else is an ordinary validation error.
+      if (parsed.error.issues.some((i) => i.path[0] === "reason")) {
+        res.status(400).json({ error: "A reason is required (1-200 characters)", code: "reason_required" });
+        return;
+      }
+      throw parsed.error;
+    }
+    const body = parsed.data;
     if (!UUID.test(questId)) {
       res.status(404).json({ error: "Quest not found" });
       return;
@@ -287,7 +298,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
 
       const [refused] = await tx
         .update(quests)
-        .set({ status: "refused", resolvedAt: now, resolvedLocalDate: today, refusalReason: body.reason ?? null })
+        .set({ status: "refused", resolvedAt: now, resolvedLocalDate: today, refusalReason: body.reason })
         .where(and(eq(quests.id, quest.id), eq(quests.status, "active")))
         .returning();
       if (!refused) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
@@ -310,9 +321,26 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
               { localDate: today, now },
             )
           : { results: [], notices: [] };
+      // Floor Quest + Shadow takeover: a refused BODY quest gets a short routine to do now and the Shadow
+      // "takes" the session. Neither touches a score; the refusal penalty above is the only score change.
+      let floor: ReturnType<typeof pickFloorRoutine> | null = null;
+      let shadowTook: { questTitle: string } | null = null;
+      if (quest.domain === "BODY") {
+        floor = pickFloorRoutine(quest.id);
+        shadowTook = { questTitle: quest.title };
+        await tx.insert(shadowTakeovers).values({ userId, questId: quest.id, questTitle: quest.title, localDate: today });
+        await track(tx, userId, "floor_offered", { questId: quest.id, routineId: floor.id });
+      }
       return {
         status: 200,
-        body: { quest: toQuestDto(refused!), penalty: outcome.penalty, results: applied.results, notices: applied.notices },
+        body: {
+          quest: toQuestDto(refused!),
+          penalty: outcome.penalty,
+          results: applied.results,
+          notices: applied.notices,
+          floor,
+          shadowTook,
+        },
       };
     });
   });

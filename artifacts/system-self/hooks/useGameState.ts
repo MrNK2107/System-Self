@@ -5,7 +5,8 @@ import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api/client";
 import { getOutbox, type FailedOutboxItem, type OutboxItem } from "@/lib/api/outbox";
 import { fetchChains, fetchGameState, fetchLogs, fetchQuests, validGameState } from "@/lib/game/actions";
-import { chainsKey, gameStateKey, logsKey, questsKey } from "@/lib/game/keys";
+import { fetchDeferrals, fetchShadowTakeovers } from "@/lib/game/adherence";
+import { chainsKey, deferralsKey, gameStateKey, logsKey, questsKey, shadowTakeoversKey } from "@/lib/game/keys";
 
 /** The signed-in user's id, or null. Game queries run only while this is set. */
 export function useGameUserId(): string | null {
@@ -46,6 +47,18 @@ export function useQuestsQuery() {
 export function useChainsQuery() {
   const userId = useGameUserId();
   return useQuery({ queryKey: chainsKey(userId), queryFn: () => fetchChains(api), enabled: !!userId, staleTime: 5 * 60_000 });
+}
+
+/** The deferral ledger: refusal reasons of the last `days` days, newest first. */
+export function useDeferralsQuery(days = 30) {
+  const userId = useGameUserId();
+  return useQuery({ queryKey: [...deferralsKey(userId), days], queryFn: () => fetchDeferrals(api, days), enabled: !!userId });
+}
+
+/** Sessions the Shadow Self "took" in the last 30 days. */
+export function useShadowTakeoversQuery() {
+  const userId = useGameUserId();
+  return useQuery({ queryKey: shadowTakeoversKey(userId), queryFn: () => fetchShadowTakeovers(api), enabled: !!userId });
 }
 
 export interface OutboxSnapshot {

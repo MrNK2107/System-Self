@@ -3,6 +3,7 @@
 // Rivals, challenges and taunts are still simulated on the device until P5 (useLocalRivals).
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQueryClient } from "@tanstack/react-query";
+import type { FloorRoutineDto } from "@workspace/contracts";
 import { streakMultiplier } from "@workspace/engine";
 import type { OutboxItem } from "@/lib/api/outbox";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -84,7 +85,13 @@ export function getStreakTier(streak: number): "none" | "low" | "mid" | "high" |
 }
 
 /** Outcome of a quest / chain request. `sync_pending`: older logs are still queued, nothing was sent. */
-export type GameMutationResult = { ok: true } | { ok: false; reason: "sync_pending" } | { ok: false; reason: "error"; error: unknown };
+export type GameMutationResult<T = unknown> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "sync_pending" }
+  | { ok: false; reason: "error"; error: unknown };
+
+/** What a successful refusal returns: the floor routine on offer (BODY quests only) and the Shadow takeover. */
+export type RefuseOutcome = { floor: FloorRoutineDto | null; shadowTook: { questTitle: string } | null };
 
 interface AppContextType {
   user: User | null;
@@ -117,7 +124,7 @@ interface AppContextType {
   /** Queues the log in the outbox and starts a flush; it shows as pending until the server has it. */
   addLog: (entry: LogInput) => Promise<void>;
   completeQuest: (questId: string) => Promise<GameMutationResult>;
-  refuseQuest: (questId: string, reason?: string) => Promise<GameMutationResult>;
+  refuseQuest: (questId: string, reason: string) => Promise<GameMutationResult<RefuseOutcome>>;
   startQuestChain: (templateKey: string) => Promise<GameMutationResult>;
   generateQuests: () => Promise<GameMutationResult>;
 
@@ -241,7 +248,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const runGuarded = useCallback(
-    async (prefix: string, send: (clientId: string) => Promise<MutationResult<unknown>>): Promise<GameMutationResult> => {
+    async <T,>(prefix: string, send: (clientId: string) => Promise<MutationResult<T>>): Promise<GameMutationResult<T>> => {
       try {
         const r = await send(newClientId(prefix));
         if (!r.ok) {
@@ -249,7 +256,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return { ok: false, reason: "sync_pending" };
         }
         setSyncBlocked(false);
-        return { ok: true };
+        return { ok: true, value: r.value };
       } catch (error) {
         return { ok: false, reason: "error", error };
       } finally {
@@ -264,8 +271,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [runGuarded],
   );
   const refuseQuest = useCallback(
-    (questId: string, reason?: string) =>
-      runGuarded("quest-refuse", (id) => refuseQuestRequest(api, getOutbox(), questId, reason, id)),
+    (questId: string, reason: string) =>
+      runGuarded("quest-refuse", async (id) => {
+        const r = await refuseQuestRequest(api, getOutbox(), questId, reason, id);
+        return r.ok ? { ok: true as const, value: { floor: r.value.floor, shadowTook: r.value.shadowTook } } : r;
+      }),
     [runGuarded],
   );
   const startQuestChain = useCallback(

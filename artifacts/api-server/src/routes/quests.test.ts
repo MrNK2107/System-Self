@@ -63,7 +63,7 @@ test("expired or unknown quest is not completable", { skip }, async () => {
   assert.equal(r.status, 409);
   assert.equal((await request(a).post("/api/quests/not-a-uuid/complete").set(auth(token)).send({})).status, 404);
   assert.equal(
-    (await request(a).post("/api/quests/00000000-0000-4000-8000-000000000000/refuse").set(auth(token)).send({})).status,
+    (await request(a).post("/api/quests/00000000-0000-4000-8000-000000000000/refuse").set(auth(token)).send({ reason: "r" })).status,
     404,
   );
 });
@@ -78,13 +78,13 @@ test("refuse: 1st free, 2nd -1.5, 3rd 409 refusal_limit", { skip }, async () => 
   assert.equal(r1.body.penalty, 0);
   assert.equal(r1.body.quest.status, "refused");
   assert.equal(r1.body.quest.refusalReason, "too tired");
-  const r2 = await request(a).post(`/api/quests/${qs[1]!.id}/refuse`).set(auth(token)).send({});
+  const r2 = await request(a).post(`/api/quests/${qs[1]!.id}/refuse`).set(auth(token)).send({ reason: "r2" });
   assert.equal(r2.status, 200);
   assertContract(QuestRefuseResponseSchema, r2.body);
   assert.deepEqual(r2.body.notices, []);
   assert.equal(r2.body.penalty, 1.5);
   assert.equal(r2.body.results[0].actualDelta, -1.5);
-  const r3 = await request(a).post(`/api/quests/${qs[2]!.id}/refuse`).set(auth(token)).send({});
+  const r3 = await request(a).post(`/api/quests/${qs[2]!.id}/refuse`).set(auth(token)).send({ reason: "r3" });
   assert.equal(r3.status, 409);
   assert.equal(r3.body.code, "refusal_limit");
   const s = await score(id, "DISCIPLINE");
@@ -165,7 +165,7 @@ test("refusing a chain-step quest abandons the chain and frees the template", { 
   const { token, id } = await setup(a);
   const start = await request(a).post("/api/chains").set(auth(token)).send({ templateKey: "mind_sharpening" });
   assert.equal(start.status, 201);
-  const ref = await request(a).post(`/api/quests/${start.body.quest.id}/refuse`).set(auth(token)).send({});
+  const ref = await request(a).post(`/api/quests/${start.body.quest.id}/refuse`).set(auth(token)).send({ reason: "r" });
   assert.equal(ref.status, 200);
   const [chain] = await db!.select().from(questChains).where(eq(questChains.userId, id));
   assert.equal(chain!.status, "abandoned");

@@ -1,8 +1,9 @@
-// "Why not today?" sheet shown before a quest is refused. The reason is optional in this phase.
+// "Why not today?" sheet shown before a quest is refused. The reason is required (1-200 characters).
 import React, { useEffect, useState } from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { normalizeReason } from "@/lib/game/adherence";
 
 export const REFUSAL_RULE = "First refusal this week is logged. The second costs 1.5 DISCIPLINE. There is no third.";
 
@@ -18,6 +19,7 @@ export function RefuseSheet({ visible, questTitle, busy, onCancel, onConfirm }: 
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [reason, setReason] = useState("");
+  const valid = normalizeReason(reason) !== null;
 
   useEffect(() => {
     if (visible) setReason("");
@@ -41,11 +43,12 @@ export function RefuseSheet({ visible, questTitle, busy, onCancel, onConfirm }: 
           <TextInput
             value={reason}
             onChangeText={setReason}
-            placeholder="Optional"
+            placeholder="Required. One word is enough."
             placeholderTextColor={colors.mutedForeground}
             maxLength={200}
             multiline
             editable={!busy}
+            accessibilityLabel="Reason"
             style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
           />
           <Text style={[styles.rule, { color: colors.mutedForeground }]}>{REFUSAL_RULE}</Text>
@@ -59,9 +62,9 @@ export function RefuseSheet({ visible, questTitle, busy, onCancel, onConfirm }: 
               <Text style={[styles.btnText, { color: colors.mutedForeground }]}>CANCEL</Text>
             </Pressable>
             <Pressable
-              style={[styles.btn, { borderColor: colors.destructive + "80", backgroundColor: colors.destructive + "15", opacity: busy ? 0.5 : 1 }]}
-              onPress={() => onConfirm(reason)}
-              disabled={busy}
+              style={[styles.btn, { borderColor: colors.destructive + "80", backgroundColor: colors.destructive + "15", opacity: busy || !valid ? 0.5 : 1 }]}
+              onPress={() => onConfirm(reason.trim())}
+              disabled={busy || !valid}
               accessibilityRole="button"
             >
               <Text style={[styles.btnText, { color: colors.destructive }]}>{busy ? "SENDING" : "REFUSE"}</Text>

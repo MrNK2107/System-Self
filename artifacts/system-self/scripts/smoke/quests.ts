@@ -113,14 +113,14 @@ async function main() {
   const r1 = await refuseQuest(api, outbox, dailies[0]!.id, "too tired", newClientId("qr"));
   assert.ok(r1.ok);
   assert.equal(r1.value.penalty, 0);
-  const r2 = await refuseQuest(api, outbox, dailies[1]!.id, undefined, newClientId("qr"));
+  const r2 = await refuseQuest(api, outbox, dailies[1]!.id, "second reason", newClientId("qr"));
   assert.ok(r2.ok);
   assert.equal(r2.value.penalty, 1.5);
   assert.equal(r2.value.results.find((r) => r.domain === "DISCIPLINE")!.actualDelta, -1.5);
   step("refuse twice: second costs 1.5", { first: r1.value.penalty, second: r2.value.penalty });
 
   await assert.rejects(
-    () => refuseQuest(api, outbox, dailies[2]!.id, undefined, newClientId("qr")),
+    () => refuseQuest(api, outbox, dailies[2]!.id, "third reason", newClientId("qr")),
     (e: unknown) => e instanceof ApiError && e.status === 409 && e.code === "refusal_limit",
   );
   step("third refusal: 409 refusal_limit");

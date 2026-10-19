@@ -257,15 +257,45 @@ export const QuestCompleteResponseSchema = z.object({
   notices: z.array(NoticeSchema),
 });
 
+/** Refusing needs a typed reason: 1-200 characters after trim (a blank one is 400 reason_required). */
 export const QuestRefuseRequestSchema = z.object({
-  reason: z.string().max(200).optional(),
+  reason: z.string().trim().min(1).max(200),
   clientId: ClientIdSchema.optional(),
 });
+
+export const FloorRoutineSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  minutes: z.number().int(),
+  steps: z.array(z.object({ name: z.string(), seconds: z.number().int() })),
+});
+export type FloorRoutineDto = z.infer<typeof FloorRoutineSchema>;
+
 export const QuestRefuseResponseSchema = z.object({
   quest: QuestSchema,
   penalty: z.number(),
   results: z.array(ScoreResultSchema),
   notices: z.array(NoticeSchema),
+  /** Set for a refused BODY quest: a short bodyweight routine to do now. Null for every other domain. */
+  floor: FloorRoutineSchema.nullable(),
+  /** Set for a refused BODY quest: the Shadow Self "took" the session. Narrative only. */
+  shadowTook: z.object({ questTitle: z.string() }).nullable(),
+});
+
+export const DeferralsQuerySchema = z.object({
+  days: z.coerce.number().int().min(7).max(90).default(7),
+});
+export const DeferralsResponseSchema = z.object({
+  items: z.array(z.object({ questTitle: z.string(), domain: z.string(), reason: z.string(), localDate: z.string() })),
+  countThisWeek: z.number().int(),
+});
+
+export const ShadowTakeoversQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).default(30),
+});
+export const ShadowTakeoversResponseSchema = z.object({
+  items: z.array(z.object({ questTitle: z.string(), localDate: z.string() })),
+  count: z.number().int(),
 });
 
 export const CHAIN_TEMPLATE_KEYS = ["physical_protocol", "mind_sharpening", "wealth_accumulation", "discipline_forge"] as const;

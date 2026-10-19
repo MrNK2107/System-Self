@@ -5,6 +5,7 @@ import { localDate, logChanges } from "@workspace/engine";
 import { LogListQuerySchema, LogRequestSchema } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
+import { track } from "../services/analytics";
 import { applyChanges } from "../services/scoring";
 
 const RETROACTIVE_LIMIT_MS = 48 * 3600_000;
@@ -97,6 +98,7 @@ export function logsRoutes(db: Db): IRouter {
       }));
       const { results, notices } = await applyChanges(tx, userId, changes, { localDate: logDate, now });
       await rollOverDue(tx, userId, now);
+      if (body.logType === "floor_session") await track(tx, userId, "floor_completed", { logId: log!.id });
       return { status: 201, body: { log: toLogDto(log!), results, notices } };
     }, { preferClientId: true });
   });

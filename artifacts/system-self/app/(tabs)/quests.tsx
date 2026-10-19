@@ -19,6 +19,9 @@ import { ApiError } from "@/lib/api/client";
 import { hasApiCode, isoWeekKey } from "@/lib/game/guards";
 import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
 import { QuestCard } from "@/components/QuestCard";
+import { FloorQuestCard } from "@/components/FloorQuestCard";
+import { shadowTallyLine } from "@/lib/game/adherence";
+import type { RefuseOutcome } from "@/context/AppContext";
 import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
 import { useQuestScheduler } from "@/hooks/useQuestScheduler";
 import { DOMAIN_COLORS } from "@/constants/domains";
@@ -123,6 +126,8 @@ export default function QuestsScreen() {
   const [showChainCatalog, setShowChainCatalog] = useState(false);
   const [refusing, setRefusing] = useState<Quest | null>(null);
   const [refuseBusy, setRefuseBusy] = useState(false);
+  // The floor routine offered right after a BODY quest was refused (cleared when dismissed or started).
+  const [floorOffer, setFloorOffer] = useState<RefuseOutcome | null>(null);
   // The 409 refusal_limit marker belongs to one account and one ISO week.
   const userId = user?.id ?? null;
   const [limitMark, setLimitMark] = useState<{ userId: string | null; week: string } | null>(null);
@@ -179,8 +184,11 @@ export default function QuestsScreen() {
     setNotice(null);
     try {
       const r = await refuseQuest(id, reason);
-      if (!r.ok) {
+      if (r.ok) {
+        setFloorOffer(r.value.floor ? r.value : null);
+      } else {
         if (r.reason === "error" && hasApiCode(r.error, "refusal_limit")) setLimitMark({ userId, week: isoWeekKey(new Date()) });
+        else if (r.reason === "error" && hasApiCode(r.error, "reason_required")) setNotice("A reason is required.");
         else if (!isStale(r)) setNotice(describeFailure(r));
       }
       setRefusing(null);
@@ -286,6 +294,19 @@ export default function QuestsScreen() {
             </View>
           </View>
         </View>
+
+        {floorOffer?.floor && (
+          <FloorQuestCard
+            routine={floorOffer.floor}
+            shadowLine={floorOffer.shadowTook ? shadowTallyLine(floorOffer.shadowTook.questTitle) : null}
+            onStart={() => {
+              const id = floorOffer.floor!.id;
+              setFloorOffer(null);
+              router.push({ pathname: "/floor/[routineId]", params: { routineId: id } });
+            }}
+            onDismiss={() => setFloorOffer(null)}
+          />
+        )}
 
         {domainFilter && (
           <View style={[styles.filterBar, { borderColor: colors.border, backgroundColor: colors.card }]}>

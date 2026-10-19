@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, inArray } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray } from "drizzle-orm";
 import { logs, quests, users, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, addDays, type RankedDomain } from "@workspace/engine";
 import { generateOrTemplate, type AiDeps } from "../lib/ai";
@@ -8,7 +8,7 @@ import { generatedQuestsPayloadSchema } from "../lib/schemas";
 import type { WeeklyRecap } from "./recap";
 import { buildGameState } from "./state";
 
-export const MESSAGE_PROMPT_VERSION = "system-message-v3";
+export const MESSAGE_PROMPT_VERSION = "system-message-v4";
 export const QUESTS_PROMPT_VERSION = "system-quests-v4";
 export const WEEKLY_DEBRIEF_PROMPT_VERSION = "weekly-debrief-v2";
 
@@ -50,6 +50,8 @@ export interface PromptContext {
   weakestDomain: RankedDomain;
   /** Reasons given on the last 5 refused quests, newest first. */
   recentRefusals: string[];
+  /** Quests refused in the last 7 local days (the deferral ledger count). */
+  deferralsThisWeek: number;
   weeklyRecap?: WeeklyRecap;
 }
 
@@ -99,6 +101,10 @@ export async function buildUserContext(
     .where(and(eq(quests.userId, userId), eq(quests.status, "refused")))
     .orderBy(desc(quests.resolvedAt))
     .limit(5);
+  const [deferred] = await tx
+    .select({ n: count() })
+    .from(quests)
+    .where(and(eq(quests.userId, userId), eq(quests.status, "refused"), gte(quests.resolvedLocalDate, addDays(today, -6))));
 
   return {
     username: state.profile.username,
@@ -121,6 +127,7 @@ export async function buildUserContext(
     completionRate30: resolved30.length > 0 ? completed.length / resolved30.length : null,
     weakestDomain: weakestDomainOf(scores),
     recentRefusals: refusals.map((r) => r.reason?.trim()).filter((r): r is string => Boolean(r)),
+    deferralsThisWeek: Number(deferred?.n ?? 0),
   };
 }
 
@@ -238,8 +245,12 @@ export function buildMessagePrompt(
     const deltas = RANKED_DOMAINS.map((k) => `${k} ${d.deltas[k] >= 0 ? "+" : ""}${d.deltas[k]}`).join(", ");
     blocks.push(`DEBRIEF FACTS:\n- Deltas today: ${deltas}\n- Quests resolved today: ${d.questCompleted} of ${d.questTotal} completed\n- Verdict: ${d.verdict}`);
   }
+  const deferral =
+    ctx.deferralsThisWeek > 0 && (type === "morning_briefing" || type === "nightly_debrief")
+      ? `\nThe user deferred ${ctx.deferralsThisWeek} times this week. Quote up to 3 of their reasons verbatim, in quotation marks, as evidence. Do not comment on them beyond one line.`
+      : "";
   return {
-    prompt: `${blocks.join("\n\n")}\n\nGenerate a ${type.replace(/_/g, " ")} for this user.\n${config.instruction}\nOutput only the message. No preamble. No explanation. Maximum ${config.maxWords} words.`,
+    prompt: `${blocks.join("\n\n")}\n\nGenerate a ${type.replace(/_/g, " ")} for this user.\n${config.instruction}${deferral}\nOutput only the message. No preamble. No explanation. Maximum ${config.maxWords} words.`,
     maxWords: config.maxWords,
   };
 }

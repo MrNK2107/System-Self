@@ -24,7 +24,8 @@ import {
   type Rival,
   type Trajectory,
 } from "@/context/AppContext";
-import { ShadowSelfCard } from "@/components/ShadowSelfCard";
+import { ShadowSelfCard, ShadowTakeoverTally } from "@/components/ShadowSelfCard";
+import { useShadowTakeoversQuery } from "@/hooks/useGameState";
 import { RankBadge } from "@/components/RankBadge";
 import { ChallengeModal } from "@/components/ChallengeModal";
 import { ChallengeOutcomeModal } from "@/components/ChallengeOutcomeModal";
@@ -679,6 +680,7 @@ export default function RivalsScreen() {
     rivalTaunts, addRivalTaunt, markRivalTauntsRead,
   } = useApp();
   const { generateRivalTaunt } = useSystemAI();
+  const takeovers = useShadowTakeoversQuery().data?.items ?? [];
 
   const [refreshing, setRefreshing] = useState(false);
   const [challengeTarget, setChallengeTarget] = useState<Rival | null>(null);
@@ -924,8 +926,10 @@ export default function RivalsScreen() {
             shadowScores={shadowScores}
             shadowRank={shadowRank}
             userScores={scoreRecord(domainScores)}
+            takeovers={takeovers}
           />
         )}
+        {!shadowSelf.active && <ShadowTakeoverTally takeovers={takeovers} dormant />}
 
         {/* Entity profiles */}
         <View style={styles.section}>

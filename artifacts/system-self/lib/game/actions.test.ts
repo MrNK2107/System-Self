@@ -17,7 +17,7 @@ import {
   startChain,
   validGameState,
 } from "./actions";
-import { chainsKey, gameStateKey, invalidateGame, logsKey, noticesKey, questsKey } from "./keys";
+import { chainsKey, deferralsKey, gameStateKey, invalidateGame, logsKey, noticesKey, questsKey, shadowTakeoversKey } from "./keys";
 
 function memoryStorage(): KeyValueStorage {
   const data = new Map<string, string>();
@@ -122,7 +122,7 @@ test("quest and chain mutations flush the outbox first and are not sent while ol
   const api = fakeApi((c) => {
     order.push(`${c.method} ${c.path}`);
     if (c.path.endsWith("/complete")) return { quest: questDto, results: [], notices: [{ id: "x", kind: "future_kind" }] };
-    if (c.path.endsWith("/refuse")) return { quest: { ...questDto, status: "refused" }, penalty: 0, results: [], notices: [] };
+    if (c.path.endsWith("/refuse")) return { quest: { ...questDto, status: "refused" }, penalty: 0, results: [], notices: [], floor: null, shadowTook: null };
     return {
       chain: {
         id: "c1",
@@ -257,10 +257,10 @@ test("retryFailedEntries re-queues failed items; discardFailedEntries drops them
   reject = false;
 });
 
-test("invalidateGame invalidates state, quests and notices (plus logs and chains) for the user", async () => {
+test("invalidateGame invalidates state, quests and notices (plus logs, chains and the ledger views) for the user", async () => {
   const keys: unknown[] = [];
   await invalidateGame({ invalidateQueries: async (f: { queryKey: readonly unknown[] }) => void keys.push(f.queryKey) }, "u1");
-  assert.deepEqual(keys, [gameStateKey("u1"), questsKey("u1"), noticesKey("u1"), logsKey("u1"), chainsKey("u1")]);
+  assert.deepEqual(keys, [gameStateKey("u1"), questsKey("u1"), noticesKey("u1"), logsKey("u1"), chainsKey("u1"), deferralsKey("u1"), shadowTakeoversKey("u1")]);
 });
 
 test("validGameState passes a contract-valid cached state through unchanged and rejects a stale shape", () => {

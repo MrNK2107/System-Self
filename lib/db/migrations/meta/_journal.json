@@ -71,6 +71,13 @@
       "when": 1792360615754,
       "tag": "0009_yellow_blindfold",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792369411340,
+      "tag": "0010_strange_vampiro",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import type { Db } from "@workspace/db";
 import type { AiDeps } from "../lib/ai";
 import type { Mailer } from "../lib/mailer";
 import { createRequireAuth } from "../middlewares/auth";
+import { adherenceRoutes } from "./adherence";
 import { adminRoutes } from "./admin";
 import { authRoutes } from "./auth";
 import { chainsRoutes } from "./chains";
@@ -30,7 +31,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
   router.use(authRoutes({ db, mailer, requireAuth }));
 
   // Private surfaces. requireAuth is mounted per prefix so unknown /api paths fall through to 404.
-  router.use(["/system", "/admin", "/onboarding", "/profile", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym"], requireAuth);
+  router.use(["/system", "/admin", "/onboarding", "/profile", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym", "/adherence"], requireAuth);
   router.use(systemRoutes(db));
   router.use(historyRoutes(db, ai));
   if (db) {
@@ -45,6 +46,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
     router.use(messagesRoutes(db, ai));
     router.use(debriefRoutes(db, ai));
     router.use(gymRoutes(db, deps.now));
+    router.use(adherenceRoutes(db));
   }
   return router;
 }
