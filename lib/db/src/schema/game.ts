@@ -48,6 +48,9 @@ export const profiles = pgTable("profiles", {
   returnerCount: integer("returner_count").notNull().default(0),
   /** Life context shaping quest content (never the score). */
   lifeContext: text("life_context").notNull().default("student"),
+  /** "Past You" baseline: the ranked-domain scores at onboarding (backfilled from the first snapshot) and their date. */
+  baselineScores: jsonb("baseline_scores"),
+  baselineDate: date("baseline_date", { mode: "string" }),
 });
 
 export const domainScores = pgTable(

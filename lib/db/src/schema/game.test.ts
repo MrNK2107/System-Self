@@ -8,7 +8,7 @@ import { DEFAULT_EXERCISES } from "@workspace/engine";
 import { closeTestDb, getTestDb, resetDb } from "../testing";
 import { SEED_EXERCISES } from "../seed";
 import { users } from "./users";
-import { logs, questChains } from "./game";
+import { dailySnapshots, logs, profiles, questChains } from "./game";
 import { exercises } from "./gym";
 
 after(() => closeTestDb());
@@ -85,4 +85,25 @@ test("migration seed INSERT itself produces the engine DEFAULT_EXERCISES", async
     rows.map(({ userId: _u, ...r }) => r),
     expected,
   );
+});
+
+test("profiles baseline backfill takes each user's earliest daily snapshot", async (t) => {
+  const db = getTestDb();
+  if (!db) return t.skip("TEST_DATABASE_URL not set");
+  await resetDb(db);
+  const userId = await mkUser(db);
+  await db.insert(profiles).values({ userId, primaryGoal: "g", biggestWeakness: "BODY", codename: "c", onboardingRatings: {} });
+  const snap = (localDate: string, BODY: number) => ({ userId, localDate, scores: { BODY }, hidden: 1, rank: "E" });
+  await db.insert(dailySnapshots).values([snap("2026-10-03", 30), snap("2026-10-01", 10), snap("2026-10-02", 20)]);
+  const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../migrations");
+  const backfill = readdirSync(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .flatMap((f) => readFileSync(path.join(dir, f), "utf8").split("--> statement-breakpoint"))
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.startsWith('UPDATE "profiles"') && chunk.includes('"baseline_scores"'));
+  assert.equal(backfill.length, 1);
+  await db.execute(sql.raw(backfill[0]!));
+  const [p] = await db.select().from(profiles).where(eq(profiles.userId, userId));
+  assert.deepEqual(p!.baselineScores, { BODY: 10 });
+  assert.equal(p!.baselineDate, "2026-10-01");
 });

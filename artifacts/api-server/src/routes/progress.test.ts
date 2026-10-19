@@ -9,12 +9,14 @@ import {
   dailySnapshots,
   logs,
   personalRecords,
+  profiles,
   quests,
   users,
   workoutSessions,
 } from "@workspace/db";
 import { addDays, localDate } from "@workspace/engine";
 import { AdherenceMetricsResponseSchema, GameStateSchema, PastSelfResponseSchema } from "@workspace/contracts";
+import { ensureRolledOver } from "../services/rollover";
 import { TZ, app, assertContract, auth, db, setup, skip } from "./game-test-helpers";
 
 after(async () => {
@@ -55,19 +57,42 @@ test("past-self returns DAY 1 baseline from onboarding", { skip }, async () => {
   assert.ok(moved.body.current.BODY > onboarded.BODY, "current BODY moved");
   for (const d of DOMAINS) if (d !== "BODY") assert.equal(moved.body.current[d], onboarded[d]);
 
-  // An earlier snapshot (an existing user's first one) becomes the baseline and the label reads SINCE.
+  // A backfilled older account: the baseline is the profile's stored one, and the label reads SINCE.
   const earlier = addDays(localDate(new Date(), TZ), -10);
-  await db!.insert(dailySnapshots).values({
-    userId: id,
-    localDate: earlier,
-    scores: { BODY: 1, MIND: 2, WEALTH: 3, SOCIAL: 4, DISCIPLINE: 5 },
-    hidden: 0.5,
-    rank: "E",
-  });
+  await db!
+    .update(profiles)
+    .set({ baselineScores: { BODY: 1, MIND: 2, WEALTH: 3, SOCIAL: 4, DISCIPLINE: 5 }, baselineDate: earlier })
+    .where(eq(profiles.userId, id));
   const since = await request(a).get("/api/progress/past-self").set(auth(token));
   assertContract(PastSelfResponseSchema, since.body);
   assert.equal(since.body.label, `SINCE ${earlier}`);
+  assert.equal(since.body.baselineDate, earlier);
   assert.deepEqual(since.body.baseline, { BODY: 1, MIND: 2, WEALTH: 3, SOCIAL: 4, DISCIPLINE: 5 });
+});
+
+test("past-self baseline survives the rollover of the onboarding date", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const state = await request(a).get("/api/state").set(auth(token));
+  const onboarded = Object.fromEntries(state.body.scores.map((s: { domain: string; score: number }) => [s.domain, s.score]));
+  const onboardedOn = localDate(new Date(), TZ);
+
+  // A day-1 log moves BODY; rolling day 1 over upserts its snapshot with the moved scores.
+  const log = await request(a)
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "ps-roll", domain: "BODY", logType: "workout", occurredAt: new Date().toISOString() });
+  assert.equal(log.status, 201);
+  await ensureRolledOver(db!, id, new Date(Date.now() + 2 * 86_400_000));
+  const [snap] = await db!.select().from(dailySnapshots).where(eq(dailySnapshots.localDate, onboardedOn));
+  assert.notDeepEqual(snap!.scores, onboarded, "the day-1 snapshot was overwritten by the rollover");
+
+  const res = await request(a).get("/api/progress/past-self").set(auth(token));
+  assert.equal(res.status, 200);
+  assertContract(PastSelfResponseSchema, res.body);
+  assert.equal(res.body.label, "DAY 1");
+  assert.equal(res.body.baselineDate, onboardedOn);
+  assert.deepEqual(res.body.baseline, onboarded);
 });
 
 test("past-self counts completed sessions and exercises with a PR", { skip }, async () => {
