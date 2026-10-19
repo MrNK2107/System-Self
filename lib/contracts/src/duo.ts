@@ -7,6 +7,8 @@ export const DuoCheckinKindSchema = z.enum(DUO_CHECKIN_KINDS);
 export type DuoCheckinKind = z.infer<typeof DuoCheckinKindSchema>;
 /** A nudge (`going_now`): at most this many per sender per local day. */
 export const DUO_NUDGES_PER_DAY = 3;
+/** Check-ins of every kind (nudges included): at most this many per sender per local day. */
+export const DUO_CHECKINS_PER_DAY = 10;
 /** Check-ins listed to the pair. */
 export const DUO_CHECKIN_DAYS = 7;
 /** Open invites one player may have out at a time. */

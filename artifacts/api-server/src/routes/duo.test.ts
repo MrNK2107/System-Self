@@ -90,7 +90,7 @@ test("one duo per user: inviting into or from a duo -> 409 already_in_duo; other
   await formed(x, y);
   assert.equal((await respond(x, early.body.id, "accept")).status, 409, "the early invite was cancelled when x joined a duo");
   const r1 = await invite(z, x.name);
-  assert.deepEqual([r1.status, r1.body.code], [409, "already_in_duo"]);
+  assert.deepEqual([r1.status, r1.body.code, r1.body.error], [409, "unavailable", "That operator can't take a partner right now."]);
   const r2 = await invite(x, w.name);
   assert.deepEqual([r2.status, r2.body.code], [409, "already_in_duo"]);
   assert.equal((await db!.select().from(duos)).length, 1);
@@ -215,6 +215,23 @@ test("a nudge (going_now) is limited to 3 per local day per sender: the 4th -> 4
   assert.equal((await checkin(x, "going_now")).status, 429);
   clock = new Date("2026-03-12T00:10:00+05:30");
   assert.equal((await checkin(x, "going_now")).status, 201);
+});
+
+test("every check-in kind is capped at 10 per sender per local day -> 429 checkin_limit; the next local day resets", { skip }, async () => {
+  const x = await mk("xena_1");
+  const y = await mk("yuri_1");
+  await formed(x, y);
+  clock = new Date("2026-03-10T09:00:00+05:30");
+  for (let i = 0; i < 3; i++) assert.equal((await checkin(x, "going_now")).status, 201);
+  for (let i = 0; i < 7; i++) assert.equal((await checkin(x, i % 2 ? "done" : "checked_in")).status, 201);
+  const over = await checkin(x, "checked_in");
+  assert.deepEqual([over.status, over.body.code], [429, "checkin_limit"]);
+  assert.equal((await checkin(y, "done")).status, 201, "the cap is per sender");
+  clock = new Date("2026-03-10T23:59:00+05:30");
+  assert.equal((await checkin(x, "done")).status, 429);
+  clock = new Date("2026-03-11T00:01:00+05:30");
+  assert.equal((await checkin(x, "done")).status, 201, "a new local day");
+  assert.equal((await noticesOf(y.id, "duo_checkin")).length, 11);
 });
 
 test("check-ins and the whole duo never create score_events or change scores", { skip }, async () => {

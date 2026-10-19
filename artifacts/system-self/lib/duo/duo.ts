@@ -61,6 +61,10 @@ export function describeDuoError(err: unknown): string {
       return `${DUO_NUDGES_PER_DAY} nudges a day is the limit. Logged.`;
     case "already_in_duo":
       return "A Party of Two is already formed. One partner at a time.";
+    case "unavailable":
+      return "That operator can't take a partner right now.";
+    case "checkin_limit":
+      return "10 check-ins a day is the limit. Logged.";
     case "invite_open":
       return "An invite between you is already open.";
     case "invite_limit":

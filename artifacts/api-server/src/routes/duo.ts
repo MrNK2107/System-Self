@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq, gt, or } from "drizzle-orm";
 import { duoCheckins, duoInvites, duoMembers, duos, users, type Db } from "@workspace/db";
 import {
+  DUO_CHECKINS_PER_DAY,
   DUO_MAX_OUTGOING_INVITES,
   DUO_NUDGES_PER_DAY,
   DuoActionRequestSchema,
@@ -53,7 +54,8 @@ export function duoRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
       if (!target) return notFound();
       if (target.self) return err(400, "self_target", "You cannot invite yourself");
       if (await isBlockedEitherWay(tx, me, target.userId)) return notFound();
-      if (await duoOf(tx, target.userId)) return alreadyInDuo();
+      // A mild, accepted signal: the handle is resolvable already, so this only says the player has a partner.
+      if (await duoOf(tx, target.userId)) return err(409, "unavailable", "That operator can't take a partner right now.");
       const open = await tx
         .select({ fromId: duoInvites.fromId, toId: duoInvites.toId })
         .from(duoInvites)
@@ -142,17 +144,18 @@ export function duoRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
       if (!mine) return notInDuo();
       const [u] = await tx.select({ tz: users.timezone, username: users.username }).from(users).where(eq(users.id, me)).limit(1);
       const tz = u?.tz ?? "UTC";
-      if (body.kind === "going_now") {
-        // Counted per local day of the sender (the 48 h window only bounds the scan).
-        const today = localDate(now, tz);
-        const recent = await tx
-          .select({ at: duoCheckins.createdAt })
+      // Counted per local day of the sender (the 48 h window only bounds the scan).
+      const today = localDate(now, tz);
+      const recent = (
+        await tx
+          .select({ at: duoCheckins.createdAt, kind: duoCheckins.kind })
           .from(duoCheckins)
-          .where(and(eq(duoCheckins.userId, me), eq(duoCheckins.kind, "going_now"), gt(duoCheckins.createdAt, new Date(now.getTime() - 2 * DAY_MS))));
-        if (recent.filter((r) => localDate(r.at, tz) === today).length >= DUO_NUDGES_PER_DAY) {
-          return err(429, "nudge_limit", `At most ${DUO_NUDGES_PER_DAY} nudges a day`);
-        }
+          .where(and(eq(duoCheckins.userId, me), gt(duoCheckins.createdAt, new Date(now.getTime() - 2 * DAY_MS))))
+      ).filter((r) => localDate(r.at, tz) === today);
+      if (body.kind === "going_now" && recent.filter((r) => r.kind === "going_now").length >= DUO_NUDGES_PER_DAY) {
+        return err(429, "nudge_limit", `At most ${DUO_NUDGES_PER_DAY} nudges a day`);
       }
+      if (recent.length >= DUO_CHECKINS_PER_DAY) return err(429, "checkin_limit", `At most ${DUO_CHECKINS_PER_DAY} check-ins a day`);
       let row;
       try {
         [row] = await tx.transaction((sp) =>

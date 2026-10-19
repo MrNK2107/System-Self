@@ -119,6 +119,8 @@ test("a stuck outbox sends nothing", async () => {
 test("errors read in the SYSTEM voice", () => {
   assert.equal(describeDuoError(http(429, "nudge_limit")), "3 nudges a day is the limit. Logged.");
   assert.equal(describeDuoError(http(409, "already_in_duo")), "A Party of Two is already formed. One partner at a time.");
+  assert.equal(describeDuoError(http(409, "unavailable")), "That operator can't take a partner right now.");
+  assert.equal(describeDuoError(http(429, "checkin_limit")), "10 check-ins a day is the limit. Logged.");
   assert.equal(describeDuoError(http(409, "invite_open")), "An invite between you is already open.");
   assert.equal(describeDuoError(http(409, "not_pending")), "That invite is no longer open.");
   assert.equal(describeDuoError(http(404, "not_in_duo")), "You are not in a Party of Two.");

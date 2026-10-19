@@ -4,10 +4,9 @@
  * nothing here ever calls applyChanges.
  */
 import { and, desc, eq, gt, inArray, or } from "drizzle-orm";
-import { duoCheckins, duoInvites, duoMembers, duos, users, type Db } from "@workspace/db";
+import { blocks, duoCheckins, duoInvites, duoMembers, duos, type Db } from "@workspace/db";
 import { DUO_CHECKIN_DAYS, type DuoCheckinItem, type DuoInviteItem, type DuoResponse } from "@workspace/contracts";
 import { loadProjectionSubjects, projectUser } from "./projection";
-import { isBlockedEitherWay } from "./social";
 
 type Reader = Pick<Db, "select">;
 
@@ -66,11 +65,14 @@ export async function duoView(db: Reader, viewerId: string, now: Date): Promise<
     checkins = rows.map((r) => ({ id: r.id, kind: r.kind as DuoCheckinItem["kind"], fromMe: r.userId === viewerId, createdAt: r.createdAt.toISOString() }));
   }
 
+  // One query for every block touching the viewer among the invite counterparts.
+  const blockRows = ids.length === 0 ? [] : await db.select().from(blocks).where(or(and(eq(blocks.blockerId, viewerId), inArray(blocks.blockedId, ids)), and(eq(blocks.blockedId, viewerId), inArray(blocks.blockerId, ids))));
+  const blocked = new Set(blockRows.map((b) => (b.blockerId === viewerId ? b.blockedId : b.blockerId)));
   const pendingInvites: DuoInviteItem[] = [];
   for (const i of open) {
     const other = otherOf(i);
     const subject = subjects.get(other);
-    if (!subject || (await isBlockedEitherWay(db, viewerId, other))) continue;
+    if (!subject || blocked.has(other)) continue;
     const p = projectUser(subject, "public");
     pendingInvites.push({
       id: i.id,
@@ -81,11 +83,6 @@ export async function duoView(db: Reader, viewerId: string, now: Date): Promise<
     });
   }
   return { partner, checkins, pendingInvites };
-}
-
-export async function usernameOf(db: Reader, userId: string): Promise<string> {
-  const [u] = await db.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1);
-  return u?.username ?? "OPERATOR";
 }
 
 /** Marks every pending invite that involves either user as cancelled (they are in a duo now). */
