@@ -241,9 +241,20 @@ export const QuestSchema = z.object({
   chainStep: z.number().int().nullable(),
   chainTotal: z.number().int().nullable(),
   refusalReason: z.string().nullable(),
+  slotStart: z.string().nullable(),
+  slotEnd: z.string().nullable(),
+  /** Computed from the user's local now on GET /quests; "none" everywhere else. */
+  slotState: z.enum(["none", "upcoming", "open", "missed"]),
   createdAt: z.string(),
 });
 export type GameQuest = z.infer<typeof QuestSchema>;
+
+/** Lock the Slot: both times (end after start, same day, at most 4 h) or `{ slotStart: null }` to clear. */
+export const QuestSlotRequestSchema = z.union([
+  z.object({ slotStart: z.null(), clientId: ClientIdSchema.optional() }),
+  z.object({ slotStart: HHMM, slotEnd: HHMM, clientId: ClientIdSchema.optional() }),
+]);
+export const QuestSlotResponseSchema = z.object({ quest: QuestSchema });
 
 export const QuestListResponseSchema = z.object({
   active: z.array(QuestSchema),

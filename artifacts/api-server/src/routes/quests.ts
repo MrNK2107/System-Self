@@ -11,12 +11,12 @@ import {
   pickFloorRoutine,
   refusalOutcome,
 } from "@workspace/engine";
-import { QuestRefuseRequestSchema } from "@workspace/contracts";
+import { QuestRefuseRequestSchema, QuestSlotRequestSchema } from "@workspace/contracts";
 import type { AiDeps } from "../lib/ai";
 import { generateQuestsRequestSchema } from "../lib/schemas";
 import { findReplay, readKey, withIdempotency, type HandlerResult } from "../services/idempotency";
 import { rollOverBeforeToday } from "../services/rollover";
-import { abandonChain, activeBoard, createQuests, hasActiveChain, toQuestDto } from "../services/quests";
+import { abandonChain, activeBoard, createQuests, hasActiveChain, slotStateOf, toQuestDto } from "../services/quests";
 import { track } from "../services/analytics";
 import { applyChanges, insertNotice } from "../services/scoring";
 import { withUserLock, type Tx } from "../services/user-lock";
@@ -53,7 +53,7 @@ async function questNeed(tx: Tx, userId: string, active: { type: string }[]): Pr
 
 const boardResult = async (tx: Tx, userId: string, now: Date, generated: boolean): Promise<HandlerResult> => ({
   status: 200,
-  body: { active: (await activeBoard(tx, userId, now)).map(toQuestDto), generated },
+  body: { active: (await activeBoard(tx, userId, now)).map((q) => toQuestDto(q)), generated },
 });
 
 type GenerateStep1 =
@@ -82,7 +82,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
       .from(quests)
       .where(and(eq(quests.userId, userId), ne(quests.status, "active"), gte(quests.resolvedLocalDate, since)))
       .orderBy(desc(quests.resolvedAt));
-    res.json({ active: active.map(toQuestDto), recent: recent.map(toQuestDto) });
+    res.json({ active: active.map((q) => toQuestDto(q, slotStateOf(q, now, tz))), recent: recent.map((q) => toQuestDto(q)) });
   });
 
   /**
@@ -249,6 +249,47 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
         }
       }
       return { status: 200, body: { quest: toQuestDto(done!), results: applied.results, notices: outNotices } };
+    });
+  });
+
+  /** Lock the Slot: a hand-picked HH:MM window for an active quest. It changes messages only, never when the quest fails. */
+  router.patch("/quests/:id/slot", async (req, res) => {
+    const questId = String(req.params.id);
+    const userId = req.user!.id;
+    const body = QuestSlotRequestSchema.parse(req.body ?? {});
+    if (!UUID.test(questId)) {
+      res.status(404).json({ error: "Quest not found" });
+      return;
+    }
+    if (body.slotStart !== null) {
+      const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+      const span = mins(body.slotEnd) - mins(body.slotStart);
+      if (span <= 0 || span > 240) {
+        res.status(400).json({ error: "The slot must end after it starts and last at most 4 hours", code: "invalid_slot" });
+        return;
+      }
+    }
+    await withIdempotency(db, req, res, `PATCH /quests/${questId}/slot`, async (tx) => {
+      const now = new Date();
+      await rollOverBeforeToday(tx, userId, now);
+      const [quest] = await tx
+        .select()
+        .from(quests)
+        .where(and(eq(quests.id, questId), eq(quests.userId, userId)))
+        .limit(1);
+      if (!quest) return { status: 404, body: { error: "Quest not found" } };
+      if (quest.status !== "active" || quest.expiresAt.getTime() <= now.getTime()) {
+        return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+      }
+      const slot = body.slotStart === null ? { slotStart: null, slotEnd: null } : { slotStart: body.slotStart, slotEnd: body.slotEnd };
+      const [updated] = await tx
+        .update(quests)
+        .set(slot)
+        .where(and(eq(quests.id, quest.id), eq(quests.status, "active")))
+        .returning();
+      if (!updated) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+      const tz = (await userTimezone(tx, userId))!;
+      return { status: 200, body: { quest: toQuestDto(updated, slotStateOf(updated, now, tz)) } };
     });
   });
 

@@ -19,6 +19,7 @@ import { ApiError } from "@/lib/api/client";
 import { hasApiCode, isoWeekKey } from "@/lib/game/guards";
 import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
 import { QuestCard } from "@/components/QuestCard";
+import { SlotPicker } from "@/components/SlotPicker";
 import { FloorQuestCard } from "@/components/FloorQuestCard";
 import { shadowTallyLine } from "@/lib/game/adherence";
 import type { RefuseOutcome } from "@/context/AppContext";
@@ -116,7 +117,7 @@ export default function QuestsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    quests, completeQuest, refuseQuest, shadowSelf, getWeakestDomain,
+    quests, completeQuest, refuseQuest, setQuestSlot, shadowSelf, getWeakestDomain,
     questChains, chainTemplates, startQuestChain, user, tierProgress,
     loading, loadError, questsLoadError, refresh, offline,
   } = useApp();
@@ -126,6 +127,8 @@ export default function QuestsScreen() {
   const [showChainCatalog, setShowChainCatalog] = useState(false);
   const [refusing, setRefusing] = useState<Quest | null>(null);
   const [refuseBusy, setRefuseBusy] = useState(false);
+  const [slotting, setSlotting] = useState<Quest | null>(null);
+  const [slotBusy, setSlotBusy] = useState(false);
   // The floor routine offered right after a BODY quest was refused (cleared when dismissed or started).
   const [floorOffer, setFloorOffer] = useState<RefuseOutcome | null>(null);
   // The 409 refusal_limit marker belongs to one account and one ISO week.
@@ -195,6 +198,22 @@ export default function QuestsScreen() {
     } finally {
       setBusy(id, false);
       setRefuseBusy(false);
+    }
+  };
+
+  const saveSlot = async (slot: { slotStart: string; slotEnd: string } | null) => {
+    if (!slotting || inFlight.current.has(slotting.id)) return;
+    const id = slotting.id;
+    setBusy(id, true);
+    setSlotBusy(true);
+    setNotice(null);
+    try {
+      const r = await setQuestSlot(id, slot);
+      if (!r.ok && !isStale(r)) setNotice(describeFailure(r));
+      setSlotting(null);
+    } finally {
+      setBusy(id, false);
+      setSlotBusy(false);
     }
   };
 
@@ -444,7 +463,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeDailies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
                 ))}
                 {refusalLimit && (
                   <Text style={[styles.refusalNote, { color: colors.destructive }]}>{REFUSAL_RULE}</Text>
@@ -462,7 +481,7 @@ export default function QuestsScreen() {
                   </Text>
                 </View>
                 {activeWeeklies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
+                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
                 ))}
               </View>
             )}
@@ -602,6 +621,15 @@ export default function QuestsScreen() {
           </TouchableOpacity>
         )}
       </ScrollView>
+      <SlotPicker
+        visible={slotting !== null}
+        questTitle={slotting?.title ?? ""}
+        current={slotting?.slotStart && slotting.slotEnd ? { slotStart: slotting.slotStart, slotEnd: slotting.slotEnd } : null}
+        busy={slotBusy}
+        onCancel={() => setSlotting(null)}
+        onConfirm={(slot) => void saveSlot(slot)}
+        onClear={() => void saveSlot(null)}
+      />
       <RefuseSheet
         visible={refusing !== null}
         questTitle={refusing?.title ?? ""}

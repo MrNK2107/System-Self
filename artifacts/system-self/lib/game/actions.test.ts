@@ -105,6 +105,9 @@ const questDto = {
   chainStep: null,
   chainTotal: null,
   refusalReason: null,
+  slotStart: null,
+  slotEnd: null,
+  slotState: "none",
   createdAt: "2026-10-19T00:00:00.000Z",
 };
 

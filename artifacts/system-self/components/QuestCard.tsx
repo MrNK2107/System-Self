@@ -5,11 +5,14 @@ import * as Haptics from "expo-haptics";
 import { useColors } from "@/hooks/useColors";
 import type { Quest } from "@/context/AppContext";
 import { DOMAIN_COLORS } from "@/constants/domains";
+import { slotLabel } from "@/lib/game/slots";
 
 interface QuestCardProps {
   quest: Quest;
   onComplete: (id: string) => void;
   onRefuse?: (quest: Quest) => void;
+  /** Opens the slot picker (shown for active BODY quests only). */
+  onSlot?: (quest: Quest) => void;
   /** The weekly refusal allowance is used up (server 409 refusal_limit). */
   refuseDisabled?: boolean;
   /** A request for this quest is in flight. */
@@ -22,7 +25,7 @@ const TYPE_LABELS: Record<string, string> = {
   arc: "ARC",
 };
 
-export function QuestCard({ quest, onComplete, onRefuse, refuseDisabled = false, busy = false }: QuestCardProps) {
+export function QuestCard({ quest, onComplete, onRefuse, onSlot, refuseDisabled = false, busy = false }: QuestCardProps) {
   const colors = useColors();
   const domainColor = DOMAIN_COLORS[quest.domain] ?? colors.primary;
   const isActive = quest.status === "active";
@@ -75,6 +78,22 @@ export function QuestCard({ quest, onComplete, onRefuse, refuseDisabled = false,
       <Text style={[styles.description, { color: colors.mutedForeground }]}>
         {quest.description}
       </Text>
+
+      {isActive && quest.domain === "BODY" && onSlot && (
+        <TouchableOpacity
+          onPress={() => onSlot(quest)}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel={slotLabel(quest) ? "Change slot" : "Lock slot"}
+          style={[styles.slotRow, { borderColor: colors.border, opacity: busy ? 0.5 : 1 }]}
+          activeOpacity={0.7}
+        >
+          <Feather name="clock" size={12} color={slotLabel(quest) ? domainColor : colors.mutedForeground} />
+          <Text style={[styles.slotText, { color: slotLabel(quest) ? domainColor : colors.mutedForeground }]}>
+            {slotLabel(quest) ? `LOCKED ${slotLabel(quest)}` : "LOCK THE SLOT"}
+          </Text>
+        </TouchableOpacity>
+      )}
 
       {isActive && (
         <View style={styles.actions}>
@@ -144,6 +163,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  slotRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    alignSelf: "flex-start",
+  },
+  slotText: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 1.5 },
   actions: {
     flexDirection: "row",
     gap: 8,

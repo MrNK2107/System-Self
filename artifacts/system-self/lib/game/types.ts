@@ -62,6 +62,10 @@ export interface Quest {
   chainStep?: number;
   chainTotal?: number;
   isRankUpPrep?: boolean;
+  /** Lock the Slot: the hand-picked HH:MM window; absent when none is set. */
+  slotStart?: string;
+  slotEnd?: string;
+  slotState?: "none" | "upcoming" | "open" | "missed";
 }
 
 export interface QuestChain {

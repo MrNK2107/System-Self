@@ -41,6 +41,17 @@ export function floorProgress(routine: FloorRoutineDto, elapsedSec: number): Flo
   return { stepIndex: 0, stepRemaining: 0, totalRemaining: 0, done: true };
 }
 
+/** Share of a routine's seconds that must have run before LOG IT unlocks. */
+export const FLOOR_LOG_MIN_SHARE = 0.5;
+
+/** Whether LOG IT is unlocked after `elapsedSec`, and how many seconds remain until it is. */
+export function floorLogGate(routine: FloorRoutineDto, elapsedSec: number): { unlocked: boolean; remainingSec: number } {
+  const total = routine.steps.reduce((s, x) => s + x.seconds, 0);
+  const need = Math.ceil(total * FLOOR_LOG_MIN_SHARE);
+  const remainingSec = Math.max(0, need - Math.floor(Math.max(0, elapsedSec)));
+  return { unlocked: remainingSec === 0, remainingSec };
+}
+
 /** The log for a finished floor session: an ordinary BODY log (it scores like any BODY log). */
 export function floorLogInput(routine: Pick<FloorRoutineDto, "id" | "minutes">): LogInput {
   return { domain: "BODY", type: "floor_session", data: { routineId: routine.id, minutes: routine.minutes } };

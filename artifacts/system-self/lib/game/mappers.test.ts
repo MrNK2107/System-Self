@@ -163,6 +163,9 @@ const quest = (over: Partial<GameQuest> = {}): GameQuest => ({
   chainStep: null,
   chainTotal: null,
   refusalReason: null,
+  slotStart: null,
+  slotEnd: null,
+  slotState: "none" as const,
   createdAt: "2026-10-19T00:00:00.000Z",
   ...over,
 });
@@ -183,6 +186,13 @@ test("toQuest maps server quests; chain fields only when present; unknown domain
   assert.equal(chained.chainStep, 1);
   assert.equal(chained.chainTotal, 3);
   assert.equal(chained.domain, "DISCIPLINE");
+});
+
+test("toQuest carries a locked slot and its state", () => {
+  const q = toQuest(quest({ slotStart: "17:30", slotEnd: "18:30", slotState: "missed" }));
+  assert.equal(q.slotStart, "17:30");
+  assert.equal(q.slotEnd, "18:30");
+  assert.equal(q.slotState, "missed");
 });
 
 test("toQuestChains joins the active chains with their templates", () => {

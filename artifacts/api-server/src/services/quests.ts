@@ -1,4 +1,5 @@
 import { and, asc, eq, gt } from "drizzle-orm";
+import { localDate, localTimeToInstant } from "@workspace/engine";
 import { questChains, quests } from "@workspace/db";
 import type { Tx } from "./user-lock";
 
@@ -36,7 +37,19 @@ export async function createQuests(tx: Pick<Tx, "insert">, userId: string, items
     .returning();
 }
 
-export function toQuestDto(q: typeof quests.$inferSelect) {
+export type SlotState = "none" | "upcoming" | "open" | "missed";
+
+/** Where `now` sits against a quest's locked slot (today's local HH:MM window). */
+export function slotStateOf(q: { slotStart: string | null; slotEnd: string | null }, now: Date, tz: string): SlotState {
+  if (!q.slotStart || !q.slotEnd) return "none";
+  const day = localDate(now, tz);
+  const at = (hhmm: string) => localTimeToInstant(day, Number(hhmm.slice(0, 2)), Number(hhmm.slice(3, 5)), tz).getTime();
+  const t = now.getTime();
+  if (t < at(q.slotStart)) return "upcoming";
+  return t <= at(q.slotEnd) ? "open" : "missed";
+}
+
+export function toQuestDto(q: typeof quests.$inferSelect, slotState: SlotState = "none") {
   return {
     id: q.id,
     type: q.type as "daily" | "weekly" | "arc",
@@ -50,6 +63,9 @@ export function toQuestDto(q: typeof quests.$inferSelect) {
     chainStep: q.chainStep,
     chainTotal: q.chainTotal,
     refusalReason: q.refusalReason,
+    slotStart: q.slotStart,
+    slotEnd: q.slotEnd,
+    slotState,
     createdAt: q.createdAt.toISOString(),
   };
 }

@@ -11,6 +11,7 @@ import {
   QuestGenerateResponseSchema,
   QuestListResponseSchema,
   QuestRefuseResponseSchema,
+  QuestSlotResponseSchema,
   type GameLog,
 } from "@workspace/contracts";
 import { z } from "zod";
@@ -183,6 +184,23 @@ export async function refuseQuest(api: ApiClient, outbox: Guard, questId: string
       body: { reason: trimmed, clientId },
       idempotencyKey: clientId,
       schema: LooseQuestRefuseSchema,
+    }),
+  );
+}
+
+/** Lock the Slot (or clear it with null). A plain mutation, so queued logs land first. */
+export function setQuestSlot(
+  api: ApiClient,
+  outbox: Guard,
+  questId: string,
+  slot: { slotStart: string; slotEnd: string } | null,
+  clientId: string,
+) {
+  return afterOutbox(outbox, () =>
+    api.request("PATCH", `/api/quests/${encodeURIComponent(questId)}/slot`, {
+      body: { ...(slot ?? { slotStart: null }), clientId },
+      idempotencyKey: clientId,
+      schema: QuestSlotResponseSchema,
     }),
   );
 }

@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, gte, inArray } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNotNull } from "drizzle-orm";
 import { logs, quests, users, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, addDays, type RankedDomain } from "@workspace/engine";
 import { generateOrTemplate, type AiDeps } from "../lib/ai";
@@ -52,6 +52,8 @@ export interface PromptContext {
   recentRefusals: string[];
   /** Quests refused in the last 7 local days (the deferral ledger count). */
   deferralsThisWeek: number;
+  /** HH:MM–HH:MM windows the user locked for active BODY quests. */
+  lockedSlots: string[];
   weeklyRecap?: WeeklyRecap;
 }
 
@@ -75,7 +77,7 @@ export async function buildUserContext(
   const scores = Object.fromEntries(state.scores.map((s) => [s.domain, s.score])) as Record<RankedDomain, number>;
 
   const active = await tx
-    .select({ id: quests.id })
+    .select({ id: quests.id, domain: quests.domain, slotStart: quests.slotStart, slotEnd: quests.slotEnd })
     .from(quests)
     .where(and(eq(quests.userId, userId), eq(quests.status, "active"), gt(quests.expiresAt, now)));
   const resolved30 = await tx
@@ -98,13 +100,27 @@ export async function buildUserContext(
   const refusals = await tx
     .select({ reason: quests.refusalReason })
     .from(quests)
-    .where(and(eq(quests.userId, userId), eq(quests.status, "refused")))
+    .where(
+      and(
+        eq(quests.userId, userId),
+        eq(quests.status, "refused"),
+        isNotNull(quests.refusalReason),
+        gte(quests.resolvedLocalDate, addDays(today, -6)),
+      ),
+    )
     .orderBy(desc(quests.resolvedAt))
     .limit(5);
   const [deferred] = await tx
     .select({ n: count() })
     .from(quests)
-    .where(and(eq(quests.userId, userId), eq(quests.status, "refused"), gte(quests.resolvedLocalDate, addDays(today, -6))));
+    .where(
+      and(
+        eq(quests.userId, userId),
+        eq(quests.status, "refused"),
+        isNotNull(quests.refusalReason),
+        gte(quests.resolvedLocalDate, addDays(today, -6)),
+      ),
+    );
 
   return {
     username: state.profile.username,
@@ -128,6 +144,9 @@ export async function buildUserContext(
     weakestDomain: weakestDomainOf(scores),
     recentRefusals: refusals.map((r) => r.reason?.trim()).filter((r): r is string => Boolean(r)),
     deferralsThisWeek: Number(deferred?.n ?? 0),
+    lockedSlots: active
+      .filter((q) => q.domain === "BODY" && q.slotStart && q.slotEnd)
+      .map((q) => `${q.slotStart}–${q.slotEnd}`),
   };
 }
 
@@ -153,7 +172,8 @@ function contextBlock(ctx: PromptContext, extraContext?: string): string {
 - Shadow Self status: ${ctx.shadowActive ? `ACTIVE â€” gap is ${ctx.shadowGap.toFixed(1)} points` : "inactive"}
 - Primary goal: ${quoted(ctx.primaryGoal)}
 - Recent logs (7 days): ${ctx.recentLogs.length > 0 ? ctx.recentLogs.map((l) => `${l.domain}: ${l.logType}${l.text ? ` ${quoted(l.text)}` : ""}`).join(" | ") : "none"}
-- Recent refusal reasons: ${ctx.recentRefusals.length > 0 ? ctx.recentRefusals.map(quoted).join(" | ") : "none"}${extraContext ? `
+- Recent refusal reasons (7 days): ${ctx.recentRefusals.length > 0 ? ctx.recentRefusals.map(quoted).join(" | ") : "none"}${ctx.lockedSlots.map((w) => `
+- Locked slot: ${w}`).join("")}${extraContext ? `
 - Extra context (user supplied): ${quoted(extraContext)}` : ""}`;
 }
 

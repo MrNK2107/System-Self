@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FLOOR_ROUTINES } from "@workspace/engine";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { floorHeader, floorLogInput, floorProgress } from "@/lib/game/adherence";
+import { floorHeader, floorLogGate, floorLogInput, floorProgress } from "@/lib/game/adherence";
 
 const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 
@@ -50,12 +50,21 @@ export default function FloorScreen() {
   const p = floorProgress(routine, elapsedMs / 1000);
   const step = routine.steps[p.stepIndex]!;
 
+  const gate = floorLogGate(routine, elapsedMs / 1000);
+
   const logIt = async () => {
-    if (logged) return;
+    if (logged || !gate.unlocked) return;
     setLogged(true);
     setRunning(false);
-    await addLog(floorLogInput(routine));
-    router.replace("/(tabs)/quests");
+    let ok = false;
+    try {
+      await addLog(floorLogInput(routine));
+      ok = true;
+      router.replace("/(tabs)/quests");
+    } finally {
+      // A failed enqueue lets the user try again; after success the screen is leaving.
+      if (!ok) setLogged(false);
+    }
   };
 
   return (
@@ -86,16 +95,19 @@ export default function FloorScreen() {
           <Pressable
             style={[
               styles.btn,
-              { borderColor: colors.primary + "80", backgroundColor: colors.primary + (p.done ? "30" : "10"), opacity: logged ? 0.5 : 1 },
+              { borderColor: colors.primary + "80", backgroundColor: colors.primary + (p.done ? "30" : "10"), opacity: logged || !gate.unlocked ? 0.5 : 1 },
             ]}
             onPress={() => void logIt()}
-            disabled={logged}
+            disabled={logged || !gate.unlocked}
             accessibilityRole="button"
             accessibilityLabel="Log it"
           >
             <Text style={[styles.btnText, { color: colors.primary }]}>LOG IT</Text>
           </Pressable>
         </View>
+        {!gate.unlocked && (
+          <Text style={[styles.note, { color: colors.mutedForeground }]}>LOG IT unlocks in {mmss(gate.remainingSec)}.</Text>
+        )}
         <Text style={[styles.note, { color: colors.mutedForeground }]}>
           Logged as a BODY session. It scores like any BODY log. It does not cancel the refusal.
         </Text>

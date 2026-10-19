@@ -185,6 +185,7 @@ const baseCtx: PromptContext = {
   weakestDomain: "BODY",
   recentRefusals: [],
   deferralsThisWeek: 0,
+  lockedSlots: [],
 };
 
 test("morning briefing and nightly debrief prompts carry the deferral instruction only when deferrals exist", () => {

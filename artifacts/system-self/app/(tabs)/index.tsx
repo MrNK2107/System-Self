@@ -27,6 +27,11 @@ import { fallbackMessage, msUntilLocalMidnight, tryFetchMessage } from "@/lib/ga
 import { NightlyDebriefModal } from "@/components/NightlyDebriefModal";
 import { useNightlyDebrief } from "@/hooks/useNightlyDebrief";
 import { ShadowConfrontationModal } from "@/components/ShadowConfrontationModal";
+import { RefuseSheet } from "@/components/RefuseSheet";
+import { FloorQuestCard } from "@/components/FloorQuestCard";
+import { shadowTallyLine } from "@/lib/game/adherence";
+import { missedSlotLine, missedSlotQuest } from "@/lib/game/slots";
+import type { Quest, RefuseOutcome } from "@/context/AppContext";
 
 function localDateString(now: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -154,16 +159,38 @@ export default function Dashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const userId = useGameUserId();
-  const { user, domainScores, quests, shadowSelf, trajectory, loading, loadError, refresh } = useApp();
+  const { user, domainScores, quests, shadowSelf, trajectory, loading, loadError, refresh, refuseQuest } = useApp();
   const { pendingDebrief, acknowledgeDebrief, debriefText } = useNightlyDebrief();
 
   const [logVisible, setLogVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [confrontVisible, setConfrontVisible] = useState(false);
+  const [refusing, setRefusing] = useState<Quest | null>(null);
+  const [refuseBusy, setRefuseBusy] = useState(false);
+  const [floorOffer, setFloorOffer] = useState<RefuseOutcome | null>(null);
+  // The banner re-checks the device clock once a minute so a slot that lapses while the app is open shows up.
+  const [clock, setClock] = useState(() => new Date());
+  React.useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const rank = user?.rank ?? "E";
   const activeQuests = quests.filter(q => q.status === "active");
   const completedToday = quests.filter(q => q.status === "complete").length;
+  const missed = missedSlotQuest(quests, clock);
+
+  const confirmRefuse = async (reason: string) => {
+    if (!refusing || refuseBusy) return;
+    setRefuseBusy(true);
+    try {
+      const r = await refuseQuest(refusing.id, reason);
+      if (r.ok) setFloorOffer(r.value.floor ? r.value : null);
+      setRefusing(null);
+    } finally {
+      setRefuseBusy(false);
+    }
+  };
 
   // One briefing call per local day: the server caches it per day too, so a refresh shows the same text.
   const briefingQ = useQuery({
@@ -258,6 +285,51 @@ export default function Dashboard() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Lock the Slot: the chosen window has passed and the quest is still open */}
+        {missed && (
+          <View style={[styles.slotBanner, { borderColor: colors.destructive + "60", backgroundColor: colors.card }]}>
+            <Text style={[styles.sectionLabel, { color: colors.destructive }]}>SLOT MISSED</Text>
+            <Text style={[styles.slotLine, { color: colors.foreground }]}>
+              {missedSlotLine(missed.slotStart!, clock)}
+            </Text>
+            <Text style={[styles.questTitle, { color: colors.mutedForeground }]} numberOfLines={1}>{missed.title}</Text>
+            <View style={styles.slotButtons}>
+              <TouchableOpacity
+                style={[styles.slotBtn, { borderColor: colors.border }]}
+                onPress={() => setRefusing(missed)}
+                accessibilityRole="button"
+                accessibilityLabel="Not today"
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.slotBtnText, { color: colors.mutedForeground }]}>NOT TODAY</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.slotBtn, { borderColor: colors.primary + "80", backgroundColor: colors.primary + "18" }]}
+                // P4-T3: open the dungeon briefing here once it exists; until then GO NOW opens the gym tab.
+                onPress={() => router.push("/(tabs)/gym")}
+                accessibilityRole="button"
+                accessibilityLabel="Go now"
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.slotBtnText, { color: colors.primary }]}>GO NOW</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {floorOffer?.floor && (
+          <FloorQuestCard
+            routine={floorOffer.floor}
+            shadowLine={floorOffer.shadowTook ? shadowTallyLine(floorOffer.shadowTook.questTitle) : null}
+            onStart={() => {
+              const id = floorOffer.floor!.id;
+              setFloorOffer(null);
+              router.push({ pathname: "/floor/[routineId]", params: { routineId: id } });
+            }}
+            onDismiss={() => setFloorOffer(null)}
+          />
+        )}
 
         {/* Trajectory */}
         <View style={[styles.trajectoryRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -355,6 +427,13 @@ export default function Dashboard() {
       </TouchableOpacity>
 
       <LogModal visible={logVisible} onClose={() => setLogVisible(false)} />
+      <RefuseSheet
+        visible={refusing !== null}
+        questTitle={refusing?.title ?? ""}
+        busy={refuseBusy}
+        onCancel={() => setRefusing(null)}
+        onConfirm={(reason) => void confirmRefuse(reason)}
+      />
     </View>
   );
 }
@@ -494,6 +573,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flex: 1,
   },
+  slotBanner: { borderWidth: 1, borderRadius: 4, padding: 16, gap: 8 },
+  slotLine: { fontSize: 15, fontWeight: "700" as const, letterSpacing: 0.5 },
+  slotButtons: { flexDirection: "row", gap: 8, marginTop: 4 },
+  slotBtn: { flex: 1, borderWidth: 1, borderRadius: 2, paddingVertical: 12, alignItems: "center" },
+  slotBtnText: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 2 },
   placeholder: {
     fontSize: 12,
     fontStyle: "italic",

@@ -118,6 +118,8 @@ export const quests = pgTable(
     chainStep: integer("chain_step"),
     chainTotal: integer("chain_total"),
     refusalReason: text("refusal_reason"),
+    slotStart: text("slot_start"), // HH:MM local, set by hand (Lock the Slot); never changes when the quest fails
+    slotEnd: text("slot_end"),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
   (t) => [index("quests_user_status_expires_idx").on(t.userId, t.status, t.expiresAt)],

@@ -28,6 +28,7 @@ import {
   generateQuests as generateQuestsRequest,
   newClientId,
   refuseQuest as refuseQuestRequest,
+  setQuestSlot as setQuestSlotRequest,
   retryFailedEntries,
   startChain,
   type LogInput,
@@ -125,6 +126,8 @@ interface AppContextType {
   addLog: (entry: LogInput) => Promise<void>;
   completeQuest: (questId: string) => Promise<GameMutationResult>;
   refuseQuest: (questId: string, reason: string) => Promise<GameMutationResult<RefuseOutcome>>;
+  /** Lock the Slot for an active quest; null clears it. */
+  setQuestSlot: (questId: string, slot: { slotStart: string; slotEnd: string } | null) => Promise<GameMutationResult>;
   startQuestChain: (templateKey: string) => Promise<GameMutationResult>;
   generateQuests: () => Promise<GameMutationResult>;
 
@@ -278,6 +281,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }),
     [runGuarded],
   );
+  const setQuestSlot = useCallback(
+    (questId: string, slot: { slotStart: string; slotEnd: string } | null) =>
+      runGuarded("quest-slot", (id) => setQuestSlotRequest(api, getOutbox(), questId, slot, id)),
+    [runGuarded],
+  );
   const startQuestChain = useCallback(
     (templateKey: string) => runGuarded("chain", (id) => startChain(api, getOutbox(), templateKey, id)),
     [runGuarded],
@@ -327,6 +335,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addLog,
       completeQuest,
       refuseQuest,
+      setQuestSlot,
       startQuestChain,
       generateQuests,
       syncBlocked,
@@ -340,7 +349,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
       state, stateQ.isError, stateQ.error, questsQ.data, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
-      getShadowPhase, addLog, completeQuest, refuseQuest, startQuestChain, generateQuests, syncBlocked, online,
+      getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, startQuestChain, generateQuests, syncBlocked, online,
       pendingCount, outboxSnap.failed.length, retryFailed, discardFailed, rivalsState,
     ],
   );

@@ -10,6 +10,7 @@ import {
   fetchDeferrals,
   fetchShadowTakeovers,
   floorHeader,
+  floorLogGate,
   floorLogInput,
   floorProgress,
   ledgerLine,
@@ -96,7 +97,7 @@ test("refuseQuest sends the required trimmed reason and returns the floor offer"
     quest: {
       id: "q1", type: "daily", title: "Push Day", description: "d", domain: "BODY", status: "refused",
       expiresAt: "2026-10-19T20:00:00.000Z", resolvedAt: "2026-10-19T10:00:00.000Z", chainId: null, chainStep: null,
-      chainTotal: null, refusalReason: "tomorrow", createdAt: "2026-10-19T00:00:00.000Z",
+      chainTotal: null, refusalReason: "tomorrow", slotStart: null, slotEnd: null, slotState: "none", createdAt: "2026-10-19T00:00:00.000Z",
     },
     penalty: 0,
     results: [],
@@ -123,4 +124,15 @@ test("fetchDeferrals and fetchShadowTakeovers read the adherence endpoints", asy
   assert.equal((await fetchDeferrals(api, 30)).countThisWeek, 1);
   assert.equal((await fetchShadowTakeovers(api)).count, 1);
   assert.deepEqual(calls.map((c) => c.path), ["/api/adherence/deferrals?days=30", "/api/adherence/shadow-takeovers?days=30"]);
+});
+
+test("floorLogGate unlocks at half of the routine's seconds and reports what remains", () => {
+  const r = FLOOR_ROUTINES[0]!;
+  const total = r.steps.reduce((s, x) => s + x.seconds, 0);
+  const need = Math.ceil(total / 2);
+  assert.deepEqual(floorLogGate(r, 0), { unlocked: false, remainingSec: need });
+  assert.deepEqual(floorLogGate(r, 10), { unlocked: false, remainingSec: need - 10 });
+  assert.deepEqual(floorLogGate(r, need - 1), { unlocked: false, remainingSec: 1 });
+  assert.deepEqual(floorLogGate(r, need), { unlocked: true, remainingSec: 0 });
+  assert.deepEqual(floorLogGate(r, total * 2), { unlocked: true, remainingSec: 0 });
 });

@@ -149,6 +149,11 @@ export function toQuest(q: GameQuest): Quest {
   if (q.chainId) quest.chainId = q.chainId;
   if (q.chainStep !== null) quest.chainStep = q.chainStep;
   if (q.chainTotal !== null) quest.chainTotal = q.chainTotal;
+  if (q.slotStart && q.slotEnd) {
+    quest.slotStart = q.slotStart;
+    quest.slotEnd = q.slotEnd;
+    quest.slotState = q.slotState;
+  }
   return quest;
 }
 
