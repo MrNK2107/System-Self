@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, gte, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
 import { comebacks, logs, profiles, quests, userDayState, users, workoutSessions } from "@workspace/db";
 import {
   COMEBACK_CHECKLIST,
@@ -61,14 +61,32 @@ export async function detectComeback(
   return [notice];
 }
 
-/** Counts a home session while the home path is active; the sixth clears Tier I and opens the gym. */
+/**
+ * Counts a home session while the home path is active, at most one per local day: a log counts only when no other
+ * home or floor session (not forbidden) is on file for its local date. The sixth counted one clears Tier I and
+ * opens the gym. Run after the log row is inserted.
+ */
 export async function countHomeSession(
   tx: Tx,
   userId: string,
-  log: { logType: string; forbidden: boolean },
+  log: { id: string; logType: string; forbidden: boolean; localDate: string },
   now: Date,
 ): Promise<Notice[]> {
   if (log.forbidden || !(HOME_LOG_TYPES as readonly string[]).includes(log.logType)) return [];
+  const [sameDay] = await tx
+    .select({ id: logs.id })
+    .from(logs)
+    .where(
+      and(
+        eq(logs.userId, userId),
+        eq(logs.localDate, log.localDate),
+        eq(logs.forbidden, false),
+        inArray(logs.logType, [...HOME_LOG_TYPES]),
+        ne(logs.id, log.id),
+      ),
+    )
+    .limit(1);
+  if (sameDay) return [];
   const [p] = await tx
     .update(profiles)
     .set({ homeSessions: sql`${profiles.homeSessions} + 1` })

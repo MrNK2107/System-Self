@@ -278,13 +278,21 @@ test("6 home sessions unlock the gym", { skip }, async () => {
   const a = clockApp();
   const { token, id } = await setup(a);
   await seed(id, null);
+  // One log per local day: home sessions count at most once a day, so each lands on its own day after NOW.
+  const logOn = (day: number, clientId: string, logType: string) => {
+    const at = new Date(NOW.getTime() + day * 86_400_000);
+    return request(app({ now: () => at }))
+      .post("/api/logs")
+      .set(auth(token))
+      .send({ clientId, domain: "BODY", logType, occurredAt: at.toISOString() });
+  };
   // Not on the home path: home sessions do not count.
   await postLog(a, token, "pre", "BODY", "home_session");
   assert.equal((await db!.select().from(profiles).where(eq(profiles.userId, id)))[0]!.homeSessions, 0);
   await request(a).post("/api/profile/home-path").set(auth(token)).send({ active: true });
   const types = ["home_session", "floor_session", "home_session", "home_session", "floor_session"];
   for (const [i, t] of types.entries()) {
-    const r = await postLog(a, token, `h${i}`, "BODY", t);
+    const r = await logOn(i + 1, `h${i}`, t);
     assert.equal(r.status, 201);
     assert.ok(!kindsOf(r.body).includes("gym_unlocked"));
   }
@@ -292,23 +300,46 @@ test("6 home sessions unlock the gym", { skip }, async () => {
   assert.equal(p!.homeSessions, 5);
   assert.equal(p!.homePathActive, true);
   // A non-home log does not count.
-  await postLog(a, token, "other", "BODY", "workout");
+  await logOn(5, "other", "workout");
   [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
   assert.equal(p!.homeSessions, 5);
-  const sixth = await postLog(a, token, "h5", "BODY", "home_session");
+  const sixth = await logOn(6, "h5", "home_session");
   assertContract(LogResponseSchema, sixth.body);
   const unlock = sixth.body.notices.find((x: { kind: string }) => x.kind === "gym_unlocked");
   assert.deepEqual(unlock.payload, { line: "Tier I cleared. The gym is open to you now." });
   [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
   assert.equal(p!.homePathActive, false);
   assert.equal(p!.homeSessions, 6);
-  assert.equal((await request(a).get("/api/state").set(auth(token))).body.profile.homePathActive, false);
   // Past the unlock the counter stops, and re-opting in starts a fresh count.
-  const seventh = await postLog(a, token, "h6", "BODY", "home_session");
+  const seventh = await logOn(7, "h6", "home_session");
   assert.ok(!kindsOf(seventh.body).includes("gym_unlocked"));
+  const at7 = new Date(NOW.getTime() + 7 * 86_400_000);
+  assert.equal((await request(app({ now: () => at7 })).get("/api/state").set(auth(token))).body.profile.homePathActive, false);
   await request(a).post("/api/profile/home-path").set(auth(token)).send({ active: true });
   [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
   assert.equal(p!.homeSessions, 0);
+});
+
+test("home sessions count at most once per local day toward the unlock", { skip }, async () => {
+  const a = clockApp();
+  const { token, id } = await setup(a);
+  await seed(id, null, 0);
+  await request(a).post("/api/profile/home-path").set(auth(token)).send({ active: true });
+  const homeCount = async () => (await db!.select().from(profiles).where(eq(profiles.userId, id)))[0]!.homeSessions;
+  assert.equal((await postLog(a, token, "d0-a", "BODY", "home_session")).status, 201);
+  assert.equal(await homeCount(), 1);
+  // A second home or floor session the same local day does not count again.
+  assert.equal((await postLog(a, token, "d0-b", "BODY", "floor_session")).status, 201);
+  assert.equal((await postLog(a, token, "d0-c", "BODY", "home_session")).status, 201);
+  assert.equal(await homeCount(), 1);
+  // A backdated one for yesterday is that day's first: it counts.
+  const yesterday = new Date(NOW.getTime() - 86_400_000);
+  const back = await request(a)
+    .post("/api/logs")
+    .set(auth(token))
+    .send({ clientId: "d-1", domain: "BODY", logType: "home_session", occurredAt: yesterday.toISOString() });
+  assert.equal(back.status, 201);
+  assert.equal(await homeCount(), 2);
 });
 
 test("gym session while home path active still scores (and a gym return after a gap is a comeback)", { skip }, async () => {

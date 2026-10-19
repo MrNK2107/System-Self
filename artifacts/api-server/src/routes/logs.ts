@@ -98,7 +98,7 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
         refId: log!.id,
       }));
       const { results, notices } = await applyActivityChanges(tx, userId, changes, { localDate: logDate, now }, {
-        afterApply: () => countHomeSession(tx, userId, { logType: body.logType, forbidden }, now),
+        afterApply: () => countHomeSession(tx, userId, { id: log!.id, logType: body.logType, forbidden, localDate: logDate }, now),
       });
       await rollOverDue(tx, userId, now);
       if (body.logType === "floor_session") await track(tx, userId, "floor_completed", { logId: log!.id });

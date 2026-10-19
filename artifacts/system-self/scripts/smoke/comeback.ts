@@ -1,7 +1,7 @@
 // Smoke: home-first dungeons and the redemption arc against a running API.
-// register + onboard -> GET /api/comeback is idle -> home path on -> 6 home_session logs -> the gym_unlocked notice
-// arrives and the home path switches off -> notice kinds filtering works. A real comeback needs 5 empty days, so it
-// is covered by the server tests with injected clocks; here only the idle answer is asserted.
+// register + onboard -> GET /api/comeback is idle -> home path on -> 6 home_session logs on one day count once, so no
+// gym_unlocked notice and the home path stays on -> notice kinds filtering works. A real comeback needs 5 empty days and
+// the unlock 6 separate days, so both are covered by the server tests with injected clocks.
 // Usage: SMOKE_API_URL=http://localhost:3001 pnpm exec tsx scripts/smoke/comeback.ts
 import assert from "node:assert/strict";
 import { z } from "zod";
@@ -87,28 +87,31 @@ async function main() {
     await enqueueLog(outbox, { domain: "BODY", type: "home_session", note: `home ${i + 1}` }, newClientId("home"));
     assert.deepEqual(await outbox.flush(), { sent: 1, remaining: 0 });
   }
-  step("6 home_session logs");
+  step("6 home_session logs, one day");
 
   const state = await fetchGameState(api);
-  assert.equal(state.profile.homePathActive, false, "the sixth home session clears Tier I");
+  assert.equal(state.profile.homePathActive, true, "home sessions count once a day: six in one day do not clear Tier I");
   const unlocked = parseNotices((await fetchNotices(api)).items).notices.filter((n) => n.kind === "gym_unlocked");
-  assert.equal(unlocked.length, 1);
-  assert.deepEqual(unlocked[0]!.payload, { line: "Tier I cleared. The gym is open to you now." });
-  step("gym_unlocked notice", { homePathActive: false });
+  assert.equal(unlocked.length, 0);
+  step("no gym_unlocked notice", { homePathActive: true });
   assert.deepEqual(await fetchComeback(api), { active: null, returnerCount: 0 });
 
   // Kinds filtering: only the requested kinds come back and page.
-  const only = await api.request("GET", "/api/notices?kinds=gym_unlocked", { schema: LooseList });
-  assert.deepEqual([...new Set(only.items.map((n) => n.kind))], ["gym_unlocked"]);
-  const without = await api.request("GET", "/api/notices?kinds=milestone,rank_change", { schema: LooseList });
-  assert.ok(without.items.every((n) => n.kind === "milestone" || n.kind === "rank_change"));
-  assert.ok(!without.items.some((n) => n.kind === "gym_unlocked"));
+  const present = [...new Set((await fetchNotices(api)).items.map((n) => n.kind))];
+  assert.ok(present.length > 0, "the logs above left at least one notice");
+  const kind = present[0]!;
+  const only = await api.request("GET", `/api/notices?kinds=${kind}`, { schema: LooseList });
+  assert.deepEqual([...new Set(only.items.map((n) => n.kind))], [kind]);
+  const others = ["milestone", "rank_change", "gym_unlocked"].filter((k) => k !== kind);
+  const without = await api.request("GET", `/api/notices?kinds=${others.join(",")}`, { schema: LooseList });
+  assert.ok(without.items.every((n) => others.includes(n.kind)));
+  assert.ok(!without.items.some((n) => n.kind === kind));
   const none = await api.request("GET", "/api/notices?kinds=from_the_future", { schema: LooseList });
   assert.deepEqual(none, { items: [], hasMore: false });
-  const stateKinds = await api.request("GET", "/api/state?noticeKinds=gym_unlocked", {
+  const stateKinds = await api.request("GET", `/api/state?noticeKinds=${kind}`, {
     schema: z.object({ unseenNotices: z.array(z.object({ kind: z.string() }).passthrough()) }).passthrough(),
   });
-  assert.deepEqual([...new Set(stateKinds.unseenNotices.map((n) => n.kind))], ["gym_unlocked"]);
+  assert.deepEqual([...new Set(stateKinds.unseenNotices.map((n) => n.kind))], [kind]);
   const all = await fetchNotices(api);
   assert.ok(all.items.length >= only.items.length);
   step("notice kinds filtering", { sent: NOTICE_KINDS_PARAM.split(",").length });
