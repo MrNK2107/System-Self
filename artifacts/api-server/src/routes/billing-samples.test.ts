@@ -35,14 +35,14 @@ const DAY = 86_400_000;
 
 /** A sample re-addressed to our user, with a unique id, ordered timestamps and (when it has one) a future expiry. */
 function adopt(s: Sample, userId: string, i: number): Sample {
-  const e = { ...s.event, id: `${s.event.id}-${i}`, event_timestamp_ms: NOW.getTime() - (100 - i) * 60_000 };
+  const e: Sample["event"] = { ...s.event, id: `${s.event.id}-${i}`, event_timestamp_ms: NOW.getTime() - (100 - i) * 60_000 };
   if ("app_user_id" in e) e.app_user_id = userId;
   if (typeof e.expiration_at_ms === "number") e.expiration_at_ms = NOW.getTime() + 30 * DAY;
   if (Array.isArray(e.transferred_to)) e.transferred_to = [userId];
   return { ...s, event: e };
 }
 
-const post = (body: unknown) =>
+const post = (body: Sample) =>
   request(app()).post("/api/billing/revenuecat").set({ Authorization: `Bearer ${SECRET}` }).send(body);
 
 test("the published sample set covers the lifecycle events the handler acts on", () => {
