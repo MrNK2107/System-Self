@@ -15,7 +15,7 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 
 ## H-02 🟥 Hosting provider
 **Need:** where the API and worker run (Fly.io, Render, Railway, AWS, GCP…).
-**Doing instead:** a provider-neutral Docker image (`artifacts/api-server/Dockerfile`) with separate `api` and `worker` commands, plus `docker-compose.prod.yml`. Any container host works.
+**Doing instead:** a provider-neutral Docker image (`artifacts/api-server/Dockerfile`, `ROLE=api|worker|migrate`), `docker-compose.prod.yml` (postgres, migrate, two APIs behind nginx, worker; example env in `.env.prod.example`), and a ready `render.yaml` Blueprint (web API, worker, managed Postgres, pre-deploy migrate; secrets are `sync: false`). Any container host works.
 **Resolution:**
 
 ## H-03 🟥 App store accounts and app identity

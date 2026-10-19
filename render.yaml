@@ -1,0 +1,75 @@
+# Render Blueprint for SYSTEM // SELF (HOLD H-02 ready option). Dashboard: New > Blueprint.
+# Secrets are `sync: false`: Render prompts for them on first sync.
+databases:
+  - name: system-self-db
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+    databaseName: system_self
+    user: system_self
+
+services:
+  - type: web
+    name: system-self-api
+    runtime: docker
+    dockerfilePath: ./artifacts/api-server/Dockerfile
+    dockerContext: .
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /api/readyz
+    # Runs the bundled migrator (advisory-locked) before each deploy goes live.
+    preDeployCommand: ROLE=migrate docker-entrypoint.sh
+    envVars:
+      - key: ROLE
+        value: api
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: system-self-db
+          property: connectionString
+      - key: TRUST_PROXY
+        value: "1"
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: REVENUECAT_WEBHOOK_SECRET
+        sync: false
+      - key: REVENUECAT_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: EXPO_ACCESS_TOKEN
+        sync: false
+
+  - type: worker
+    name: system-self-worker
+    runtime: docker
+    dockerfilePath: ./artifacts/api-server/Dockerfile
+    dockerContext: .
+    plan: starter
+    envVars:
+      - key: ROLE
+        value: worker
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: system-self-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: REVENUECAT_API_KEY
+        sync: false
+      - key: EXPO_ACCESS_TOKEN
+        sync: false

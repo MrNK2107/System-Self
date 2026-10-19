@@ -1,0 +1,16 @@
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+.git
+.gitignore
+.superpowers
+.env
+.env.*
+!.env.prod.example
+artifacts/system-self
+attached_assets
+docs
+**/.expo
+**/coverage
+*.md
+docker-compose*.yml

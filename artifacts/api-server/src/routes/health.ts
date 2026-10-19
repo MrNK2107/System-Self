@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { HealthCheckResponse } from "@workspace/api-zod";
 import type { Db } from "@workspace/db";
 import { aiAvailable } from "../lib/ai";
+import { isShuttingDown } from "../lib/shutdown";
 
 export function healthRoutes(db: Db | null): IRouter {
   const router: IRouter = Router();
@@ -13,6 +14,9 @@ export function healthRoutes(db: Db | null): IRouter {
   });
 
   router.get("/readyz", async (req, res) => {
+    if (isShuttingDown()) {
+      return res.status(503).json({ status: "shutting_down" });
+    }
     if (!db) {
       return res.status(503).json({ status: "not_ready", db: "unavailable" });
     }
