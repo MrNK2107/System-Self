@@ -171,6 +171,7 @@ export async function buildGameState(
     profile: {
       username: user.username,
       codename: profile.codename,
+      publicCodename: profile.publicCodename,
       rank,
       rankSince: profile.rankSince.toISOString(),
       identitySetting: profile.identitySetting as GameState["profile"]["identitySetting"],

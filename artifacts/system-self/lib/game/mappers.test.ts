@@ -18,6 +18,7 @@ import {
 const profile: GameState["profile"] = {
   username: "alpha",
   codename: "GHOST // AB1-2",
+  publicCodename: "USER // ASH-1",
   rank: "D",
   rankSince: "2026-10-01T00:00:00.000Z",
   identitySetting: "semi-public",

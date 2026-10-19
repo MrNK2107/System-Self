@@ -93,6 +93,8 @@ export const NOTICE_KINDS = [
   "comeback",
   "returner_mark",
   "gym_unlocked",
+  "rival_passed",
+  "rival_challenge_result",
 ] as const;
 export const NoticeKindSchema = z.enum(NOTICE_KINDS);
 export type NoticeKind = z.infer<typeof NoticeKindSchema>;
@@ -120,6 +122,21 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
   comeback: z.object({ gapDays: z.number().int(), line: z.string(), offerHomePath: z.boolean() }),
   returner_mark: z.object({ count: z.number().int(), line: z.string() }),
   gym_unlocked: z.object({ line: z.string() }),
+  /** A rival's domain score passed the user's at a rollover (once until the order flips back). */
+  rival_passed: z.object({ codename: z.string(), domain: RankedDomainSchema }),
+  /** A rival challenge resolved (no score effect). Marking it seen acknowledges the challenge. */
+  rival_challenge_result: z.object({
+    challengeId: z.string(),
+    codename: z.string(),
+    domain: RankedDomainSchema,
+    outcome: z.enum(["win", "loss", "draw"]),
+    startDate: z.string(),
+    endDate: z.string(),
+    userStart: z.number(),
+    userEnd: z.number(),
+    rivalStart: z.number(),
+    rivalEnd: z.number(),
+  }),
 } as const satisfies Record<NoticeKind, z.ZodTypeAny>;
 
 const noticeOf = <K extends NoticeKind>(kind: K) =>
@@ -137,6 +154,8 @@ export const NoticeSchema = z.discriminatedUnion("kind", [
   noticeOf("comeback"),
   noticeOf("returner_mark"),
   noticeOf("gym_unlocked"),
+  noticeOf("rival_passed"),
+  noticeOf("rival_challenge_result"),
 ]);
 export type Notice = z.infer<typeof NoticeSchema>;
 export type NoticePayload<K extends NoticeKind> = z.infer<(typeof NOTICE_PAYLOAD_SCHEMAS)[K]>;
@@ -155,6 +174,8 @@ export const GameStateSchema = z.object({
   profile: z.object({
     username: z.string(),
     codename: z.string(),
+    /** The user's own public codename (`USER // WORD-N`): how semi-public and anonymous players are found. Self only. */
+    publicCodename: z.string(),
     rank: RankSchema,
     rankSince: z.string(),
     identitySetting: IdentitySettingSchema,

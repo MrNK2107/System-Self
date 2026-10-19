@@ -2,7 +2,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
-import type { RivalTaunt } from "@/context/AppContext";
+import type { RivalTaunt } from "@workspace/contracts";
 
 interface Props {
   taunt: RivalTaunt;
@@ -10,8 +10,8 @@ interface Props {
 
 export function RivalTauntCard({ taunt }: Props) {
   const colors = useColors();
-  const timeAgo = getTimeAgo(taunt.generatedAt);
-  const shortName = taunt.rivalCodename.split(" // ")[1] ?? taunt.rivalCodename;
+  const timeAgo = getTimeAgo(taunt.createdAt);
+  const shortName = taunt.codename.split(" // ")[1] ?? taunt.codename;
 
   return (
     <View style={[

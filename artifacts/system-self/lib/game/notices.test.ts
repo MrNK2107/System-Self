@@ -26,6 +26,7 @@ const failed = (n: number) => ({
   payload: { questId: id(900 + n), title: `Quest ${n}`, type: "daily", penalty: 0.8 },
   createdAt: at(),
 });
+const mark = () => ({ id: id(72), kind: "returner_mark", payload: { count: 1, line: "Returned ×1." }, createdAt: at() });
 const streak = (n: number) => ({
   id: id(n),
   kind: "streak_break",
@@ -47,6 +48,8 @@ test("NOTICE_ORDER covers every server notice kind exactly once", () => {
     "comeback",
     "returner_mark",
     "gym_unlocked",
+    "rival_challenge_result",
+    "rival_passed",
   ]);
   // The kinds filter sent with every notice read is exactly this list.
   assert.equal(NOTICE_KINDS_PARAM, NOTICE_ORDER.join(","));
@@ -86,6 +89,43 @@ test("comeback, returner mark and gym unlock render as SYSTEM modals after chain
     label: "TIER I CLEARED",
     title: "The gym is open to you now.",
     body: "Tier I cleared. The gym is open to you now.",
+  });
+});
+
+test("rival notices: pressure is a SYSTEM alert, a challenge result opens the outcome modal", () => {
+  const passed = { id: id(70), kind: "rival_passed", payload: { codename: "RIVAL // ASH-3", domain: "MIND" }, createdAt: at() };
+  const payload = {
+    challengeId: id(80),
+    codename: "RIVAL // OAK-1",
+    domain: "SOCIAL",
+    outcome: "loss",
+    startDate: "2026-01-01",
+    endDate: "2026-01-07",
+    userStart: 20,
+    userEnd: 21,
+    rivalStart: 30,
+    rivalEnd: 33,
+  };
+  const result = { id: id(71), kind: "rival_challenge_result", payload, createdAt: at() };
+  const parsed = parseNotices([passed, result, mark()]).notices;
+  const order: string[] = [];
+  const ack = new Set<string>();
+  for (let g = nextNoticeGroup(parsed, ack); g; g = nextNoticeGroup(parsed, ack)) {
+    order.push(g.kind);
+    g.notices.forEach((n) => ack.add(n.id));
+  }
+  assert.deepEqual(order, ["returner_mark", "rival_challenge_result", "rival_passed"]);
+  assert.deepEqual(noticeView({ kind: "rival_passed", notices: parseNotices([passed]).notices }), {
+    modal: "system",
+    tone: "alert",
+    label: "RIVAL PRESSURE",
+    title: "RIVAL // ASH-3 passed your MIND score.",
+    body: "The order changed overnight. It is logged.",
+  });
+  const { challengeId: _ignored, ...shown } = payload;
+  assert.deepEqual(noticeView({ kind: "rival_challenge_result", notices: parseNotices([result]).notices }), {
+    modal: "challenge_result",
+    result: shown,
   });
 });
 

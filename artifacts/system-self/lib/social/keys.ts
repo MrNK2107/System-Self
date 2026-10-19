@@ -6,6 +6,8 @@ export const followingKey = (userId: string | null) => ["social-following", user
 export const followersCountKey = (userId: string | null) => ["social-followers-count", userId] as const;
 /** One player's profile (GET /api/social/profile/:handle). */
 export const socialProfileKey = (userId: string | null, handle: string) => ["social-profile", userId, handle] as const;
+/** The user's rivals, challenges and transmissions (GET /api/rivals). */
+export const rivalsKey = (userId: string | null) => ["rivals", userId] as const;
 /** Prefix of every social query, for invalidating them together. */
 export const socialRootKeys = (userId: string | null) =>
   [
@@ -13,4 +15,5 @@ export const socialRootKeys = (userId: string | null) =>
     ["social-following", userId],
     ["social-followers-count", userId],
     ["social-profile", userId],
+    ["rivals", userId],
   ] as const;

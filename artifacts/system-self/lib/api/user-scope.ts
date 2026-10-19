@@ -1,6 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { activeKey, loadActive } from "../game/gym";
-import { RIVAL_STORAGE_KEYS } from "../game/rival-keys";
 import type { KeyValueStorage, Outbox } from "./outbox";
 
 export const LAST_USER_KEY = "system_self.last_user_id";
@@ -10,7 +9,7 @@ interface ClientPersister {
 }
 
 /**
- * Local data (query cache, outbox, gym session, on-device rivals) belongs to one user. This wipes it on explicit sign-out and when a
+ * Local data (query cache, outbox, gym session) belongs to one user. This wipes it on explicit sign-out and when a
  * different user signs in on the same device. Mere session expiry for the same user keeps everything.
  */
 export function createLocalDataManager(deps: {
@@ -26,7 +25,6 @@ export function createLocalDataManager(deps: {
   async function clearLocalData(userId?: string): Promise<void> {
     const owner = userId ?? (await deps.storage.getItem(LAST_USER_KEY));
     if (owner) await deps.storage.removeItem(activeKey(owner));
-    for (const key of RIVAL_STORAGE_KEYS) await deps.storage.removeItem(key);
     deps.queryClient.clear();
     await deps.persister.removeClient();
     await deps.outbox.reset();

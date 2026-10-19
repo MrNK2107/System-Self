@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LEGACY_CLEANUP_MARKER, cleanupLegacyKeys, type CleanupStorage } from "./legacy-cleanup";
+import { LEGACY_CLEANUP_MARKER, LEGACY_CLEANUP_MARKER_V2, LEGACY_RIVAL_KEYS, cleanupLegacyKeys, type CleanupStorage } from "./legacy-cleanup";
 
 function memoryStorage(keys: string[]): CleanupStorage & { data: Map<string, string> } {
   const data = new Map(keys.map((k) => [k, "x"]));
@@ -33,11 +33,28 @@ const KEPT = [
 ];
 const OTHER = ["system_self.outbox.v1", "system_self.rq.v1", "system_self.last_user_id"];
 
-test("first launch removes old @system_self:* game keys except the local rivals keys", async () => {
+const markers = new Set([LEGACY_CLEANUP_MARKER, LEGACY_CLEANUP_MARKER_V2]);
+
+test("first launch removes the old @system_self:* game keys and the old on-device rival keys (discarded, not imported)", async () => {
   const storage = memoryStorage([...OLD, ...KEPT, ...OTHER]);
-  assert.equal(await cleanupLegacyKeys(storage), OLD.length);
-  assert.deepEqual([...storage.data.keys()].filter((k) => k !== LEGACY_CLEANUP_MARKER).sort(), [...KEPT, ...OTHER].sort());
+  assert.equal(await cleanupLegacyKeys(storage), OLD.length + KEPT.length);
+  assert.deepEqual([...storage.data.keys()].filter((k) => !markers.has(k)).sort(), [...OTHER].sort());
   assert.ok(storage.data.has(LEGACY_CLEANUP_MARKER));
+  assert.ok(storage.data.has(LEGACY_CLEANUP_MARKER_V2));
+});
+
+test("v2: an install already cleaned by v1 drops only the rival keys, once", async () => {
+  const storage = memoryStorage([...KEPT, ...OTHER, "@system_self:last_debrief"]);
+  storage.data.set(LEGACY_CLEANUP_MARKER, "2026-10-01T00:00:00.000Z");
+  assert.deepEqual([...LEGACY_RIVAL_KEYS].sort(), [...KEPT].sort());
+  assert.equal(await cleanupLegacyKeys(storage), KEPT.length);
+  assert.deepEqual(
+    [...storage.data.keys()].filter((k) => !markers.has(k)).sort(),
+    [...OTHER, "@system_self:last_debrief"].sort(),
+  );
+  storage.data.set("@system_self:rivals", "[]");
+  assert.equal(await cleanupLegacyKeys(storage), 0);
+  assert.ok(storage.data.has("@system_self:rivals"));
 });
 
 test("it runs once: keys written after the cleanup survive later launches", async () => {
@@ -55,4 +72,5 @@ test("a failed removal leaves the marker unset so the next launch retries", asyn
   };
   await assert.rejects(cleanupLegacyKeys(storage));
   assert.equal(storage.data.has(LEGACY_CLEANUP_MARKER), false);
+  assert.equal(storage.data.has(LEGACY_CLEANUP_MARKER_V2), false);
 });

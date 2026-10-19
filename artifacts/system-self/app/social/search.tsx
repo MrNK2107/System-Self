@@ -4,8 +4,10 @@ import { router } from "expo-router";
 import { SOCIAL_SEARCH_MIN_CHARS } from "@workspace/contracts";
 import { AuthField } from "@/components/AuthField";
 import { AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
+import { CodenameCard } from "@/components/CodenameCard";
 import { PlayerRow } from "@/components/PlayerRow";
 import { useColors } from "@/hooks/useColors";
+import { useGameStateQuery } from "@/hooks/useGameState";
 import { useSearchQuery } from "@/hooks/useSocial";
 import { describeSocialError, normalizeSearchQuery } from "@/lib/social/social";
 
@@ -15,11 +17,13 @@ export default function SocialSearchScreen() {
   const q = useSearchQuery(text);
   const ready = normalizeSearchQuery(text) !== null;
   const results = ready ? (q.data ?? []) : [];
+  const myCodename = useGameStateQuery().data?.profile.publicCodename;
 
   return (
-    <AuthShell tag="SEARCH" title="Find players" subtitle="Public and semi-public players only. Anonymous players cannot be found." back>
+    <AuthShell tag="SEARCH" title="Find players" subtitle="Public players by username, semi-public players by codename. Anonymous players cannot be found." back>
+      {myCodename ? <CodenameCard codename={myCodename} /> : null}
       <AuthField
-        label="USERNAME"
+        label="USERNAME OR CODENAME"
         value={text}
         onChangeText={setText}
         placeholder={`${SOCIAL_SEARCH_MIN_CHARS}+ characters`}

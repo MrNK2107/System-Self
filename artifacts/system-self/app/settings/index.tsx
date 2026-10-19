@@ -6,6 +6,7 @@ import React, { useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
+import { shareCodename } from "@/components/CodenameCard";
 import { Separator, SettingsCard, SettingsRow } from "@/components/SettingsParts";
 import { IDENTITY_OPTIONS } from "@/constants/identity";
 import { useAuth } from "@/context/AuthContext";
@@ -199,6 +200,18 @@ export default function SettingsScreen() {
                 })
               : unavailable}
           </View>
+        ) : null}
+        {profile ? (
+          <>
+            <Separator />
+            <SettingsRow
+              icon="hash"
+              label="Your codename"
+              value={profile.publicCodename}
+              trailing="share-2"
+              onPress={() => void shareCodename(profile.publicCodename)}
+            />
+          </>
         ) : null}
       </SettingsCard>
 

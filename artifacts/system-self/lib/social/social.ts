@@ -60,6 +60,11 @@ export function profileSummary(p: PublicProfile): ProfileSummary {
   };
 }
 
+/** What the share sheet sends for the user's own codename (semi-public and anonymous players are found only by it). */
+export function codenameShareMessage(codename: string): string {
+  return `Find me on SYSTEM // SELF. Search my codename: ${codename}`;
+}
+
 /** SYSTEM-voice line for a failed social request. */
 export function describeSocialError(err: unknown): string {
   if (!(err instanceof ApiError)) return "The request failed. Retry.";

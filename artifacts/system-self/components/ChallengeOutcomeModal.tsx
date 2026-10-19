@@ -9,28 +9,17 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
-import { type Challenge, type ChallengeOutcome } from "@/context/AppContext";
-
-const DOMAIN_COLORS = {
-  BODY: "#E05555",
-  MIND: "#3A7BD5",
-  WEALTH: "#4B8B6F",
-  DISCIPLINE: "#C4873A",
-};
-const DOMAIN_ICONS = {
-  BODY: "◈",
-  MIND: "◉",
-  WEALTH: "◆",
-  DISCIPLINE: "▲",
-};
+import { DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
+import type { ChallengeResultView } from "@/lib/game/notices";
 
 interface Props {
-  challenge: Challenge | null;
+  /** A resolved rival challenge (from its rival_challenge_result notice). */
+  result: ChallengeResultView | null;
   visible: boolean;
   onAcknowledge: () => void;
 }
 
-function OutcomeConfig(outcome: ChallengeOutcome) {
+function OutcomeConfig(outcome: ChallengeResultView["outcome"]) {
   switch (outcome) {
     case "win": return {
       label: "VICTORY",
@@ -56,7 +45,7 @@ function OutcomeConfig(outcome: ChallengeOutcome) {
   }
 }
 
-export function ChallengeOutcomeModal({ challenge, visible, onAcknowledge }: Props) {
+export function ChallengeOutcomeModal({ result: challenge, visible, onAcknowledge }: Props) {
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const headerOpacity = useRef(new Animated.Value(0)).current;
   const headerY = useRef(new Animated.Value(-16)).current;
@@ -111,8 +100,8 @@ export function ChallengeOutcomeModal({ challenge, visible, onAcknowledge }: Pro
   const domColor = DOMAIN_COLORS[challenge.domain];
   const domIcon = DOMAIN_ICONS[challenge.domain];
 
-  const userGain = challenge.userCurrentScore - challenge.userStartScore;
-  const rivalGain = challenge.rivalCurrentScore - challenge.rivalStartScore;
+  const userGain = challenge.userEnd - challenge.userStart;
+  const rivalGain = challenge.rivalEnd - challenge.rivalStart;
   const userGainStr = userGain >= 0 ? `+${userGain.toFixed(1)}` : userGain.toFixed(1);
   const rivalGainStr = rivalGain >= 0 ? `+${rivalGain.toFixed(1)}` : rivalGain.toFixed(1);
 
@@ -147,7 +136,7 @@ export function ChallengeOutcomeModal({ challenge, visible, onAcknowledge }: Pro
               <Text style={[styles.domainIcon, { color: domColor }]}>{domIcon}</Text>
               <Text style={[styles.domainName, { color: domColor }]}>{challenge.domain}</Text>
               <Text style={styles.vsLabel}>vs</Text>
-              <Text style={styles.rivalLabel}>{challenge.rivalCodename}</Text>
+              <Text style={styles.rivalLabel}>{challenge.codename}</Text>
             </View>
             <View style={styles.dateRow}>
               <Feather name="calendar" size={10} color="#3A3D48" />
@@ -208,14 +197,14 @@ export function ChallengeOutcomeModal({ challenge, visible, onAcknowledge }: Pro
               <View style={styles.scorePair}>
                 <Text style={styles.scoreLabel}>YOUR FINAL</Text>
                 <Text style={[styles.scoreVal, { color: config.color }]}>
-                  {challenge.userCurrentScore.toFixed(1)}
+                  {challenge.userEnd.toFixed(1)}
                 </Text>
               </View>
               <View style={[styles.scoreDivider, { backgroundColor: "#2A2D38" }]} />
               <View style={styles.scorePair}>
                 <Text style={styles.scoreLabel}>RIVAL FINAL</Text>
                 <Text style={[styles.scoreVal, { color: "#6B7280" }]}>
-                  {challenge.rivalCurrentScore.toFixed(1)}
+                  {challenge.rivalEnd.toFixed(1)}
                 </Text>
               </View>
             </View>

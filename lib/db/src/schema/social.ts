@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { check, index, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { users } from "./users";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
@@ -51,6 +51,8 @@ export const userReports = pgTable(
   },
   (t) => [
     index("user_reports_subject_idx").on(t.subjectId),
+    // One open report per (reporter, subject); a resolved one can be filed again.
+    uniqueIndex("user_reports_open_uq").on(t.reporterId, t.subjectId).where(sql`${t.resolvedAt} is null`),
     check("user_reports_reason_len", sql`char_length(${t.reason}) between 1 and 500`),
   ],
 );

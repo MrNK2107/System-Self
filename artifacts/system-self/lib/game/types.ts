@@ -12,7 +12,6 @@ export type QuestStatus = "active" | "complete" | "failed" | "refused";
 export type Trajectory = "up" | "stable" | "down";
 export type DebriefVerdict = "ACCEPTABLE" | "INSUFFICIENT" | "PATHETIC";
 export type ShadowPhase = "DORMANT" | "AWAKENED" | "HUNTING" | "DOMINANT";
-export type ChallengeOutcome = "win" | "loss" | "draw";
 export type MilestoneTier = 60 | 70 | 80 | 90 | 100;
 
 export interface User {
@@ -144,48 +143,3 @@ export interface StreakBreakData {
   aiText: string;
 }
 
-// --- rivals (local until P5) --------------------------------------------------
-
-/** Rivals rate only the four original domains; they are simulated locally until P5. */
-export type RivalDomain = "BODY" | "MIND" | "WEALTH" | "DISCIPLINE";
-
-export interface RivalTaunt {
-  id: string;
-  rivalCodename: string;
-  message: string;
-  generatedAt: string;
-  read: boolean;
-}
-
-export interface Rival {
-  codename: string;
-  rank: Rank;
-  bodyScore: number;
-  mindScore: number;
-  wealthScore: number;
-  disciplineScore: number;
-  trajectory: Trajectory;
-  shadowActive: boolean;
-  lastTauntDate?: string | null;
-}
-
-export interface Challenge {
-  id: string;
-  rivalCodename: string;
-  rivalRank: Rank;
-  domain: RivalDomain;
-  startDate: string;
-  endDate: string;
-  userStartScore: number;
-  rivalStartScore: number;
-  userCurrentScore: number;
-  rivalCurrentScore: number;
-  outcome: ChallengeOutcome | null;
-  acknowledged: boolean;
-}
-
-export interface ChallengeRecord {
-  wins: number;
-  losses: number;
-  draws: number;
-}

@@ -171,6 +171,7 @@ const state = {
   profile: {
     username: "alpha",
     codename: "GHOST // AB1-2",
+    publicCodename: "USER // ASH-1",
     rank: "E",
     rankSince: "2026-10-01T00:00:00.000Z",
     identitySetting: "semi-public",
@@ -300,7 +301,7 @@ test("fetchComeback reads GET /api/comeback", async () => {
 
 test("setHomePath flushes the outbox first, then POSTs the flag with an idempotency key", async () => {
   const profile = {
-    username: "a", codename: "C", rank: "E", rankSince: "2026-10-01T00:00:00.000Z", identitySetting: "anonymous",
+    username: "a", codename: "C", publicCodename: "USER // ASH-1", rank: "E", rankSince: "2026-10-01T00:00:00.000Z", identitySetting: "anonymous",
     primaryGoal: "Build a disciplined life", biggestWeakness: "BODY", morningTime: "07:00", nightlyTime: "21:00",
     dayNumber: 1, onboarded: true, homePathActive: true, lifeContext: "student", season: null,
   };

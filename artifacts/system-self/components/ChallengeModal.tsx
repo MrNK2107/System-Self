@@ -11,26 +11,21 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
-// Challenges cover the four domains rivals are rated on (device-simulated until P5).
-import { useApp, type RivalDomain as Domain, type Rank, type Rival } from "@/context/AppContext";
+import { useApp, type Domain, type Rank } from "@/context/AppContext";
+import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
+import { RIVAL_CHALLENGE_DAYS } from "@workspace/contracts";
 
-const DOMAINS: Domain[] = ["BODY", "MIND", "WEALTH", "DISCIPLINE"];
-const DOMAIN_COLORS: Record<Domain, string> = {
-  BODY: "#E05555",
-  MIND: "#3A7BD5",
-  WEALTH: "#4B8B6F",
-  DISCIPLINE: "#C4873A",
-};
-const DOMAIN_ICONS: Record<Domain, string> = {
-  BODY: "◈",
-  MIND: "◉",
-  WEALTH: "◆",
-  DISCIPLINE: "▲",
-};
+/** The rival as the challenge sheet shows it (all five ranked domains). */
+export interface ChallengeTarget {
+  codename: string;
+  rank: Rank;
+  trajectory: "up" | "stable" | "down";
+  scores: Record<Domain, number>;
+}
 
 interface Props {
   visible: boolean;
-  rival: Rival | null;
+  rival: ChallengeTarget | null;
   onClose: () => void;
   onDeclare: (domain: Domain) => void;
 }
@@ -61,18 +56,15 @@ export function ChallengeModal({ visible, rival, onClose, onDeclare }: Props) {
   if (!rival) return null;
 
   const userScore = domainScores.find(s => s.domain === selectedDomain)?.score ?? 50;
-  const rivalScore =
-    selectedDomain === "BODY" ? rival.bodyScore :
-    selectedDomain === "MIND" ? rival.mindScore :
-    selectedDomain === "WEALTH" ? rival.wealthScore :
-    rival.disciplineScore;
+  const rivalScore = rival.scores[selectedDomain] ?? 0;
 
   const diff = rivalScore - userScore;
   const userAhead = diff < 0;
   const domainColor = DOMAIN_COLORS[selectedDomain];
 
   const startDate = new Date();
-  const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  // The window is 7 local days including today.
+  const endDate = new Date(Date.now() + (RIVAL_CHALLENGE_DAYS - 1) * 24 * 60 * 60 * 1000);
   const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   const handleDeclare = () => {

@@ -1,6 +1,6 @@
 // Game state for the screens. Everything here comes from the server (GET /api/state, /api/logs, /api/quests,
 // /api/chains/templates) through React Query; logs go through the outbox. No game rule is computed here.
-// Rivals, challenges and taunts are still simulated on the device until P5 (useLocalRivals).
+// Rivals, challenges and taunts live on the server too (GET /api/rivals, hooks/useRivals.ts).
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQueryClient } from "@tanstack/react-query";
 import type { FloorRoutineDto, SeasonKind } from "@workspace/contracts";
@@ -17,7 +17,6 @@ import {
   useOutboxSnapshot,
   useQuestsQuery,
 } from "@/hooks/useGameState";
-import { useLocalRivals } from "@/hooks/useLocalRivals";
 import { api } from "@/lib/api/client";
 import { getOutbox } from "@/lib/api/outbox";
 import { useOnline } from "@/lib/api/query";
@@ -148,19 +147,6 @@ interface AppContextType {
   failedCount: number;
   retryFailed: () => Promise<void>;
   discardFailed: () => Promise<void>;
-
-  // Local until P5.
-  rivals: ReturnType<typeof useLocalRivals>["rivals"];
-  challenges: ReturnType<typeof useLocalRivals>["challenges"];
-  challengeRecord: ReturnType<typeof useLocalRivals>["challengeRecord"];
-  rivalTaunts: ReturnType<typeof useLocalRivals>["rivalTaunts"];
-  updateRivals: ReturnType<typeof useLocalRivals>["updateRivals"];
-  declareChallenge: ReturnType<typeof useLocalRivals>["declareChallenge"];
-  updateChallengeScores: ReturnType<typeof useLocalRivals>["updateChallengeScores"];
-  acknowledgeChallenge: ReturnType<typeof useLocalRivals>["acknowledgeChallenge"];
-  resolveExpiredChallenges: ReturnType<typeof useLocalRivals>["resolveExpiredChallenges"];
-  addRivalTaunt: ReturnType<typeof useLocalRivals>["addRivalTaunt"];
-  markRivalTauntsRead: ReturnType<typeof useLocalRivals>["markRivalTauntsRead"];
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -232,8 +218,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const chainTemplates = useMemo(() => (chainsQ.data ? toChainTemplates(chainsQ.data) : []), [chainsQ.data]);
   const trajectory: Trajectory = state?.trajectory ?? "stable";
   const tierProgress = state?.tierProgress ?? 0;
-
-  const rivalsState = useLocalRivals(domainScores, userId);
 
   // Whenever a queued item leaves the outbox (sent or parked) the server state changed: refetch. Compared as a
   // set, so one item leaving while another arrives (same count) still refetches.
@@ -388,13 +372,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       failedCount: outboxSnap.failed.length,
       retryFailed,
       discardFailed,
-      ...rivalsState,
     }),
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
       state, stateQ.isError, stateQ.error, questsQ.data, questsQ.dataUpdatedAt, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
       getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
-      pendingCount, outboxSnap.failed.length, retryFailed, discardFailed, rivalsState,
+      pendingCount, outboxSnap.failed.length, retryFailed, discardFailed,
     ],
   );
 

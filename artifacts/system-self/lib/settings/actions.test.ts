@@ -40,6 +40,7 @@ function setup(handler: (call: Call) => { status: number; body?: unknown }) {
 const profileBody = {
   username: "alpha",
   codename: "ALPHA",
+  publicCodename: "USER // ASH-1",
   rank: "E",
   rankSince: "2026-01-01T00:00:00.000Z",
   identitySetting: "public",

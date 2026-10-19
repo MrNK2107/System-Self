@@ -6,6 +6,7 @@ import {
   REPORT_REASON_MAX,
   SOCIAL_POLL_MS,
   blockPlayer,
+  codenameShareMessage,
   describeSocialError,
   fetchFollowersCount,
   fetchFollowing,
@@ -172,4 +173,8 @@ test("errors read in the SYSTEM voice", () => {
   assert.equal(describeSocialError(new ApiError({ kind: "network", message: "x" })), "No connection. Check your signal and retry.");
   assert.equal(describeSocialError(e(500)), "The system is unavailable. Retry shortly.");
   assert.equal(describeSocialError(new Error("boom")), "The request failed. Retry.");
+});
+
+test("codename share message names the codename", () => {
+  assert.equal(codenameShareMessage("USER // ASH-3"), "Find me on SYSTEM // SELF. Search my codename: USER // ASH-3");
 });

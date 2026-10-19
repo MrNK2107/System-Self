@@ -37,6 +37,7 @@ import {
 import type { Notice, NoticePayload } from "@workspace/contracts";
 import { logger } from "../lib/logger";
 import { abandonChain } from "./quests";
+import { expireAssignments, rivalRollover } from "./rivals";
 import { applyChanges, insertNotice, toShadowState, type ScoreChange } from "./scoring";
 import { withUserLock, type Tx } from "./user-lock";
 
@@ -87,7 +88,7 @@ function decayChanges(perDomain: number): ScoreChange[] {
 
 /**
  * Applies the daily rollover for one local date (quest expiry, streak breaks, decay, snapshot, rank
- * transition, shadow) and marks it rolled. A no-op returning [] if `date` was already rolled.
+ * transition, shadow, rivals) and marks it rolled. A no-op returning [] if `date` was already rolled.
  * Must run inside withUserLock.
  */
 export async function rolloverDate(tx: Tx, userId: string, date: string, now: Date): Promise<Notice[]> {
@@ -204,6 +205,8 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
       .update(profiles)
       .set({ rank: transition.to, rankSince, codename: newCodename })
       .where(eq(profiles.userId, userId));
+    // A rank change re-matches every rival slot (PRD 14).
+    await expireAssignments(tx, userId, now);
     out.push(
       await insertNotice(
         tx,
@@ -261,6 +264,9 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
     await tx.update(shadowSelves).set({ active: false, resolvedAt: at }).where(eq(shadowSelves.userId, userId));
     out.push(await insertNotice(tx, userId, "shadow_resolved", { codename: shadow.codename }, now));
   }
+
+  // 7. Rivals: ghost drift for `date`, rival pressure, rival challenges whose window ended.
+  out.push(...(await rivalRollover(tx, userId, date, now)));
 
   await tx.update(userDayState).set({ lastRolledDate: date }).where(eq(userDayState.userId, userId));
   return out;

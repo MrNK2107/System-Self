@@ -3,13 +3,14 @@ import { inArray, lt } from "drizzle-orm";
 import { idempotencyKeys, userDayState, type Db } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { claimDueUsers, ensureRolledOver } from "../services/rollover";
+import { runSocialJobs } from "./social";
 
 export const WORKER_BATCH_SIZE = 200;
 export const IDEMPOTENCY_KEY_TTL_MS = 7 * 86_400_000;
 
 /**
- * One worker pass: claims up to `batchSize` due users and rolls each over, then prunes idempotency keys
- * older than 7 days. If `signal` aborts mid-batch, the current user finishes and the remaining claimed
+ * One worker pass: claims up to `batchSize` due users and rolls each over, runs the social jobs (rival
+ * re-matching), then prunes idempotency keys older than 7 days. If `signal` aborts mid-batch, the current user finishes and the remaining claimed
  * users are released (made due again) for the next worker.
  */
 export async function runWorkerTick(
@@ -34,6 +35,13 @@ export async function runWorkerTick(
     } catch (err) {
       // The claim lease expires, so this user is retried by a later tick.
       logger.error({ err, userId }, "Rollover failed");
+    }
+  }
+  if (!signal?.aborted) {
+    try {
+      await runSocialJobs(db, now);
+    } catch (err) {
+      logger.error({ err }, "Social jobs failed");
     }
   }
   await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(now.getTime() - IDEMPOTENCY_KEY_TTL_MS)));

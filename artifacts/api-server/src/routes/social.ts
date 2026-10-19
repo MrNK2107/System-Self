@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, count, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, ne, or, sql } from "drizzle-orm";
 import { blocks, follows, profiles, userReports, users, type Db } from "@workspace/db";
 import { SocialHandleSchema, SocialSearchQuerySchema, UserReportRequestSchema } from "@workspace/contracts";
 import type { PublicProfile } from "@workspace/contracts";
@@ -190,12 +190,6 @@ export function socialRoutes(db: Db, clock: () => Date = () => new Date()): IRou
       const target = await resolveHandle(tx, me, body.subject);
       if (!target) return notFound();
       if (target.self) return { status: 400, body: { error: "You cannot report yourself", code: "self_target" } };
-      const [open] = await tx
-        .select({ id: userReports.id })
-        .from(userReports)
-        .where(and(eq(userReports.reporterId, me), eq(userReports.subjectId, target.userId), isNull(userReports.resolvedAt)))
-        .limit(1);
-      if (open) return { status: 409, body: { error: "Already reported", code: "already_reported" } };
       const now = clock();
       const [u] = await tx.select({ tz: users.timezone }).from(users).where(eq(users.id, me));
       const today = localDate(now, u!.tz);
@@ -206,11 +200,23 @@ export function socialRoutes(db: Db, clock: () => Date = () => new Date()): IRou
       if (recent.filter((r) => localDate(r.at, u!.tz) === today).length >= REPORTS_PER_DAY) {
         return { status: 429, body: { error: "Report limit reached for today", code: "report_limit" } };
       }
-      const [row] = await tx
-        .insert(userReports)
-        .values({ reporterId: me, subjectId: target.userId, reason: body.reason, createdAt: now })
-        .returning({ id: userReports.id });
-      return { status: 201, body: { id: row!.id } };
+      // One open report per (reporter, subject) is enforced by the partial unique index user_reports_open_uq;
+      // the insert runs in a savepoint so its violation answers 409 instead of aborting the transaction.
+      try {
+        const [row] = await tx.transaction((sp) =>
+          sp
+            .insert(userReports)
+            .values({ reporterId: me, subjectId: target.userId, reason: body.reason, createdAt: now })
+            .returning({ id: userReports.id }),
+        );
+        return { status: 201, body: { id: row!.id } };
+      } catch (err) {
+        const e = err as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } };
+        if ((e.cause?.code ?? e.code) === "23505" && (e.cause?.constraint ?? e.constraint) === "user_reports_open_uq") {
+          return { status: 409, body: { error: "Already reported", code: "already_reported" } };
+        }
+        throw err;
+      }
     });
   });
 

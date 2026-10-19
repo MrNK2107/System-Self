@@ -126,31 +126,6 @@ test("switching users drops the previous users gym session", async () => {
   assert.equal(await s.storage.getItem(activeKey("A")), null);
 });
 
-const RIVAL_KEYS = [
-  "@system_self:rivals",
-  "@system_self:challenges",
-  "@system_self:challenge_record",
-  "@system_self:rival_taunts",
-  "@system_self:rivals_last_drift",
-];
-
-test("clearLocalData removes the on-device rivals, challenges, record, taunts and drift date", async () => {
-  const s = setup("A");
-  for (const k of RIVAL_KEYS) await s.storage.setItem(k, "[]");
-  await s.mgr.clearLocalData("A");
-  for (const k of RIVAL_KEYS) assert.equal(await s.storage.getItem(k), null, k);
-});
-
-test("switching users drops the previous users rivals", async () => {
-  const s = setup("A");
-  await s.mgr.handleSignIn("A");
-  await s.storage.setItem("@system_self:rivals", "[]");
-  await s.mgr.handleSignIn("A");
-  assert.equal(await s.storage.getItem("@system_self:rivals"), "[]");
-  await s.mgr.handleSignIn("B");
-  assert.equal(await s.storage.getItem("@system_self:rivals"), null);
-});
-
 test("pendingLocalCount adds the users queued outbox entries and unsent gym sets", async () => {
   const s = setup("A");
   assert.equal(await pendingLocalCount({ outbox: s.outbox, storage: s.storage, userId: "A" }), 0);

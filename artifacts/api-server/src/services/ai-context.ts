@@ -6,6 +6,7 @@ import { templateQuests, templateSystemMessage, type TemplateQuest } from "../li
 import type { MessageType } from "@workspace/contracts";
 import { generatedQuestsPayloadSchema } from "../lib/schemas";
 import type { WeeklyRecap } from "./recap";
+import { rivalPassedLines } from "./rivals";
 import { buildGameState } from "./state";
 
 export const MESSAGE_PROMPT_VERSION = "system-message-v4";
@@ -60,6 +61,8 @@ export interface PromptContext {
   lifeContext: string;
   /** A season is active today: quests shrink, the count does not change. */
   season: string | null;
+  /** Rival pressure lines from today's rival_passed notices ("RIVAL // X passed your MIND score overnight."). */
+  rivalPassed?: string[];
   weeklyRecap?: WeeklyRecap;
 }
 
@@ -156,6 +159,7 @@ export async function buildUserContext(
     homePathActive: state.profile.homePathActive,
     lifeContext: state.profile.lifeContext,
     season: state.profile.season?.kind ?? null,
+    rivalPassed: await rivalPassedLines(tx, userId, user?.tz ?? "UTC", today, now),
   };
 }
 
@@ -181,7 +185,8 @@ function contextBlock(ctx: PromptContext, extraContext?: string): string {
 - Shadow Self status: ${ctx.shadowActive ? `ACTIVE — gap is ${ctx.shadowGap.toFixed(1)} points` : "inactive"}
 - Primary goal: ${quoted(ctx.primaryGoal)}
 - Recent logs (7 days): ${ctx.recentLogs.length > 0 ? ctx.recentLogs.map((l) => `${l.domain}: ${l.logType}${l.text ? ` ${quoted(l.text)}` : ""}`).join(" | ") : "none"}
-- Recent refusal reasons (7 days): ${ctx.recentRefusals.length > 0 ? ctx.recentRefusals.map(quoted).join(" | ") : "none"}${ctx.lockedSlots.map((w) => `
+- Recent refusal reasons (7 days): ${ctx.recentRefusals.length > 0 ? ctx.recentRefusals.map(quoted).join(" | ") : "none"}${(ctx.rivalPassed ?? []).map((l) => `
+- Rival pressure: ${l}`).join("")}${ctx.lockedSlots.map((w) => `
 - Locked slot: ${w}`).join("")}${extraContext ? `
 - Extra context (user supplied): ${quoted(extraContext)}` : ""}`;
 }
@@ -215,7 +220,7 @@ export function buildMessagePrompt(
   const gap = Math.abs(ctx.shadowGap).toFixed(1);
   const configs: Record<MessageType, { instruction: string; maxWords: number }> = {
     morning_briefing: {
-      instruction: `Generate a morning briefing. Cold, operational. 2-3 lines max. Reference the day number, mention score trajectory, shadow status if relevant, and active quests. End with one line about today.`,
+      instruction: `Generate a morning briefing. Cold, operational. 2-3 lines max. Reference the day number, mention score trajectory, shadow status if relevant, and active quests. If a Rival pressure line is listed, state it once, verbatim. End with one line about today.`,
       maxWords: 80,
     },
     nightly_debrief: {
@@ -321,20 +326,30 @@ export async function generateMessage(
   const text = result.model === "template" ? "" : capAtWord(result.text.trim(), maxWords * 8);
   if (!text || text.includes("!") || /\p{Extended_Pictographic}/u.test(text)) {
     return {
-      message:
+      message: withRivalPressure(
+        type,
+        ctx,
         templateText ??
-        templateSystemMessage(type, {
-          rank: ctx.rank,
-          dayNumber: ctx.dayNumber,
-          shadowGap: ctx.shadowGap,
-          trajectory: ctx.trajectory,
-        }),
+          templateSystemMessage(type, {
+            rank: ctx.rank,
+            dayNumber: ctx.dayNumber,
+            shadowGap: ctx.shadowGap,
+            trajectory: ctx.trajectory,
+          }),
+      ),
       model: "template",
       promptVersion,
       attempts: result.attempts,
     };
   }
-  return { message: text, model: result.model, promptVersion, attempts: result.attempts };
+  return { message: withRivalPressure(type, ctx, text), model: result.model, promptVersion, attempts: result.attempts };
+}
+
+/** The morning briefing carries each rival pressure line once (PRD 14): appended when the text does not already state it. */
+function withRivalPressure(type: MessageType, ctx: PromptContext, text: string): string {
+  if (type !== "morning_briefing") return text;
+  const missing = (ctx.rivalPassed ?? []).filter((line) => !text.includes(line));
+  return missing.length > 0 ? `${text}\n${missing.join("\n")}` : text;
 }
 
 // ---- quest generation ------------------------------------------------------------------------

@@ -65,6 +65,24 @@ export function projectUser(subject: ProjectionSubject, relation: Relation, opts
   return profile;
 }
 
+/** A ghost rival (a server simulation, not a user) as a rival sees it: its codename and its five domain scores. */
+export function projectGhost(ghost: {
+  codename: string;
+  rank: Rank;
+  scores: Record<RankedDomain, number>;
+  trajectory: "up" | "stable" | "down";
+  shadowActive: boolean;
+}): PublicProfile {
+  return {
+    handle: ghost.codename,
+    isCodename: true,
+    rank: ghost.rank,
+    trajectory: ghost.trajectory,
+    shadowActive: ghost.shadowActive,
+    scores: Object.fromEntries(RANKED_DOMAINS.map((d) => [d, ghost.scores[d] ?? 0])) as Record<RankedDomain, number>,
+  };
+}
+
 /**
  * Loads projection subjects in a constant number of queries (rank from the profile, scores from domain_scores, trajectory from the same
  * snapshots as the game state) for onboarded users, keyed by user id. Unknown or un-onboarded ids are absent.

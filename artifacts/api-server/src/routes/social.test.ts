@@ -7,6 +7,7 @@ import { blocks, follows, profiles, userReports } from "@workspace/db";
 import { USER_CODENAME_RE } from "@workspace/engine";
 import {
   FollowersCountResponseSchema,
+  GameStateSchema,
   PublicProfileListSchema,
   SocialProfileResponseSchema,
   UserReportResponseSchema,
@@ -331,6 +332,13 @@ test("report: at most 10 per reporter per local day (429 report_limit), the next
   // reports are stamped by the real clock; age them into the previous local day, then the injected clock moves on
   await db!.update(userReports).set({ createdAt: new Date(now.getTime() - 86_400_000) });
   assert.equal((await report(targets[10]!.name)).status, 201);
+});
+
+test("GameState.profile carries the viewer's own public codename", { skip }, async () => {
+  const a = app();
+  const me = await mk(a, "me_1", "semi-public");
+  const state = assertContract(GameStateSchema, (await request(a).get("/api/state").set(auth(me.token))).body);
+  assert.equal(state.profile.publicCodename, me.codename);
 });
 
 test("block and report by an anonymous user's codename keep working (a codename is not linked to identity)", { skip }, async () => {

@@ -127,6 +127,13 @@
       "when": 1792376791474,
       "tag": "0017_superb_ultimates",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792378479834,
+      "tag": "0018_cool_whirlwind",
+      "breakpoints": true
     }
   ]
 }

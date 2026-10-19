@@ -19,6 +19,7 @@ import { noticesRoutes } from "./notices";
 import { onboardingRoutes } from "./onboarding";
 import { profileRoutes } from "./profile";
 import { progressRoutes } from "./progress";
+import { rivalsRoutes } from "./rivals";
 import { questsRoutes } from "./quests";
 import { seasonsRoutes } from "./seasons";
 import { socialRoutes } from "./social";
@@ -36,7 +37,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
   router.use(authRoutes({ db, mailer, requireAuth }));
 
   // Private surfaces. requireAuth is mounted per prefix so unknown /api paths fall through to 404.
-  router.use(["/system", "/admin", "/onboarding", "/profile", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym", "/adherence", "/comeback", "/seasons", "/progress", "/social"], requireAuth);
+  router.use(["/system", "/admin", "/onboarding", "/profile", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym", "/adherence", "/comeback", "/seasons", "/progress", "/social", "/rivals"], requireAuth);
   router.use(systemRoutes(db));
   router.use(historyRoutes(db, ai));
   if (db) {
@@ -57,6 +58,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
     router.use(seasonsRoutes(db, deps.now));
     router.use(progressRoutes(db));
     router.use(socialRoutes(db, deps.now));
+    router.use(rivalsRoutes(db, ai, deps.now));
   }
   return router;
 }

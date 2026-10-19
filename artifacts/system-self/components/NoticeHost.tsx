@@ -1,6 +1,7 @@
 // Mounted once in the tabs layout: shows unseen server notices one at a time with the existing modals.
 import React from "react";
 import { AchievementModal } from "@/components/AchievementModal";
+import { ChallengeOutcomeModal } from "@/components/ChallengeOutcomeModal";
 import { FailureModal } from "@/components/FailureModal";
 import { HomePathOffer } from "@/components/HomePathOffer";
 import { MilestoneModal } from "@/components/MilestoneModal";
@@ -51,6 +52,9 @@ export function NoticeHost() {
           onAcknowledge={onAcknowledge}
         />
       );
+    case "challenge_result":
+      // Dismissing marks the notice seen, which acknowledges the challenge on the server.
+      return <ChallengeOutcomeModal key={key} visible result={view.result} onAcknowledge={onAcknowledge} />;
     case "system":
       return (
         <SystemNoticeModal

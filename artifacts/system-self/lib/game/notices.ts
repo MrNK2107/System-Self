@@ -15,6 +15,8 @@ export const NOTICE_ORDER: readonly NoticeKind[] = [
   "comeback",
   "returner_mark",
   "gym_unlocked",
+  "rival_challenge_result",
+  "rival_passed",
 ];
 
 /** Sent as `?kinds=` / `?noticeKinds=` with every notice read: the server returns and pages only kinds this build renders. */
@@ -74,6 +76,19 @@ export interface FailureItem {
   penalty: number;
 }
 
+/** A resolved rival challenge as the outcome modal shows it. */
+export interface ChallengeResultView {
+  codename: string;
+  domain: Domain;
+  outcome: "win" | "loss" | "draw";
+  startDate: string;
+  endDate: string;
+  userStart: number;
+  userEnd: number;
+  rivalStart: number;
+  rivalEnd: number;
+}
+
 export type NoticeView =
   | { modal: "rank_up"; fromRank: Rank; toRank: Rank; newCodename: string }
   | { modal: "achievement"; achievement: PendingAchievement }
@@ -81,6 +96,7 @@ export type NoticeView =
   | { modal: "streak_break"; data: StreakBreakData }
   | { modal: "failure"; failures: FailureItem[] }
   | { modal: "comeback"; gapDays: number; line: string; offerHomePath: boolean }
+  | { modal: "challenge_result"; result: ChallengeResultView }
   | { modal: "system"; label: string; title: string; body: string; tone: "alert" | "info" };
 
 const MILESTONE_TIER_VALUES: readonly number[] = [60, 70, 80, 90, 100];
@@ -164,6 +180,18 @@ export function noticeView(group: NoticeGroup): NoticeView {
         title: "The gym is open to you now.",
         body: first.payload.line,
       };
+    case "rival_passed":
+      return {
+        modal: "system",
+        tone: "alert",
+        label: "RIVAL PRESSURE",
+        title: `${first.payload.codename} passed your ${first.payload.domain} score.`,
+        body: "The order changed overnight. It is logged.",
+      };
+    case "rival_challenge_result": {
+      const { challengeId: _id, ...result } = first.payload;
+      return { modal: "challenge_result", result: { ...result, domain: result.domain as Domain } };
+    }
     case "quest_failed":
       return {
         modal: "failure",

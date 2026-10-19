@@ -58,6 +58,19 @@ test("NoticeSchema is a union by kind with the exact payload the server writes f
     comeback: { gapDays: 6, line: "You returned. Most don't.", offerHomePath: false },
     returner_mark: { count: 1, line: "Returned ×1." },
     gym_unlocked: { line: "Tier I cleared. The gym is open to you now." },
+    rival_passed: { codename: "RIVAL // ASH-3", domain: "MIND" },
+    rival_challenge_result: {
+      challengeId: "c1",
+      codename: "RIVAL // ASH-3",
+      domain: "BODY",
+      outcome: "win",
+      startDate: "2026-01-01",
+      endDate: "2026-01-07",
+      userStart: 20,
+      userEnd: 25,
+      rivalStart: 30,
+      rivalEnd: 31,
+    },
   };
   for (const kind of NOTICE_KINDS) {
     assert.equal(NoticeSchema.parse({ ...base, kind, payload: payloads[kind] }).kind, kind);

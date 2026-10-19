@@ -35,6 +35,7 @@ const draft: OnboardingDraft = {
 const profile = {
   username: "alpha",
   codename: "X",
+  publicCodename: "USER // ASH-1",
   rank: "E",
   rankSince: "2026-01-01T00:00:00.000Z",
   identitySetting: "semi-public",

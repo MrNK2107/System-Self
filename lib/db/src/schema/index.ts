@@ -22,3 +22,4 @@ export * from "./users";
 export * from "./game";
 export * from "./gym";
 export * from "./social";
+export * from "./rivals";
