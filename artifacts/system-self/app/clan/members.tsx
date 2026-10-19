@@ -8,7 +8,7 @@ import { AuthNotice, AuthShell } from "@/components/AuthShell";
 import { RankBadge } from "@/components/RankBadge";
 import { useColors } from "@/hooks/useColors";
 import { useClanActions, useMyClanQuery } from "@/hooks/useClan";
-import { SYNC_PENDING_MESSAGE, completionLabel, describeClanError, isLeader } from "@/lib/clan/clan";
+import { SYNC_PENDING_MESSAGE, completionLabel, describeClanError, isLeader, removableMembers, transferCandidates } from "@/lib/clan/clan";
 import type { MutationResult } from "@/lib/game/actions";
 
 function confirm(title: string, body: string, action: string, run: () => void) {
@@ -21,13 +21,15 @@ function confirm(title: string, body: string, action: string, run: () => void) {
 
 function MemberCard({
   m,
-  leaderView,
+  canRemove,
+  canTransfer,
   busy,
   onRemove,
   onTransfer,
 }: {
   m: ClanMember;
-  leaderView: boolean;
+  canRemove: boolean;
+  canTransfer: boolean;
   busy: boolean;
   onRemove: () => void;
   onTransfer: () => void;
@@ -61,16 +63,18 @@ function MemberCard({
           ))}
         </View>
       ) : null}
-      {leaderView && !m.isSelf ? (
+      {canRemove || canTransfer ? (
         <View style={s.actions}>
-          {m.flagged ? (
+          {canRemove ? (
             <TouchableOpacity onPress={onRemove} disabled={busy} accessibilityRole="button" style={[s.action, { borderColor: colors.destructive }]}>
               <Text style={[s.actionText, { color: colors.foreground }]}>REMOVE</Text>
             </TouchableOpacity>
           ) : null}
-          <TouchableOpacity onPress={onTransfer} disabled={busy} accessibilityRole="button" style={[s.action, { borderColor: colors.border }]}>
-            <Text style={[s.actionText, { color: colors.mutedForeground }]}>MAKE LEADER</Text>
-          </TouchableOpacity>
+          {canTransfer ? (
+            <TouchableOpacity onPress={onTransfer} disabled={busy} accessibilityRole="button" style={[s.action, { borderColor: colors.border }]}>
+              <Text style={[s.actionText, { color: colors.mutedForeground }]}>MAKE LEADER</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -98,6 +102,9 @@ export default function ClanMembersScreen() {
 
   const data = q.data;
   const leaderView = isLeader(data);
+  // Leader actions come from the plain helpers: remove flagged dead weight only, transfer to anyone but self.
+  const removable = new Set(leaderView && data ? removableMembers(data.members).map((m) => m.userId) : []);
+  const heirs = new Set(leaderView && data ? transferCandidates(data.members).map((m) => m.userId) : []);
 
   return (
     <AuthShell tag="CLAN" title="Roster" subtitle="Members see each other by username. Flagged: 5 consecutive inactive days, excluded from the clan score." back>
@@ -112,7 +119,8 @@ export default function ClanMembersScreen() {
             <MemberCard
               key={m.userId}
               m={m}
-              leaderView={leaderView}
+              canRemove={removable.has(m.userId)}
+              canTransfer={heirs.has(m.userId)}
               busy={busy}
               onRemove={() => confirm("Remove dead weight?", `${m.profile.handle} leaves the clan.`, "Remove", () => void attempt(() => actions.remove(m.userId)))}
               onTransfer={() =>

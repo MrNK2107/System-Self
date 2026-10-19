@@ -9,8 +9,14 @@ export const CLAN_NAME_MAX = 24;
 export const CLAN_NAME_RE = /^[A-Za-z0-9 _-]+$/;
 export const CLAN_TAG_RE = /^[A-Z]{2,5}$/;
 export const CLAN_DESCRIPTION_MAX = 200;
-/** A member with this many consecutive inactive local days is dead weight (flagged, excluded from the score). */
+/**
+ * The activity window: the CLAN_INACTIVE_DAYS full local days ending yesterday (today excluded). A member with no
+ * log in it is inactive (excluded from the clan score); one who was also in the clan for the whole window is dead
+ * weight (flagged, removable by the leader).
+ */
 export const CLAN_INACTIVE_DAYS = 5;
+/** Below this many active members a clan has no score and no rank (a mean of 1–2 would reveal hidden scores). */
+export const CLAN_SCORE_MIN_ACTIVE = 3;
 
 export const ClanStatusSchema = z.enum(["forming", "active"]);
 export type ClanStatus = z.infer<typeof ClanStatusSchema>;
@@ -56,7 +62,7 @@ export type ClanSummary = z.infer<typeof ClanSummarySchema>;
 export const ClanSearchResponseSchema = z.object({ items: z.array(ClanSummarySchema) });
 export type ClanSearchResponse = z.infer<typeof ClanSearchResponseSchema>;
 
-/** A ranked (active) clan on the global board. The clan score may be shown; member hidden scores never are. */
+/** A ranked clan on the global board (always scored). The clan score may be shown; member hidden scores never are. */
 export const ClanLeaderboardItemSchema = ClanSummarySchema.extend({ clanScore: z.number() });
 export const ClanLeaderboardResponseSchema = z.object({ items: z.array(ClanLeaderboardItemSchema) });
 export type ClanLeaderboardItem = z.infer<typeof ClanLeaderboardItemSchema>;
@@ -65,7 +71,10 @@ export type ClanLeaderboardResponse = z.infer<typeof ClanLeaderboardResponseSche
 /** The viewer's own clan (members only: carries the invite code and the viewer's role). */
 export const ClanSchema = ClanSummarySchema.extend({
   description: z.string().nullable(),
-  clanScore: z.number(),
+  /** Null until the first daily score, and while fewer than CLAN_SCORE_MIN_ACTIVE members are active. */
+  clanScore: z.number().nullable(),
+  /** Members active in the activity window at the last daily score. */
+  activeMemberCount: z.number().int().min(0),
   raidWins: z.number().int().min(0),
   inviteCode: z.string(),
   createdAt: z.string(),
@@ -105,18 +114,3 @@ export const MyClanResponseSchema = z.object({
   raid: z.null(),
 });
 export type MyClanResponse = z.infer<typeof MyClanResponseSchema>;
-
-/** Error codes the clan routes answer with. */
-export const CLAN_ERROR_CODES = [
-  "email_unverified",
-  "already_in_clan",
-  "clan_full",
-  "leader_must_transfer",
-  "not_flagged",
-  "not_leader",
-  "not_in_clan",
-  "name_taken",
-  "blocked",
-  "self_target",
-  "not_found",
-] as const;

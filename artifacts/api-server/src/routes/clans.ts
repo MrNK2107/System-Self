@@ -17,7 +17,7 @@ import {
   addDispatch,
   blockedWithMember,
   clanMembersView,
-  isActive,
+  isDeadWeight,
   lockClan,
   membershipOf,
   newInviteCode,
@@ -43,6 +43,12 @@ const memberNotFound = () => err(404, "not_found", "Member not found");
 
 /** `%`, `_` and `\` in user input match literally in a LIKE pattern. */
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** Re-checked under the clan lock: the role read before the lock may be stale (e.g. the daily repair). */
+const stillLeader = async (tx: Tx, userId: string, clanId: string) => {
+  const m = await membershipOf(tx, userId);
+  return !!m && m.clanId === clanId && m.role === "leader";
+};
 
 const usernameOf = async (tx: Pick<Tx, "select">, userId: string) =>
   (await tx.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1))[0]?.username ?? "operator";
@@ -171,10 +177,13 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
     const me = req.user!.id;
     await withIdempotency(db, req, res, "POST /clans/leave", async (tx) => {
       const now = clock();
-      const m = await membershipOf(tx, me);
-      if (!m) return notInClan();
-      const clan = await lockClan(tx, m.clanId);
+      const before = await membershipOf(tx, me);
+      if (!before) return notInClan();
+      const clan = await lockClan(tx, before.clanId);
       if (!clan) return notInClan();
+      // Re-read under the clan lock: a transfer or removal may have committed while this request waited for it.
+      const m = await membershipOf(tx, me);
+      if (!m || m.clanId !== clan.id) return notInClan();
       if (m.role === "leader") {
         const [{ n }] = (await tx.select({ n: sql<number>`count(*)::int` }).from(clanMembers).where(eq(clanMembers.clanId, clan.id))) as [{ n: number }];
         if (n > 1) return err(409, "leader_must_transfer", "Transfer leadership before leaving");
@@ -201,6 +210,7 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
       if (target.data === me) return err(400, "self_target", "The leader cannot remove themselves");
       const clan = await lockClan(tx, m.clanId);
       if (!clan) return notInClan();
+      if (!(await stillLeader(tx, me, clan.id))) return notLeader();
       const [t] = await tx
         .select()
         .from(clanMembers)
@@ -208,8 +218,8 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
         .limit(1);
       if (!t) return memberNotFound();
       if (!t.flaggedAt) return err(409, "not_flagged", "Only members flagged as dead weight can be removed");
-      if (await isActive(tx, t.userId, now)) {
-        // Active again since the flag was set: the flag no longer holds.
+      if (!(await isDeadWeight(tx, t.userId, now))) {
+        // Active again (or not in the clan for the whole window): the flag no longer holds.
         await tx.update(clanMembers).set({ flaggedAt: null }).where(eq(clanMembers.userId, t.userId));
         return err(409, "not_flagged", "Only members flagged as dead weight can be removed");
       }
@@ -232,6 +242,7 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
       if (userId === me) return err(400, "self_target", "Already the leader");
       const clan = await lockClan(tx, m.clanId);
       if (!clan) return notInClan();
+      if (!(await stillLeader(tx, me, clan.id))) return notLeader();
       const [t] = await tx
         .select()
         .from(clanMembers)

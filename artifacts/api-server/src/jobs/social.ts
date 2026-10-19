@@ -75,8 +75,8 @@ async function markRun(db: Pick<Db, "insert">, job: string, now: Date) {
 }
 
 /**
- * Daily dead-weight pass (00:30 UTC): flags members with 5 consecutive inactive local days and clears members who
- * are active again. "not_due" when it already ran today (UTC) or it is before 00:30 UTC.
+ * Daily dead-weight pass (00:30 UTC): flags members in the clan for the whole activity window (5 full local days
+ * ending yesterday) without a log in it, and clears members who no longer are dead weight. "not_due" when it already ran today (UTC) or it is before 00:30 UTC.
  */
 export async function flagDeadWeight(db: Db, now: Date): Promise<{ flagged: number; cleared: number } | "not_due"> {
   if (!(await dailyDue(db, "dead-weight", now))) return "not_due";
@@ -119,7 +119,8 @@ export async function recomputeClanScores(
     const rows = live.length ? await db.select().from(clans).where(inArray(clans.id, live)) : [];
     const scores = await computeClanScores(db, rows, now);
     for (const r of rows) {
-      await db.update(clans).set({ clanScore: scores.get(r.id) ?? 0, scoredOn: today }).where(eq(clans.id, r.id));
+      const sc = scores.get(r.id) ?? { score: null, activeMemberCount: 0 };
+      await db.update(clans).set({ clanScore: sc.score, activeMemberCount: sc.activeMemberCount, scoredOn: today }).where(eq(clans.id, r.id));
       scored++;
     }
     if (nowMs() - started >= budgetMs) {

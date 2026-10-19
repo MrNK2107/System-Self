@@ -26,7 +26,8 @@ test("clans: unique lower name and invite code, valid tag/status/description; on
   const b = await mkUser(db, "b");
   const [c] = await db.insert(clans).values({ name: "Iron", nameLower: "iron", tag: "IRON", inviteCode: "AAAA1111", createdBy: a }).returning();
   assert.equal(c!.status, "forming");
-  assert.equal(c!.clanScore, 0);
+  assert.equal(c!.clanScore, null);
+  assert.equal(c!.activeMemberCount, 0);
   assert.equal(c!.clanRank, null);
   await assert.rejects(db.insert(clans).values({ name: "IRON", nameLower: "iron", tag: "IR", inviteCode: "BBBB2222" }), (e: any) => code(e) === "23505");
   await assert.rejects(db.insert(clans).values({ name: "X1", nameLower: "x1", tag: "IR", inviteCode: "AAAA1111" }), (e: any) => code(e) === "23505");

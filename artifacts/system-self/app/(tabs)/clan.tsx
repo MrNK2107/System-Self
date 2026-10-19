@@ -16,6 +16,8 @@ import {
   clanStatusLine,
   describeClanError,
   leaveBlocker,
+  leaveDisbands,
+  scoreLabel,
 } from "@/lib/clan/clan";
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
@@ -31,7 +33,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 function Board({ items, mine }: { items: ClanLeaderboardItem[]; mine?: string }) {
   const colors = useColors();
   if (items.length === 0) {
-    return <Text style={[s.muted, { color: colors.mutedForeground }]}>No ranked clans yet. A clan ranks once it holds 8 operators.</Text>;
+    return <Text style={[s.muted, { color: colors.mutedForeground }]}>No ranked clans yet. A clan ranks once it holds 8 operators, 3 of them active.</Text>;
   }
   return (
     <View style={s.list}>
@@ -41,7 +43,7 @@ function Board({ items, mine }: { items: ClanLeaderboardItem[]; mine?: string })
           <Text style={[s.boardName, { color: c.id === mine ? colors.primary : colors.foreground }]} numberOfLines={1}>
             {clanLabel(c)}
           </Text>
-          <Text style={[s.mono, { color: colors.foreground }]}>{c.clanScore.toFixed(1)}</Text>
+          <Text style={[s.mono, { color: colors.foreground }]}>{scoreLabel(c.clanScore)}</Text>
         </View>
       ))}
     </View>
@@ -69,7 +71,7 @@ function MyClan({ data, onError }: { data: MyClanResponse; onError: (m: string |
         setBusy(false);
       }
     };
-    const lastOne = data.members.length <= 1;
+    const lastOne = leaveDisbands(data);
     if (Platform.OS === "web") return void go();
     Alert.alert(lastOne ? "Disband the clan?" : "Leave the clan?", lastOne ? "You are the last operator. The clan is dissolved." : "Your record stays. Your place does not.", [
       { text: "Cancel", style: "cancel" },
@@ -87,7 +89,7 @@ function MyClan({ data, onError }: { data: MyClanResponse; onError: (m: string |
         <Text style={[s.status, { color: clan.status === "active" ? colors.primary : "#C4873A" }]}>{clanStatusLine(clan)}</Text>
         <View style={s.statRow}>
           <View style={s.stat}>
-            <Text style={[s.statVal, { color: colors.foreground }]}>{clan.clanScore.toFixed(1)}</Text>
+            <Text style={[s.statVal, { color: colors.foreground }]}>{scoreLabel(clan.clanScore)}</Text>
             <Text style={[s.statLabel, { color: colors.mutedForeground }]}>CLAN SCORE</Text>
           </View>
           <View style={s.stat}>
@@ -121,7 +123,7 @@ function MyClan({ data, onError }: { data: MyClanResponse; onError: (m: string |
         <View style={{ flex: 1 }}>
           <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>ROSTER</Text>
           <Text style={[s.linkText, { color: colors.foreground }]}>
-            {data.members.length} operators{flagged > 0 ? ` · ${flagged} flagged dead weight` : ""}
+            {clan.memberCount} operators · {clan.activeMemberCount} active{flagged > 0 ? ` · ${flagged} flagged dead weight` : ""}
           </Text>
         </View>
         <Feather name="chevron-right" size={14} color={colors.mutedForeground} />
@@ -142,7 +144,7 @@ function MyClan({ data, onError }: { data: MyClanResponse; onError: (m: string |
 
       <TouchableOpacity onPress={leave} disabled={busy} accessibilityRole="button" style={[s.leave, { borderColor: colors.destructive }]}>
         <Text style={[s.leaveText, { color: busy ? colors.subtle : colors.foreground }]}>
-          {clan.myRole === "leader" && data.members.length <= 1 ? "DISBAND CLAN" : "LEAVE CLAN"}
+          {leaveDisbands(data) ? "DISBAND CLAN" : "LEAVE CLAN"}
         </Text>
       </TouchableOpacity>
     </>

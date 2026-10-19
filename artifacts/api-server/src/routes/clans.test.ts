@@ -59,16 +59,41 @@ async function create(u: U, name = "Iron Wolves", tag = "IRON") {
 }
 
 let bareN = 0;
-/** Inserts `n` bare users (no onboarding, no logs) straight into the clan. */
-async function fill(clanId: string, n: number) {
+/** Inserts `n` bare users (no onboarding) straight into the clan; each logs on `logOn` when given. */
+async function fill(clanId: string, n: number, logOn?: string) {
+  const ids: string[] = [];
   for (let i = 0; i < n; i++) {
     const [u] = await db!
       .insert(users)
-      .values({ email: `bare${bareN}@x.com`, passwordHash: "h", username: `bare_${bareN++}`, birthYear: 1990, termsAcceptedAt: new Date() })
+      .values({ email: `bare${bareN}@x.com`, passwordHash: "h", username: `bare_${bareN++}`, birthYear: 1990, timezone: TZ, termsAcceptedAt: new Date() })
       .returning();
-    await db!.insert(clanMembers).values({ userId: u!.id, clanId, role: "member" });
+    await db!.insert(clanMembers).values({ userId: u!.id, clanId, role: "member", joinedAt: OLD_JOIN });
+    if (logOn) await addLog(u!.id, logOn);
+    ids.push(u!.id);
   }
+  return ids;
 }
+
+/** A join date well before any activity window the tests use. */
+const OLD_JOIN = new Date("2026-09-01T00:00:00Z");
+/** Backdates a membership so the dead-weight rule (in the clan for the whole window) can apply. */
+const ageMembership = (userId: string) => db!.update(clanMembers).set({ joinedAt: OLD_JOIN }).where(eq(clanMembers.userId, userId));
+
+/** Holds the clan row FOR UPDATE until `release()` so requests queue on it in the order they are sent. */
+async function holdClanRow(clanId: string) {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let locked!: () => void;
+  const isLocked = new Promise<void>((r) => (locked = r));
+  const done = db!.transaction(async (tx) => {
+    await tx.select().from(clans).where(eq(clans.id, clanId)).for("update");
+    locked();
+    await gate;
+  });
+  await isLocked;
+  return { release: async () => (release(), await done) };
+}
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const join = (u: U, clanId: string) => request(a()).post(`/api/clans/${clanId}/join`).set(auth(u.token)).send({});
 const mine = async (u: U): Promise<MyClanResponse> => {
@@ -291,6 +316,7 @@ test("remove non-flagged → 409 not_flagged; a flagged inactive member can be r
   assert.equal(res.status, 409);
   assert.equal(res.body.code, "not_flagged");
 
+  await ageMembership(u.id);
   await db!.update(clanMembers).set({ flaggedAt: new Date() }).where(eq(clanMembers.userId, u.id));
   const byMember = await request(a()).post(`/api/clans/members/${u.id}/remove`).set(auth(v.token)).send({});
   assert.equal(byMember.status, 403);
@@ -310,13 +336,84 @@ test("a flagged member who logged again is no longer removable (flag cleared)", 
   const c = await create(l);
   const u = await mk("mem_1");
   assert.equal((await join(u, c.id)).status, 204);
+  await ageMembership(u.id);
   await db!.update(clanMembers).set({ flaggedAt: new Date() }).where(eq(clanMembers.userId, u.id));
-  await addLog(u.id, localDate(clock, TZ));
+  await addLog(u.id, addDays(localDate(clock, TZ), -1)); // inside the window (ends yesterday)
   assert.equal((await mine(l)).members.find((m) => m.userId === u.id)!.flagged, false);
   const res = await request(a()).post(`/api/clans/members/${u.id}/remove`).set(auth(l.token)).send({});
   assert.equal(res.status, 409);
   assert.equal(res.body.code, "not_flagged");
   assert.equal((await db!.select().from(clanMembers).where(eq(clanMembers.userId, u.id)))[0]!.flaggedAt, null);
+});
+
+test("a fresh joiner with no logs is not dead weight (flag job and remove use the join date)", { skip }, async () => {
+  const now = new Date("2026-10-19T00:31:00Z");
+  clock = now;
+  const l = await mk("lead_1");
+  await makePro(l);
+  const c = await create(l);
+  await ageMembership(l.id);
+  await addLog(l.id, "2026-10-18");
+  clock = new Date("2026-10-17T06:00:00Z"); // u joins two days before the run
+  const u = await mk("mem_1");
+  assert.equal((await join(u, c.id)).status, 204);
+  clock = now;
+  assert.deepEqual(await flagDeadWeight(db!, now), { flagged: 0, cleared: 0 });
+  // a stale flag on a fresh joiner does not make them removable either
+  await db!.update(clanMembers).set({ flaggedAt: new Date() }).where(eq(clanMembers.userId, u.id));
+  assert.equal((await mine(l)).members.find((m) => m.userId === u.id)!.flagged, false);
+  const res = await request(a()).post(`/api/clans/members/${u.id}/remove`).set(auth(l.token)).send({});
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, "not_flagged");
+  // joined on the first day of the window (10-14 local) or earlier: dead weight
+  await db!.update(clanMembers).set({ joinedAt: new Date("2026-10-14T06:00:00+05:30"), flaggedAt: null }).where(eq(clanMembers.userId, u.id));
+  await db!.delete(jobRuns);
+  assert.deepEqual(await flagDeadWeight(db!, now), { flagged: 1, cleared: 0 });
+});
+
+test("a transfer racing the heir's leave never leaves the clan without a leader", { skip }, async () => {
+  clock = new Date();
+  const l = await mk("lead_1");
+  await makePro(l);
+  const c = await create(l);
+  const b = await mk("mem_b");
+  assert.equal((await join(b, c.id)).status, 204);
+  const hold = await holdClanRow(c.id);
+  const transfer = request(a()).post("/api/clans/leader").set(auth(l.token)).send({ userId: b.id }).then((r) => r);
+  await pause(250);
+  const leave = request(a()).post("/api/clans/leave").set(auth(b.token)).send({}).then((r) => r);
+  await pause(250);
+  await hold.release();
+  const [t, lv] = await Promise.all([transfer, leave]);
+  assert.equal(t.status, 204);
+  assert.equal(lv.status, 409);
+  assert.equal(lv.body.code, "leader_must_transfer");
+  const rows = await db!.select().from(clanMembers).where(eq(clanMembers.clanId, c.id));
+  assert.equal(rows.length, 2);
+  assert.equal(rows.filter((r) => r.role === "leader").length, 1);
+});
+
+test("a leave racing a removal answers not_in_clan and posts no LEFT dispatch", { skip }, async () => {
+  clock = new Date();
+  const l = await mk("lead_1");
+  await makePro(l);
+  const c = await create(l);
+  const u = await mk("mem_1");
+  assert.equal((await join(u, c.id)).status, 204);
+  await ageMembership(u.id);
+  await db!.update(clanMembers).set({ flaggedAt: new Date() }).where(eq(clanMembers.userId, u.id));
+  const hold = await holdClanRow(c.id);
+  const remove = request(a()).post(`/api/clans/members/${u.id}/remove`).set(auth(l.token)).send({}).then((r) => r);
+  await pause(250);
+  const leave = request(a()).post("/api/clans/leave").set(auth(u.token)).send({}).then((r) => r);
+  await pause(250);
+  await hold.release();
+  const [rm, lv] = await Promise.all([remove, leave]);
+  assert.equal(rm.status, 204);
+  assert.equal(lv.status, 409);
+  assert.equal(lv.body.code, "not_in_clan");
+  const kinds = (await db!.select().from(clanDispatches).where(eq(clanDispatches.clanId, c.id))).map((d) => d.kind);
+  assert.ok(!kinds.includes("left"), kinds.join(","));
 });
 
 // --- members payload ---------------------------------------------------------------------------
@@ -409,7 +506,7 @@ test("search by name or tag; leaderboard lists ranked active clans only", { skip
   const c1 = await create(l1, "Iron Wolves", "IRON");
   const c2 = await create(l2, "Night Owls", "OWL");
   await fill(c1.id, 7);
-  await db!.update(clans).set({ status: "active", clanRank: 1, clanScore: 42.5 }).where(eq(clans.id, c1.id));
+  await db!.update(clans).set({ status: "active", clanRank: 1, clanScore: 42.5, activeMemberCount: 3 }).where(eq(clans.id, c1.id));
 
   const s = await request(a()).get("/api/clans/search?q=wol").set(auth(l2.token));
   assert.equal(s.status, 200);
@@ -425,6 +522,10 @@ test("search by name or tag; leaderboard lists ranked active clans only", { skip
   assert.equal(lb.status, 200);
   const board = assertContract(ClanLeaderboardResponseSchema, lb.body);
   assert.deepEqual(board.items, [{ id: c1.id, name: "Iron Wolves", tag: "IRON", memberCount: 8, status: "active", clanRank: 1, clanScore: 42.5 }]);
+
+  // the own-clan DTO carries the active member count; a clan never scored has a null score
+  assert.equal((await mine(l1)).clan!.activeMemberCount, 3);
+  assert.equal((await mine(l2)).clan!.clanScore, null);
 });
 
 // --- daily jobs --------------------------------------------------------------------------------
@@ -435,28 +536,35 @@ test("clan score excludes members inactive ≥ 5 days and adds this month's raid
   await makePro(l);
   const c = await create(l);
   const b = await mk("mem_b");
+  const d = await mk("mem_d");
   const x = await mk("mem_x");
-  assert.equal((await join(b, c.id)).status, 204);
-  assert.equal((await join(x, c.id)).status, 204);
+  const t = await mk("mem_t");
+  for (const u of [b, d, x, t]) assert.equal((await join(u, c.id)).status, 204);
   const setAll = async (id: string, v: number) => db!.update(domainScores).set({ score: v }).where(eq(domainScores.userId, id));
   await setAll(l.id, 40);
   await setAll(b.id, 60);
+  await setAll(d.id, 50);
   await setAll(x.id, 99);
+  await setAll(t.id, 98);
 
   const now = new Date("2026-10-19T00:31:00Z"); // 06:01 in Kolkata, local date 2026-10-19
   const today = localDate(now, TZ);
+  // The window is the 5 full local days ending yesterday: today - 5 .. today - 1.
   await addLog(l.id, addDays(today, -1));
-  await addLog(b.id, addDays(today, -4)); // still inside the 5-day window
-  await addLog(x.id, addDays(today, -5)); // 5 inactive days: excluded
+  await addLog(b.id, addDays(today, -5)); // first day of the window
+  await addLog(d.id, addDays(today, -3));
+  await addLog(x.id, addDays(today, -6)); // before the window: excluded
+  await addLog(t.id, today); // today does not count: excluded
   await db!.update(clans).set({ raidBonusMonth: "2026-10", raidBonus: 4 }).where(eq(clans.id, c.id));
 
   const hiddenOf = async (id: string, v: number) =>
     (await hiddenAndTrajectory(db!, id, today, Object.fromEntries(RANKED_DOMAINS.map((d) => [d, v])) as Record<RankedDomain, number>)).hidden;
-  const expected = Math.round((((await hiddenOf(l.id, 40)) + (await hiddenOf(b.id, 60))) / 2 + 4) * 100) / 100;
+  const expected = Math.round((((await hiddenOf(l.id, 40)) + (await hiddenOf(b.id, 60)) + (await hiddenOf(d.id, 50))) / 3 + 4) * 100) / 100;
 
   assert.equal(await recomputeClanScores(db!, now), 1);
   const row = await clanRow(c.id);
   assert.equal(row.clanScore, expected);
+  assert.equal(row.activeMemberCount, 3);
   assert.equal(row.clanRank, null); // forming clans are not ranked
 
   // last month's bonus does not count
@@ -468,6 +576,16 @@ test("clan score excludes members inactive ≥ 5 days and adds this month's raid
   // the payload never carries a member's hidden score
   const text = JSON.stringify(await mine(l));
   assert.ok(!/hidden/i.test(text));
+
+  // fewer than 3 active members: no clan score at all (a mean of 1-2 would expose individual hidden scores)
+  await db!.delete(logs).where(eq(logs.userId, d.id));
+  await db!.update(clans).set({ scoredOn: null, raidBonusMonth: "2026-10" }).where(eq(clans.id, c.id));
+  await db!.delete(jobRuns);
+  assert.equal(await recomputeClanScores(db!, now), 1);
+  const thin = await clanRow(c.id);
+  assert.equal(thin.clanScore, null);
+  assert.equal(thin.activeMemberCount, 2);
+  assert.equal((await mine(l)).clan!.clanScore, null);
 });
 
 test("clan scores run daily from 00:30 UTC once, and rank active clans by score", { skip }, async () => {
@@ -479,19 +597,28 @@ test("clan scores run daily from 00:30 UTC once, and rank active clans by score"
   const c1 = await create(l1, "Iron Wolves", "IRON");
   const c2 = await create(l2, "Night Owls", "OWL");
   const c3 = await create(l3, "Small Band", "SMB");
-  await fill(c1.id, 7);
-  await fill(c2.id, 7);
+  await fill(c1.id, 2, "2026-10-18");
+  await fill(c1.id, 5);
+  await fill(c2.id, 2, "2026-10-18");
+  await fill(c2.id, 5);
+  const l4 = await mk("lead_4");
+  await makePro(l4);
+  const c4 = await create(l4, "Thin Line", "THN");
+  await fill(c4.id, 7); // active status, but only the leader logs: not ranked
+  await addLog(l4.id, "2026-10-18");
   await db!.update(domainScores).set({ score: 30 }).where(eq(domainScores.userId, l1.id));
   await db!.update(domainScores).set({ score: 70 }).where(eq(domainScores.userId, l2.id));
   await db!.update(domainScores).set({ score: 90 }).where(eq(domainScores.userId, l3.id));
-  for (const u of [l1, l2, l3]) await addLog(u.id, "2026-10-19");
+  for (const u of [l1, l2, l3]) await addLog(u.id, "2026-10-18");
 
   assert.equal(await recomputeClanScores(db!, new Date("2026-10-19T00:10:00Z")), "not_due");
-  assert.equal(await recomputeClanScores(db!, new Date("2026-10-19T00:31:00Z")), 3);
+  assert.equal(await recomputeClanScores(db!, new Date("2026-10-19T00:31:00Z")), 4);
   assert.equal((await clanRow(c2.id)).clanRank, 1);
   assert.equal((await clanRow(c1.id)).clanRank, 2);
   assert.equal((await clanRow(c3.id)).clanRank, null); // forming
-  assert.ok((await clanRow(c3.id)).clanScore > 0);
+  assert.equal((await clanRow(c3.id)).clanScore, null); // one active member: no score
+  assert.equal((await clanRow(c4.id)).status, "active");
+  assert.equal((await clanRow(c4.id)).clanRank, null); // fewer than 3 active members: unranked
   assert.equal(await recomputeClanScores(db!, new Date("2026-10-19T09:00:00Z")), "not_due");
   const [run] = await db!.select().from(jobRuns).where(eq(jobRuns.job, "clan-scores"));
   assert.equal(run!.lastRunDate, "2026-10-19");
@@ -502,7 +629,7 @@ test("clan scores run daily from 00:30 UTC once, and rank active clans by score"
   const first = await recomputeClanScores(db!, new Date("2026-10-20T00:31:00Z"), { budgetMs: 1, nowMs: () => (t += 5), batchSize: 1 });
   assert.equal(first, 1);
   assert.equal((await clanRow(c2.id)).clanRank, 1); // not re-ranked yet
-  assert.equal(await recomputeClanScores(db!, new Date("2026-10-20T00:32:00Z")), 2);
+  assert.equal(await recomputeClanScores(db!, new Date("2026-10-20T00:32:00Z")), 3);
   assert.equal((await clanRow(c1.id)).clanRank, 1);
   assert.equal((await clanRow(c2.id)).clanRank, 2);
 
@@ -517,10 +644,13 @@ test("dead weight: flagged after 5 inactive local days, cleared when active agai
   const c = await create(l);
   const u = await mk("mem_1");
   assert.equal((await join(u, c.id)).status, 204);
+  await ageMembership(l.id);
+  await ageMembership(u.id);
   const now = new Date("2026-10-19T00:31:00Z");
   const today = localDate(now, TZ);
   await addLog(l.id, addDays(today, -4));
-  await addLog(u.id, addDays(today, -5));
+  await addLog(u.id, addDays(today, -6)); // nothing in today - 5 .. today - 1
+  await addLog(u.id, today); // today does not count
 
   assert.equal(await flagDeadWeight(db!, new Date("2026-10-19T00:10:00Z")), "not_due");
   assert.deepEqual(await flagDeadWeight(db!, now), { flagged: 1, cleared: 0 });
@@ -529,8 +659,7 @@ test("dead weight: flagged after 5 inactive local days, cleared when active agai
   assert.equal(await flagOf(l.id), null);
   assert.equal(await flagDeadWeight(db!, new Date("2026-10-19T12:00:00Z")), "not_due");
 
-  await addLog(u.id, "2026-10-20");
-  await addLog(l.id, "2026-10-20");
+  await addLog(l.id, "2026-10-19"); // the 10-20 window is 10-15 .. 10-19: u's 10-19 log now counts
   assert.deepEqual(await flagDeadWeight(db!, new Date("2026-10-20T00:31:00Z")), { flagged: 0, cleared: 1 });
   assert.equal(await flagOf(u.id), null);
 

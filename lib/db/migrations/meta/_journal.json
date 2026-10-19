@@ -148,6 +148,13 @@
       "when": 1792381411675,
       "tag": "0020_uneven_sersi",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792382939782,
+      "tag": "0021_lethal_the_phantom",
+      "breakpoints": true
     }
   ]
 }

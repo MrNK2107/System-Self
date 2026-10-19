@@ -6,6 +6,7 @@ import { blocks, clanDispatches, clanMembers, clans, domainScores, logs, quests,
 import {
   CLAN_INACTIVE_DAYS,
   CLAN_MIN_ACTIVE,
+  CLAN_SCORE_MIN_ACTIVE,
   type Clan,
   type ClanDispatch,
   type ClanLeaderboardItem,
@@ -30,14 +31,26 @@ export function newInviteCode(): string {
   return out;
 }
 
+/** SQL: `now` as a local date in the timezone in `tzCol`. */
+const localToday = (tzCol: unknown, now: Date) => sql`((${now.toISOString()}::timestamptz at time zone ${tzCol})::date)`;
+
 /**
- * SQL: the user in `userIdCol` (timezone in `tzCol`) logged on one of the last CLAN_INACTIVE_DAYS local days
- * (today included). Not active = CLAN_INACTIVE_DAYS consecutive inactive local days: dead weight, excluded from
- * the clan score. The single definition of clan activity, used by the score, the dead-weight job and the routes.
+ * SQL: the user in `userIdCol` (timezone in `tzCol`) logged in the activity window: the CLAN_INACTIVE_DAYS full
+ * local days ending yesterday (today - 5 .. today - 1; today does not count). The single definition of clan
+ * activity, used by the clan score, the dead-weight rule, the roster and the routes.
  * Pass table-qualified references (a bare column name would resolve against `logs` inside the subquery).
  */
 export function activeSql(userIdCol: unknown, tzCol: unknown, now: Date): SQL<boolean> {
-  return sql<boolean>`exists (select 1 from ${logs} l where l.user_id = ${userIdCol} and l.local_date >= ((${now.toISOString()}::timestamptz at time zone ${tzCol})::date - ${CLAN_INACTIVE_DAYS - 1}::int))`;
+  const today = localToday(tzCol, now);
+  return sql<boolean>`exists (select 1 from ${logs} l where l.user_id = ${userIdCol} and l.local_date >= ${today} - ${CLAN_INACTIVE_DAYS}::int and l.local_date < ${today})`;
+}
+
+/**
+ * SQL: the member is dead weight: in the clan since the window's first local day (or earlier) and no log in the
+ * window, i.e. CLAN_INACTIVE_DAYS consecutive inactive local days as a member. A fresh joiner never is.
+ */
+export function deadWeightSql(userIdCol: unknown, joinedAtCol: unknown, tzCol: unknown, now: Date): SQL<boolean> {
+  return sql<boolean>`((${joinedAtCol} at time zone ${tzCol})::date <= ${localToday(tzCol, now)} - ${CLAN_INACTIVE_DAYS}::int and not ${activeSql(userIdCol, tzCol, now)})`;
 }
 
 /** The clan status for a member count: `active` from 8 members, else `forming`. */
@@ -103,15 +116,15 @@ export async function blockedWithMember(db: Reader, userId: string, clanId: stri
   return !!row;
 }
 
-/** Whether `userId` is active (a log in the last 5 local days). */
-export async function isActive(db: Reader, userId: string, now: Date): Promise<boolean> {
+/** Whether the member `userId` is dead weight right now (see deadWeightSql). */
+export async function isDeadWeight(db: Reader, userId: string, now: Date): Promise<boolean> {
   const [row] = await db
-    // Qualified on purpose: in a one-table select drizzle renders bare column names, which the logs subquery would capture.
-    .select({ active: activeSql(sql`${users}."id"`, sql`${users}."timezone"`, now) })
-    .from(users)
-    .where(eq(users.id, userId))
+    .select({ dead: deadWeightSql(clanMembers.userId, clanMembers.joinedAt, users.timezone, now) })
+    .from(clanMembers)
+    .innerJoin(users, eq(users.id, clanMembers.userId))
+    .where(eq(clanMembers.userId, userId))
     .limit(1);
-  return !!row?.active;
+  return !!row?.dead;
 }
 
 // --- DTOs ---------------------------------------------------------------------------------------
@@ -142,7 +155,7 @@ export async function toSummaries(db: Reader, rows: ClanRow[]): Promise<ClanSumm
 
 export async function toLeaderboardItems(db: Reader, rows: ClanRow[]): Promise<ClanLeaderboardItem[]> {
   const n = await counts(db, rows.map((r) => r.id));
-  return rows.map((r) => ({ ...summary(r, n.get(r.id) ?? 0), clanScore: r.clanScore }));
+  return rows.map((r) => ({ ...summary(r, n.get(r.id) ?? 0), clanScore: r.clanScore ?? 0 }));
 }
 
 export async function toClanDto(db: Reader, c: ClanRow, myRole: ClanRole): Promise<Clan> {
@@ -150,6 +163,7 @@ export async function toClanDto(db: Reader, c: ClanRow, myRole: ClanRole): Promi
     ...summary(c, await memberCount(db, c.id)),
     description: c.description,
     clanScore: c.clanScore,
+    activeMemberCount: c.activeMemberCount,
     raidWins: c.raidWins,
     inviteCode: c.inviteCode,
     createdAt: c.createdAt.toISOString(),
@@ -159,7 +173,7 @@ export async function toClanDto(db: Reader, c: ClanRow, myRole: ClanRole): Promi
 
 /**
  * The members as a clanmate sees them: the clanmate projection (usernames always, PRD 16), role, the dead-weight
- * flag (only while still inactive) and the 30-day quest completion %. Leader first, then by join time.
+ * flag (only while still dead weight) and the 30-day quest completion %. Leader first, then by join time.
  */
 export async function clanMembersView(db: Reader, clanId: string, viewerId: string, now: Date): Promise<ClanMember[]> {
   const rows = await db
@@ -167,7 +181,7 @@ export async function clanMembersView(db: Reader, clanId: string, viewerId: stri
       userId: clanMembers.userId,
       role: clanMembers.role,
       flaggedAt: clanMembers.flaggedAt,
-      active: activeSql(clanMembers.userId, users.timezone, now),
+      dead: deadWeightSql(clanMembers.userId, clanMembers.joinedAt, users.timezone, now),
       resolved: sql<number>`(select count(*)::int from ${quests} q where q.user_id = ${clanMembers.userId} and q.status in ('complete', 'failed', 'refused') and q.resolved_local_date >= ((${now.toISOString()}::timestamptz at time zone ${users.timezone})::date - 29))`,
       completed: sql<number>`(select count(*)::int from ${quests} q where q.user_id = ${clanMembers.userId} and q.status = 'complete' and q.resolved_local_date >= ((${now.toISOString()}::timestamptz at time zone ${users.timezone})::date - 29))`,
     })
@@ -185,7 +199,7 @@ export async function clanMembersView(db: Reader, clanId: string, viewerId: stri
       isSelf: r.userId === viewerId,
       profile: projectUser(s, "clanmate"),
       role: r.role as ClanRole,
-      flagged: r.flaggedAt !== null && !r.active,
+      flagged: r.flaggedAt !== null && r.dead,
       questCompletionRate30d: r.resolved > 0 ? Math.round((r.completed / r.resolved) * 100) : null,
     });
   }
@@ -209,12 +223,19 @@ export const utcMonth = (now: Date) => now.toISOString().slice(0, 7);
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+export interface ClanScore {
+  /** Null with fewer than CLAN_SCORE_MIN_ACTIVE active members. */
+  score: number | null;
+  activeMemberCount: number;
+}
+
 /**
- * Clan score of each clan: the mean hidden score of its active members (inactive ones excluded; 0 with none
- * active) plus the raid bonus accumulated in the current UTC month. Hidden scores stay server-side.
+ * Clan score of each clan: the mean hidden score of its members active in the window (inactive ones excluded)
+ * plus the raid bonus accumulated in the current UTC month. With fewer than CLAN_SCORE_MIN_ACTIVE active members
+ * there is no score (a mean of one or two members would reveal their hidden scores). Hidden scores stay server-side.
  */
-export async function computeClanScores(db: Reader, clanRows: ClanRow[], now: Date): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
+export async function computeClanScores(db: Reader, clanRows: ClanRow[], now: Date): Promise<Map<string, ClanScore>> {
+  const out = new Map<string, ClanScore>();
   if (clanRows.length === 0) return out;
   const members = await db
     .select({ clanId: clanMembers.clanId, userId: clanMembers.userId, timezone: users.timezone })
@@ -236,8 +257,11 @@ export async function computeClanScores(db: Reader, clanRows: ClanRow[], now: Da
   const month = utcMonth(now);
   for (const c of clanRows) {
     const mine = members.filter((m) => m.clanId === c.id).map((m) => hidden.get(m.userId)!.hidden);
-    const mean = mine.length ? mine.reduce((a, b) => a + b, 0) / mine.length : 0;
-    out.set(c.id, round2(mean + (c.raidBonusMonth === month ? c.raidBonus : 0)));
+    const score =
+      mine.length < CLAN_SCORE_MIN_ACTIVE
+        ? null
+        : round2(mine.reduce((a, b) => a + b, 0) / mine.length + (c.raidBonusMonth === month ? c.raidBonus : 0));
+    out.set(c.id, { score, activeMemberCount: mine.length });
   }
   return out;
 }
@@ -272,27 +296,31 @@ export async function repairClans(db: Db, clanIds: string[]): Promise<Set<string
   return deleted;
 }
 
-/** Global rank by clan score among active clans (ties: older clan first); forming clans are unranked. */
+/**
+ * Global rank by clan score among `active` clans with at least CLAN_SCORE_MIN_ACTIVE active members (ties: older
+ * clan first). Every other clan is unranked.
+ */
 export async function assignClanRanks(db: Pick<Db, "execute">): Promise<void> {
+  const ranked = sql`status = 'active' and active_member_count >= ${CLAN_SCORE_MIN_ACTIVE}::int and clan_score is not null`;
   await db.execute(sql`
     update ${clans} c set clan_rank = r.rk
-    from (select id, row_number() over (order by clan_score desc, created_at asc, id asc)::int as rk from ${clans} where status = 'active') r
+    from (select id, row_number() over (order by clan_score desc, created_at asc, id asc)::int as rk from ${clans} where ${ranked}) r
     where c.id = r.id`);
-  await db.execute(sql`update ${clans} set clan_rank = null where status <> 'active' and clan_rank is not null`);
+  await db.execute(sql`update ${clans} set clan_rank = null where not (${ranked}) and clan_rank is not null`);
 }
 
 /**
- * Flags members with CLAN_INACTIVE_DAYS consecutive inactive local days (keeps an earlier flag time) and clears
- * the flag of members active again. Two set-based statements.
+ * Flags dead weight (see deadWeightSql; keeps an earlier flag time) and clears the flag of members who no longer
+ * are. Two set-based statements.
  */
 export async function updateDeadWeightFlags(db: Pick<Db, "execute">, now: Date): Promise<{ flagged: number; cleared: number }> {
   const flagged = await db.execute(sql`
     update ${clanMembers} m set flagged_at = ${now.toISOString()}::timestamptz
     from ${users} u
-    where u.id = m.user_id and m.flagged_at is null and not ${activeSql(sql`m.user_id`, sql`u.timezone`, now)}`);
+    where u.id = m.user_id and m.flagged_at is null and ${deadWeightSql(sql`m.user_id`, sql`m.joined_at`, sql`u.timezone`, now)}`);
   const cleared = await db.execute(sql`
     update ${clanMembers} m set flagged_at = null
     from ${users} u
-    where u.id = m.user_id and m.flagged_at is not null and ${activeSql(sql`m.user_id`, sql`u.timezone`, now)}`);
+    where u.id = m.user_id and m.flagged_at is not null and not ${deadWeightSql(sql`m.user_id`, sql`m.joined_at`, sql`u.timezone`, now)}`);
   return { flagged: flagged.rowCount ?? 0, cleared: cleared.rowCount ?? 0 };
 }

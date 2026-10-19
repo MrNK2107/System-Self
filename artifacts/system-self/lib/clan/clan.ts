@@ -8,6 +8,7 @@ import {
   CLAN_NAME_MAX,
   CLAN_NAME_MIN,
   CLAN_NAME_RE,
+  CLAN_SCORE_MIN_ACTIVE,
   CLAN_TAG_RE,
   ClanLeaderboardResponseSchema,
   ClanSchema,
@@ -25,6 +26,9 @@ import { isProRequired } from "../api/pro";
 import { afterOutbox, type MutationResult } from "../game/actions";
 
 export { CLAN_MAX_MEMBERS, CLAN_MIN_ACTIVE };
+
+/** Clan search waits this long after the last keystroke before it asks the server. */
+export const CLAN_SEARCH_DEBOUNCE_MS = 300;
 
 /** The account screen where the email is verified (founding a clan requires it). */
 export const VERIFY_EMAIL_ROUTE = "/settings/account";
@@ -64,14 +68,25 @@ export function clanCreateBody(d: ClanDraft, clientId: string) {
 /** `IRON WOLVES [IRON]` */
 export const clanLabel = (c: Pick<ClanSummary, "name" | "tag">): string => `${c.name.toUpperCase()} [${c.tag}]`;
 
-/** One status line: how far a forming clan is from 8, or an active clan's rank. */
-export function clanStatusLine(c: Pick<ClanSummary, "status" | "memberCount" | "clanRank">): string {
+/**
+ * One status line: how far a forming clan is from 8, or an active clan's rank. An active clan is unranked while
+ * fewer than 3 members are active (when `activeMemberCount` is known) or until the next daily run.
+ */
+export function clanStatusLine(c: Pick<ClanSummary, "status" | "memberCount" | "clanRank"> & { activeMemberCount?: number }): string {
   if (c.status === "forming") {
     const need = Math.max(0, CLAN_MIN_ACTIVE - c.memberCount);
     return `FORMING — ${c.memberCount}/${CLAN_MIN_ACTIVE}. ${need} more operator${need === 1 ? "" : "s"} required for raids and rank.`;
   }
-  return c.clanRank ? `ACTIVE — RANK #${c.clanRank}. ${c.memberCount}/${CLAN_MAX_MEMBERS} operators.` : `ACTIVE — UNRANKED UNTIL 00:30 UTC. ${c.memberCount}/${CLAN_MAX_MEMBERS} operators.`;
+  const size = `${c.memberCount}/${CLAN_MAX_MEMBERS} operators.`;
+  if (c.clanRank) return `ACTIVE — RANK #${c.clanRank}. ${size}`;
+  if (c.activeMemberCount !== undefined && c.activeMemberCount < CLAN_SCORE_MIN_ACTIVE) {
+    return `ACTIVE — UNRANKED. ${CLAN_SCORE_MIN_ACTIVE} active operators required for a score and rank. ${size}`;
+  }
+  return `ACTIVE — UNRANKED UNTIL 00:30 UTC. ${size}`;
 }
+
+/** The clan score to one decimal, or `—` while there is none (unscored, or fewer than 3 active members). */
+export const scoreLabel = (score: number | null): string => (score === null ? "—" : score.toFixed(1));
 
 export const isFull = (c: Pick<ClanSummary, "memberCount">): boolean => c.memberCount >= CLAN_MAX_MEMBERS;
 
@@ -89,8 +104,11 @@ export const isLeader = (data: MyClanResponse | undefined): boolean => data?.cla
 /** What the leave button must do: leave, or ask the leader to transfer first (others remain). */
 export function leaveBlocker(data: MyClanResponse): string | null {
   if (!data.clan || data.clan.myRole !== "leader") return null;
-  return data.members.length > 1 ? "Transfer leadership before leaving." : null;
+  return data.clan.memberCount > 1 ? "Transfer leadership before leaving." : null;
 }
+
+/** Leaving disbands the clan: the viewer is its last member. */
+export const leaveDisbands = (data: MyClanResponse): boolean => !!data.clan && data.clan.memberCount <= 1;
 
 /** The error a founding attempt maps to: a PRO lock, an email prompt, or a message. */
 export type CreateOutcome = { kind: "pro" } | { kind: "verify_email" } | { kind: "error"; message: string };

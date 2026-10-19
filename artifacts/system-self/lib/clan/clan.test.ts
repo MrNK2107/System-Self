@@ -12,15 +12,18 @@ import {
   describeClanError,
   fetchClanLeaderboard,
   fetchMyClan,
+  CLAN_SEARCH_DEBOUNCE_MS,
   isFull,
   joinClanByCode,
   joinClanById,
   leaveBlocker,
+  leaveDisbands,
   leaveClan,
   normalizeInviteCode,
   normalizeTag,
   removableMembers,
   removeClanMember,
+  scoreLabel,
   searchClans,
   transferCandidates,
   transferClanLeader,
@@ -72,7 +75,8 @@ const clan = {
   status: "forming" as const,
   clanRank: null,
   description: null,
-  clanScore: 0,
+  clanScore: null,
+  activeMemberCount: 0,
   raidWins: 0,
   inviteCode: "ABCD2345",
   createdAt: "2026-10-19T00:00:00.000Z",
@@ -107,7 +111,17 @@ test("display helpers", () => {
   assert.equal(clanStatusLine(clan), "FORMING — 3/8. 5 more operators required for raids and rank.");
   assert.equal(clanStatusLine({ ...clan, memberCount: 7 }), "FORMING — 7/8. 1 more operator required for raids and rank.");
   assert.equal(clanStatusLine({ status: "active", memberCount: 12, clanRank: 4 }), "ACTIVE — RANK #4. 12/30 operators.");
-  assert.match(clanStatusLine({ status: "active", memberCount: 8, clanRank: null }), /UNRANKED/);
+  assert.equal(
+    clanStatusLine({ status: "active", memberCount: 8, clanRank: null, activeMemberCount: 2 }),
+    "ACTIVE — UNRANKED. 3 active operators required for a score and rank. 8/30 operators.",
+  );
+  assert.equal(
+    clanStatusLine({ status: "active", memberCount: 8, clanRank: null, activeMemberCount: 5 }),
+    "ACTIVE — UNRANKED UNTIL 00:30 UTC. 8/30 operators.",
+  );
+  assert.equal(scoreLabel(null), "—");
+  assert.equal(scoreLabel(42.46), "42.5");
+  assert.equal(CLAN_SEARCH_DEBOUNCE_MS, 300);
   assert.equal(isFull({ memberCount: 30 }), true);
   assert.equal(isFull({ memberCount: 29 }), false);
   assert.equal(completionLabel(null), "—");
@@ -120,8 +134,12 @@ test("leader actions: removable = flagged non-leaders; transfer to anyone but se
   assert.deepEqual(transferCandidates(members).map((m) => m.userId), [ID(2), ID(3)]);
   const data: MyClanResponse = { clan, members, dispatches: [], raid: null };
   assert.equal(leaveBlocker(data), "Transfer leadership before leaving.");
-  assert.equal(leaveBlocker({ ...data, members: [members[0]!] }), null);
+  assert.equal(leaveBlocker({ ...data, clan: { ...clan, memberCount: 1 } }), null);
+  // the member count decides, not the (projected) members list
+  assert.equal(leaveBlocker({ ...data, members: [members[0]!] }), "Transfer leadership before leaving.");
   assert.equal(leaveBlocker({ ...data, clan: { ...clan, myRole: "member" } }), null);
+  assert.equal(leaveDisbands(data), false);
+  assert.equal(leaveDisbands({ ...data, clan: { ...clan, memberCount: 1 } }), true);
 });
 
 test("errors: 402 → PRO lock, 403 email_unverified → verify prompt, codes → SYSTEM lines", () => {

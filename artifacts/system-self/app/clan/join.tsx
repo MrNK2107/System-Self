@@ -7,7 +7,8 @@ import { AuthField } from "@/components/AuthField";
 import { AuthButton, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { useColors } from "@/hooks/useColors";
 import { useClanActions, useClanSearchQuery } from "@/hooks/useClan";
-import { SYNC_PENDING_MESSAGE, clanLabel, clanStatusLine, describeClanError, isFull, normalizeInviteCode } from "@/lib/clan/clan";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { CLAN_SEARCH_DEBOUNCE_MS, SYNC_PENDING_MESSAGE, clanLabel, clanStatusLine, describeClanError, isFull, normalizeInviteCode } from "@/lib/clan/clan";
 import type { MutationResult } from "@/lib/game/actions";
 
 function ClanRow({ clan, onJoin, disabled }: { clan: ClanSummary; onJoin: () => void; disabled: boolean }) {
@@ -40,7 +41,7 @@ export default function JoinClanScreen() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const search = useClanSearchQuery(text);
+  const search = useClanSearchQuery(useDebouncedValue(text, CLAN_SEARCH_DEBOUNCE_MS));
 
   const attempt = async (send: () => Promise<MutationResult<unknown>>) => {
     if (busy) return;

@@ -5,8 +5,9 @@ import { users } from "./users";
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
 /**
- * A clan of 8–30 players (PRD 15). Below 8 members it is `forming` (no raids, no rank). `clanScore` and
- * `clanRank` are written by the daily job (00:30 UTC); `scoredOn` is the UTC date of the last score write.
+ * A clan of 8–30 players (PRD 15). Below 8 members it is `forming` (no raids, no rank). `clanScore`,
+ * `activeMemberCount` and `clanRank` are written by the daily job (00:30 UTC); `scoredOn` is the UTC date of the
+ * last score write.
  * `raidBonus` is the raid bonus accumulated in `raidBonusMonth` (`YYYY-MM`, UTC).
  */
 export const clans = pgTable(
@@ -20,7 +21,10 @@ export const clans = pgTable(
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: ts("created_at").defaultNow().notNull(),
     status: text("status").notNull().default("forming"),
-    clanScore: real("clan_score").notNull().default(0),
+    /** Null until scored, and whenever fewer than CLAN_SCORE_MIN_ACTIVE members are active (privacy). */
+    clanScore: real("clan_score"),
+    /** Members active in the activity window at the last daily score. */
+    activeMemberCount: integer("active_member_count").notNull().default(0),
     clanRank: integer("clan_rank"),
     scoredOn: date("scored_on", { mode: "string" }),
     raidWins: integer("raid_wins").notNull().default(0),
