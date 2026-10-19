@@ -50,20 +50,30 @@ $DC up -d --no-deps api2
 until curl -fsS http://localhost:3012/api/readyz; do sleep 2; done
 $DC up -d --no-deps worker                   # finishes its current user, releases the rest of its batch
 
-SMOKE_BASE_URL=http://localhost:8080 pnpm --filter @workspace/scripts smoke
+SMOKE_BASE_URL=http://localhost:8080 SMOKE_EMAIL_DOMAIN=<a domain you own> pnpm --filter @workspace/scripts smoke
 ```
+
+`SMOKE_EMAIL_DOMAIN` (default `example.com`) is the domain of the smoke's throwaway account. Registration mails a
+verification code to that address, so against a production API with a real mail provider set it to a domain you own
+or a mailbox sink (a catch-all or test inbox). Mail to `example.com` and other non-existent mailboxes bounces, and
+bounces count against the sending domain's reputation with the provider and with receiving mail servers, which pushes
+real users' verification and reset mails toward spam. With `MAILER=log` (CI, local) the default is fine.
+
+The direct API ports (3011, 3012) are bound to `127.0.0.1`: the `curl` checks above work on the host only, and nginx
+(8080) is the only port reachable from outside.
 
 Keep the previous tag (`docker image ls system-self-api`) for a rollback. Write down each deployed tag, for example in
 the release notes or the git tag.
 
 Render: push to the deployed branch, or Dashboard > `system-self-api` > Manual Deploy. The `preDeployCommand` runs the
-migrator, and the deploy stops if it fails. Deploy `system-self-worker` after the API is live. Then run the smoke with
-`SMOKE_BASE_URL=$API`.
+migrator (`docker-entrypoint.sh migrate`), and the deploy stops if it fails. Deploy `system-self-worker` after the API is
+live; it runs the same pre-deploy migrator (idempotent and advisory-locked), so a worker deployed first never runs on an
+old schema. Then run the smoke with `SMOKE_BASE_URL=$API SMOKE_EMAIL_DOMAIN=<a domain you own>`.
 
 After any deploy, watch the following for 15 minutes:
 - the 5xx rate: `http_request_duration_seconds_count{status=~"5.."}`
 - `ai_fallbacks_total`
-- the worker log's `Worker tick` lines
+- the worker log's `Worker tick` lines, and `worker_last_tick_timestamp_seconds` advancing
 
 ## Rollback
 
@@ -201,8 +211,9 @@ select pid, now() - xact_start as age, state, left(query, 120) from pg_stat_acti
 where xact_start < now() - interval '2 minutes' order by xact_start;
 ```
 
-1. Check the worker is alive. Its log prints `Worker tick` every `WORKER_TICK_MS`, and `$DC ps worker` shows it. Look for
-   repeated `Rollover failed` errors with a `userId`.
+1. Check the worker is alive. Its log prints `Worker tick` every `WORKER_TICK_MS`, and `$DC ps worker` shows it
+   (`unhealthy` there means no tick completed for 5 minutes: the healthcheck reads the mtime of its heartbeat file,
+   `/tmp/worker-heartbeat`). Look for repeated `Rollover failed` errors with a `userId`.
 2. A crashed or killed worker needs no cleanup. The users it had claimed become due again when their 10-minute lease
    runs out, and the next tick picks them up.
 3. A hung worker (alive, no ticks): restart it with `$DC restart worker`, or restart the Render service. SIGTERM lets it
@@ -213,6 +224,28 @@ where xact_start < now() - interval '2 minutes' order by xact_start;
    `update user_day_state set next_rollover_at = now() where user_id = '<id>';`
 6. A user who fails every tick (the same `Rollover failed` `userId` again and again) is a bug: capture the error and
    the user id for a fix. Other users are not blocked.
+
+Alert on a stale tick before users notice. With the worker scraped (`WORKER_METRICS_PORT`, [DEPLOYMENT.md](DEPLOYMENT.md#7-metrics)),
+`worker_last_tick_timestamp_seconds` is the Unix time of the last completed tick; a tick that throws (for example the
+database is unreachable) does not advance it. Example Prometheus rules:
+
+```yaml
+groups:
+  - name: system-self-worker
+    rules:
+      - alert: WorkerTickStale
+        # No completed tick for 5 minutes (WORKER_TICK_MS is 60 s). With several workers, max() means "all stalled".
+        expr: time() - max(worker_last_tick_timestamp_seconds{job="system-self-worker"}) > 300
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "Worker has not completed a tick for over 5 minutes"
+          runbook: "docs/RUNBOOK.md#stuck-worker-or-lease"
+      - alert: WorkerMetricsMissing
+        expr: absent(worker_last_tick_timestamp_seconds{job="system-self-worker"})
+        for: 10m
+        labels: { severity: page }
+```
 
 ## Push outage
 

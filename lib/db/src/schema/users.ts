@@ -42,6 +42,8 @@ export const refreshTokens = pgTable(
     index("refresh_tokens_user_id_idx").on(t.userId),
     index("refresh_tokens_family_id_idx").on(t.familyId),
     index("refresh_tokens_expires_at_idx").on(t.expiresAt),
+    // Retention prune (worker): rows revoked long ago.
+    index("refresh_tokens_revoked_at_idx").on(t.revokedAt),
   ],
 );
 

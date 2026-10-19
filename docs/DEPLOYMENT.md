@@ -25,7 +25,7 @@ Recommended:
 - `METRICS_TOKEN=<random>` turns on `/metrics` (see [Metrics](#7-metrics)). Placeholder-looking values are refused.
 - `REVENUECAT_WEBHOOK_SECRET` and `REVENUECAT_API_KEY` (see [Billing](#6-billing-revenuecat)). Placeholder-looking webhook secrets are refused.
 - `EXPO_ACCESS_TOKEN` only when Enhanced Push Security is on for the Expo project.
-- JSON and urlencoded bodies are limited to 100 KB (413 `payload_too_large`); the voice upload route keeps its own 5 MB raw limit.
+- JSON bodies are limited to 100 KB (the API is JSON-only; form-encoded bodies are not parsed) (413 `payload_too_large`); the voice upload route keeps its own 5 MB raw limit.
 
 Optional tuning (defaults shown):
 - `ACCESS_TOKEN_TTL_SEC=900`
@@ -39,6 +39,7 @@ Optional tuning (defaults shown):
 - `RATE_LIMIT_MAX=60`
 - `WORKER_TICK_MS=60000`, `SOCIAL_JOB_BUDGET_MS=2000`, `PUSH_JOB_BUDGET_MS=15000`, `PUSH_SEND_BUDGET_MS=15000` (worker)
 - `WORKER_METRICS_PORT` (unset): the worker's own `/metrics` listener, which also needs `METRICS_TOKEN`.
+- `WORKER_HEARTBEAT_FILE` (unset): a file the worker rewrites after every completed tick, for a container healthcheck on its mtime (`docker-compose.prod.yml` sets `/tmp/worker-heartbeat`).
 - `SHUTDOWN_DRAIN_MS` (5000 in production, else 0): how long `/api/readyz` answers 503 before the listener closes on SIGTERM.
 - `RATE_LIMIT_DISABLED` / `LOAD_TEST`: load-test targets only (see [PERFORMANCE.md](PERFORMANCE.md)). The API refuses to boot outside development/test with `RATE_LIMIT_DISABLED=1` unless `LOAD_TEST=1` is also set. Never set either in a deployment.
 - `LOG_LEVEL=info` (defaults to `silent` when `NODE_ENV=test`)
@@ -78,12 +79,16 @@ docker build -f artifacts/api-server/Dockerfile -t system-self-api:<tag> .
 - Size: **212 MB** in `docker images` on Docker Desktop (that figure counts unpacked plus compressed content; the root
   filesystem is about 150 MB). The budget is 250 MB, and CI's `docker-smoke` job fails the build above it
   (`docker image inspect` Size). Details: [PERFORMANCE.md](PERFORMANCE.md).
-- SIGTERM: the API flips `/api/readyz` to 503, drains for `SHUTDOWN_DRAIN_MS`, then finishes in-flight requests. The
-  worker finishes the user it is rolling over and releases the rest of its claimed batch. Give containers a 30 s stop
-  grace period (`stop_grace_period` in compose).
+- SIGTERM: the API flips `/api/readyz` to 503, drains for `SHUTDOWN_DRAIN_MS` (5 s), then gives in-flight requests
+  20 s before cutting them (a process backstop exits at 5 + 23 s). Give API containers a 30 s stop grace period
+  (`stop_grace_period` in compose, `maxShutdownDelaySeconds` on Render). The worker finishes the user it is rolling
+  over, releases the rest of its claimed batch and skips the tick's housekeeping (prunes, gym sweep); its backstop
+  exits at 60 s, so give it 75 s (both files do).
+- Entrypoint (`scripts/docker-entrypoint.sh`): the role is the first argument (`api`, `worker`, `migrate`) or else
+  `ROLE` (default `api`); any other arguments run as an explicit command (`docker run IMAGE sh`).
 
 ### Migrations run first
-`ROLE=migrate` is a one-shot job. Run it, and wait for exit 0, before starting new API and worker containers. It holds
+`ROLE=migrate` (or `docker-entrypoint.sh migrate`) is a one-shot job. Run it, and wait for exit 0, before starting new API and worker containers. It holds
 a Postgres session advisory lock (`pg_advisory_lock(7265390417)`) while drizzle applies the pending migrations, so two
 migrators started at once run one after the other and the second finds nothing to do. That makes it safe to run from
 several places (a pre-deploy hook and a compose `migrate` service, or two deploys racing). Migrations are written to
@@ -108,7 +113,8 @@ docker compose -f docker-compose.prod.yml logs -f api1 api2 worker
 
 Compose variables: `ENV_FILE` (default `.env.prod`), `POSTGRES_PASSWORD` (default is a placeholder; change it) and
 `API_IMAGE` (default `system-self-api:prod`). Postgres is not published to the host. `api1` and `api2` are also on
-3011 and 3012 for debugging. `bash scripts/docker-smoke.sh` runs the whole stack with generated secrets, smoke-tests
+3011 and 3012 for debugging, bound to `127.0.0.1` (the host only); nginx on 8080 is the only public port. The worker
+has a healthcheck on its heartbeat file (unhealthy after 5 minutes without a completed tick). `bash scripts/docker-smoke.sh` runs the whole stack with generated secrets, smoke-tests
 it and tears it down. CI runs the same script on every push.
 
 The compose file is a reference topology for a single host, not a managed platform: put TLS in front of nginx (or
@@ -117,9 +123,12 @@ replace nginx with your load balancer) and use a managed Postgres with backups f
 ## 3. Render (`render.yaml`)
 
 A Blueprint for the HOLD H-02 decision: a Docker web service (`system-self-api`, health check `/api/readyz`, a
-`preDeployCommand` that runs the migrator), a Docker background worker (`system-self-worker`), and a managed Postgres
+`preDeployCommand: docker-entrypoint.sh migrate` that runs the migrator), a Docker background worker
+(`system-self-worker`, same pre-deploy migrator), and a managed Postgres
 16 (`system-self-db`). `NODE_ENV` comes from the `system-self-shared` env group, `DATABASE_URL` from the database, and
-every secret is `sync: false`, so Render prompts for it on the first sync. Dashboard: New > Blueprint, pick the repo.
+every secret is `sync: false`, so Render prompts for it on the first sync. `MAIL_FROM` is not prompted: it defaults to
+`SYSTEM // SELF <no-reply@systemself.app>` (a blank value also means the default); set it in the dashboard to send
+from another verified address. Dashboard: New > Blueprint, pick the repo.
 
 **Not validated with the Render CLI.** The file was written against the Blueprint spec but never run through Render's
 validator. Before first use:
@@ -128,7 +137,7 @@ validator. Before first use:
 render blueprints validate render.yaml
 ```
 
-Then fill the prompted secrets (`JWT_SECRET`, `CORS_ORIGIN`, `RESEND_API_KEY`, `MAIL_FROM`, `REVENUECAT_*`,
+Then fill the prompted secrets (`JWT_SECRET`, `CORS_ORIGIN`, `RESEND_API_KEY`, `REVENUECAT_*`,
 `GEMINI_API_KEY`, `EXPO_ACCESS_TOKEN`) on both services; the worker needs the same values. Add `METRICS_TOKEN` by hand if
 you want `/metrics`. `TRUST_PROXY=1` is preset for Render's proxy.
 
@@ -142,6 +151,22 @@ you want `/metrics`. `TRUST_PROXY=1` is preset for Render's proxy.
   `max_connections` (100 on stock Postgres; small managed plans allow fewer). The load test hit its targets on one API
   instance with the default pool ([PERFORMANCE.md](PERFORMANCE.md)). Put PgBouncer (transaction mode) in front before
   you need more than the database allows.
+- **Rate-limit keys.** Mobile carriers put many subscribers behind one carrier-grade NAT (CGNAT) address, and offices
+  and campuses share one egress IP, so a pure per-IP limit lets one heavy user, or one attacker, throttle everyone on
+  that address. The limiters therefore key on the most specific identity they can verify:
+  - **Global limiter** (`RATE_LIMIT_MAX` per `RATE_LIMIT_WINDOW_MS`, default 60 per minute): per user when the request
+    carries a valid access token (the same HS256 verification `requireAuth` does, no database read), per client IP
+    otherwise. A missing, expired or forged token falls back to the IP, so unauthenticated traffic stays bounded per IP
+    and inventing tokens buys no extra budget.
+  - **Auth surfaces** (`/api/auth/login`, `/register`, `/password/*`, `/email/*`; each surface has its own buckets, so
+    failed logins do not block registration): 10 per 15 minutes per client IP + normalised email (trimmed, lower-case;
+    on the signed-in `/email/*` and `/password/change` routes, per IP + user). That stops one account being brute-forced
+    without locking out the other people behind the same IP. A looser ceiling of 100 per 15 minutes per client IP stops
+    one IP spraying many emails (credential stuffing) while leaving room for a busy CGNAT. These routes are not counted
+    by the global limiter.
+  - Unchanged: `/api/healthz` and `/api/readyz` are never limited; the RevenueCat webhook has its own per-IP bucket
+    (600 per minute); the data export has its own per-user limit.
+  - The client IP is only right with `TRUST_PROXY` set to the real number of proxy hops ([Reverse proxies](#reverse-proxies-trust_proxy)).
 - **Rate limits are per instance.** The global, auth, billing-webhook and export limiters use express-rate-limit's
   in-memory store, so with N replicas a client can make up to N times the configured limit (more if the balancer
   spreads its requests). Before running more than one replica, either move the limiters to a shared store
@@ -186,6 +211,9 @@ automatically.
   `Authorization: Bearer <METRICS_TOKEN>` (401 otherwise). Unset: `/metrics` is 404.
 - The worker is a separate process with its own registry. With `WORKER_METRICS_PORT` and `METRICS_TOKEN` both set it
   serves `/metrics` on that port (same bearer token). Do not publish that port publicly.
+- Worker only: `worker_last_tick_timestamp_seconds`, the Unix time of the last completed tick (alert when stale:
+  [RUNBOOK.md](RUNBOOK.md#stuck-worker-or-lease)). The compose stack also healthchecks the worker through its heartbeat
+  file (`WORKER_HEARTBEAT_FILE`), which needs no metrics port.
 - Series: `http_request_duration_seconds{method,route,status}` (route is the pattern, such as `/api/quests/:id/complete`,
   never a raw id), `ai_calls_total{model,outcome}`, `ai_fallbacks_total`, `job_duration_seconds{job}` (worker),
   `rollover_users_total` (worker), plus the default Node process metrics.

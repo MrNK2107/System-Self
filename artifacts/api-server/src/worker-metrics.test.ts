@@ -33,3 +33,17 @@ test("a listen error (port in use) is logged and does not crash the worker; clos
   await closeWorkerMetricsServer(first);
   assert.equal(first.listening, false);
 });
+
+test("the worker listener exposes worker_last_tick_timestamp_seconds; the API registry does not", async () => {
+  const { recordWorkerTick, registry } = await import("./lib/metrics");
+  recordWorkerTick(1_790_000_000_000);
+  const server = startWorkerMetricsServer(0, "worker-token");
+  await new Promise((r) => server.once("listening", r));
+  try {
+    const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/metrics`, { headers: { Authorization: "Bearer worker-token" } });
+    assert.match(await res.text(), /^worker_last_tick_timestamp_seconds 1790000000$/m);
+    assert.doesNotMatch(await registry.metrics(), /worker_last_tick_timestamp_seconds/);
+  } finally {
+    await closeWorkerMetricsServer(server);
+  }
+});

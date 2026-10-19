@@ -19,7 +19,8 @@ export const pushTokens = pgTable(
     createdAt: ts("created_at").defaultNow().notNull(),
     lastSeenAt: ts("last_seen_at").defaultNow().notNull(),
   },
-  (t) => [index("push_tokens_user_idx").on(t.userId)],
+  // last_seen_at: the orphaned-token prune (worker) scans tokens not seen for 30 days.
+  (t) => [index("push_tokens_user_idx").on(t.userId), index("push_tokens_last_seen_idx").on(t.lastSeenAt)],
 );
 
 /** Missing row = everything on. `morning` / `nightly` are on-device reminders (they reserve cap slots); `events` the server pushes. */

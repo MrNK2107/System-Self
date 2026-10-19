@@ -1,8 +1,8 @@
-import express, { type Express, type RequestHandler } from "express";
+import express, { type Express, type Request, type RequestHandler } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { db as defaultDb, type Db } from "@workspace/db";
 import { createRouter } from "./routes";
 import { logger as defaultLogger } from "./lib/logger";
@@ -16,11 +16,22 @@ import { createMailer, type Mailer } from "./lib/mailer";
 import { createRevenueCatClient, type RevenueCatClient } from "./services/entitlements";
 import { errorHandler, notFoundHandler } from "./middlewares/errors";
 import type { TimezoneCheck } from "./services/timezone";
+import { verifyAccessToken } from "./lib/auth/tokens";
 
 const HEALTH_PATHS = new Set(["/api/healthz", "/api/readyz"]);
 /** The RevenueCat webhook is authenticated by its secret and arrives from RevenueCat's few IPs in bursts. */
 export const BILLING_WEBHOOK_PATH = "/api/billing/revenuecat";
 export const BILLING_WEBHOOK_RATE_LIMIT_MAX = 600;
+/** Auth surfaces (login, register, password, email codes): per IP + normalised email (or user), per 15 minutes. */
+export const AUTH_IDENTITY_RATE_LIMIT_MAX = 10;
+/** Looser per-IP ceiling on each auth surface: bounds one IP spraying many emails, yet leaves room for a CGNAT. */
+export const AUTH_IP_RATE_LIMIT_MAX = 100;
+const AUTH_WINDOW_MS = 15 * 60_000;
+const AUTH_PREFIXES = ["login", "register", "password", "email"] as const;
+const isAuthLimited = (p: string) => {
+  const lower = p.toLowerCase();
+  return AUTH_PREFIXES.some((prefix) => lower === `/api/auth/${prefix}` || lower.startsWith(`/api/auth/${prefix}/`));
+};
 /** JSON body limit (the API is JSON-only). The voice upload route reads its own raw body (5 MB) and is skipped here. */
 export const JSON_BODY_LIMIT = "100kb";
 const VOICE_UPLOAD_PATH = "/api/logs/voice";
@@ -47,6 +58,30 @@ const isVoiceUpload = (p: string) => {
 };
 const skipVoice = (parser: RequestHandler): RequestHandler => (req, res, next) =>
   isVoiceUpload(req.path) ? next() : parser(req, res, next);
+
+function readBearer(req: Request): string | null {
+  const header = req.headers.authorization;
+  if (!header) return null;
+  const [scheme, token] = header.split(" ");
+  return scheme?.toLowerCase() === "bearer" && token ? token.trim() : null;
+}
+
+/**
+ * The verified access-token subject, or null when the token is absent, forged or expired (the same check
+ * requireAuth runs; an HS256 verify, no database). Memoised per request because several limiters ask.
+ */
+const subjects = new WeakMap<Request, Promise<string | null>>();
+function tokenSubject(req: Request): Promise<string | null> {
+  let s = subjects.get(req);
+  if (!s) {
+    const token = readBearer(req);
+    s = token ? verifyAccessToken(token).then((c) => c?.userId ?? null) : Promise.resolve(null);
+    subjects.set(req, s);
+  }
+  return s;
+}
+
+const ipKey = (req: Request) => ipKeyGenerator(req.ip ?? "unknown");
 
 export function createApp(
   deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number; revenuecat?: RevenueCatClient | null; metricsToken?: string | null; logger?: Logger; corsOrigins?: "*" | string[]; timezoneKnown?: TimezoneCheck; rateLimitDisabled?: boolean } = {},
@@ -100,13 +135,20 @@ export function createApp(
       origin: corsOrigins,
     }),
   );
+  // Global limiter: per user for a verified access token (many users can share one carrier-grade NAT IP), per IP
+  // otherwise. A missing, forged or expired token falls back to the IP, so unauthenticated abuse stays bounded per IP.
+  // The auth surfaces have their own limiters below.
   app.use(
     limiter({
       windowMs: env.RATE_LIMIT_WINDOW_MS,
       max: env.RATE_LIMIT_MAX,
       standardHeaders: true,
       legacyHeaders: false,
-      skip: (req) => HEALTH_PATHS.has(req.path) || req.path === BILLING_WEBHOOK_PATH,
+      keyGenerator: async (req) => {
+        const sub = await tokenSubject(req);
+        return sub ? `user:${sub}` : `ip:${ipKey(req)}`;
+      },
+      skip: (req) => HEALTH_PATHS.has(req.path) || req.path === BILLING_WEBHOOK_PATH || isAuthLimited(req.path),
     }),
   );
   // Its own generous bucket: RevenueCat retries and bursts (e.g. renewals at the top of the hour) from shared IPs.
@@ -119,20 +161,39 @@ export function createApp(
       legacyHeaders: false,
     }),
   );
-  // One limiter per auth surface so abuse of one (e.g. failed logins) does not lock out the others.
-  for (const prefix of ["login", "register", "password", "email"]) {
+  // Parsed before the auth limiters, which key on the body's email.
+  app.use(skipVoice(express.json({ limit: JSON_BODY_LIMIT })));
+  // Two limiters per auth surface (one set per surface, so abuse of one, e.g. failed logins, does not lock out the
+  // others): AUTH_IDENTITY_RATE_LIMIT_MAX per IP + normalised email (or, on the signed-in email/password routes, per
+  // IP + user), so one account is not brute-forced and one user behind a shared IP does not lock out the rest; and a
+  // looser AUTH_IP_RATE_LIMIT_MAX per IP, so one IP cannot spray many emails.
+  const authLimited = { error: "Too many attempts, try again later", code: "rate_limited" };
+  for (const prefix of AUTH_PREFIXES) {
     app.use(
       `/api/auth/${prefix}`,
       limiter({
-        windowMs: 15 * 60_000,
-        max: 10,
+        windowMs: AUTH_WINDOW_MS,
+        max: AUTH_IP_RATE_LIMIT_MAX,
         standardHeaders: true,
         legacyHeaders: false,
-        message: { error: "Too many attempts, try again later", code: "rate_limited" },
+        keyGenerator: (req) => `ip:${ipKey(req)}`,
+        message: authLimited,
+      }),
+      limiter({
+        windowMs: AUTH_WINDOW_MS,
+        max: AUTH_IDENTITY_RATE_LIMIT_MAX,
+        standardHeaders: true,
+        legacyHeaders: false,
+        keyGenerator: async (req) => {
+          const raw = (req.body as { email?: unknown } | undefined)?.email;
+          const email = typeof raw === "string" ? raw.trim().toLowerCase().slice(0, 254) : "";
+          const who = email ? `email:${email}` : `user:${(await tokenSubject(req)) ?? "-"}`;
+          return `ip:${ipKey(req)}|${who}`;
+        },
+        message: authLimited,
       }),
     );
   }
-  app.use(skipVoice(express.json({ limit: JSON_BODY_LIMIT })));
 
   app.use("/api", createRouter({ db, mailer, ai: deps.ai, now: deps.now, revenuecatSecret: deps.revenuecatSecret, revenuecat, timezoneKnown: deps.timezoneKnown }));
   app.use(notFoundHandler);

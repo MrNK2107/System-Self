@@ -4,10 +4,13 @@ import { logger } from "./lib/logger";
 import { env } from "./lib/env";
 import { createShutdown } from "./lib/shutdown";
 
-/** In-flight requests get this long before their sockets are destroyed. */
-const HARD_TIMEOUT_MS = 25_000;
-/** Process-level backstop, longer than the hard timeout plus the drain delay, in case closing hangs. */
-const EXIT_BUDGET_MS = 30_000;
+/**
+ * In-flight requests get this long before their sockets are destroyed. With the 5 s production drain this is 25 s,
+ * inside the 30 s stop grace period (docker-compose.prod.yml stop_grace_period, render.yaml maxShutdownDelaySeconds).
+ */
+const HARD_TIMEOUT_MS = 20_000;
+/** Process-level backstop (plus the drain delay), after the hard timeout and before the platform's SIGKILL at 30 s. */
+const EXIT_BUDGET_MS = 23_000;
 
 const server = app.listen(env.PORT, (err) => {
   if (err) {

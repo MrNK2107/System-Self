@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS "refresh_tokens_revoked_at_idx" ON "refresh_tokens" USING btree ("revoked_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "push_tokens_last_seen_idx" ON "push_tokens" USING btree ("last_seen_at");

@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
-import { createApp } from "./app-factory";
+import { AUTH_IDENTITY_RATE_LIMIT_MAX, AUTH_IP_RATE_LIMIT_MAX, createApp } from "./app-factory";
+import { signAccessToken } from "./lib/auth/tokens";
 import { env } from "./lib/env";
 import type { Mailer } from "./lib/mailer";
 
@@ -108,4 +109,66 @@ test("the voice upload path skips the global JSON parser with or without a trail
     const res = await request(a).post(p).set("Content-Type", "application/json").send(jsonOfSize(101 * 1024));
     assert.notEqual(res.status, 413, p);
   }
+});
+
+// --- P8 final review I-6: per-user global limiter, IP+email auth limiter, per-IP auth ceiling ---
+
+const bearer = async (id: string) =>
+  `Bearer ${(await signAccessToken({ id, role: "user", tokenVersion: 0 })).token}`;
+
+test("global limiter is per user: two users behind one IP (CGNAT) do not share a budget", async () => {
+  const a = createApp({ db: null, mailer, trustProxy: 1 });
+  const alice = await bearer("00000000-0000-4000-8000-00000000000a");
+  const bob = await bearer("00000000-0000-4000-8000-00000000000b");
+  const ip = "198.51.100.7";
+  for (let i = 0; i < env.RATE_LIMIT_MAX; i++) {
+    assert.equal((await request(a).get("/api/nope").set("X-Forwarded-For", ip).set("Authorization", alice)).status, 404, `alice ${i + 1}`);
+  }
+  assert.equal((await request(a).get("/api/nope").set("X-Forwarded-For", ip).set("Authorization", alice)).status, 429, "alice is over");
+  assert.equal((await request(a).get("/api/nope").set("X-Forwarded-For", ip).set("Authorization", bob)).status, 404, "bob has his own budget");
+  // Unauthenticated traffic from that IP has its own (IP) budget too, untouched by alice.
+  assert.equal((await request(a).get("/api/nope").set("X-Forwarded-For", ip)).status, 404, "anonymous on the IP bucket");
+});
+
+test("global limiter: an invalid or forged bearer token falls back to the IP bucket (no free budget per garbage token)", async () => {
+  const a = createApp({ db: null, mailer, trustProxy: 1 });
+  const ip = "198.51.100.8";
+  for (let i = 0; i < env.RATE_LIMIT_MAX; i++) {
+    const res = await request(a).get("/api/nope").set("X-Forwarded-For", ip).set("Authorization", `Bearer forged.${i}.token`);
+    assert.equal(res.status, 404, `forged ${i + 1}`);
+  }
+  assert.equal((await request(a).get("/api/nope").set("X-Forwarded-For", ip).set("Authorization", "Bearer another.forged.token")).status, 429);
+  assert.equal((await request(a).get("/api/nope").set("X-Forwarded-For", ip)).status, 429, "same IP bucket as the forged tokens");
+});
+
+test("auth limiter keys on IP + normalised email: the same email is limited at 10, another email on that IP is not", async () => {
+  const a = createApp({ db: null, mailer, trustProxy: 1 });
+  const ip = "198.51.100.9";
+  for (let i = 0; i < 10; i++) {
+    // Case and whitespace variants are the same account.
+    const email = i % 2 ? "  Victim@Example.com " : "victim@example.com";
+    const res = await request(a).post("/api/auth/login").set("X-Forwarded-For", ip).send({ email, password: "nope" });
+    assert.equal(res.status, 503, `attempt ${i + 1}`);
+  }
+  const limited = await request(a).post("/api/auth/login").set("X-Forwarded-For", ip).send({ email: "VICTIM@example.com", password: "nope" });
+  assert.equal(limited.status, 429);
+  assert.equal(limited.body.code, "rate_limited");
+  const other = await request(a).post("/api/auth/login").set("X-Forwarded-For", ip).send({ email: "someone@example.com", password: "nope" });
+  assert.equal(other.status, 503, "a second user behind the same IP can still sign in");
+});
+
+test("auth limiter: one IP spraying many emails hits the per-IP ceiling", async () => {
+  assert.equal(AUTH_IDENTITY_RATE_LIMIT_MAX, 10);
+  assert.equal(AUTH_IP_RATE_LIMIT_MAX, 100);
+  const a = createApp({ db: null, mailer, trustProxy: 1 });
+  const ip = "198.51.100.10";
+  for (let i = 0; i < AUTH_IP_RATE_LIMIT_MAX; i++) {
+    const res = await request(a).post("/api/auth/password/forgot").set("X-Forwarded-For", ip).send({ email: `spray${i}@example.com` });
+    assert.equal(res.status, 503, `email ${i + 1}`);
+  }
+  const limited = await request(a).post("/api/auth/password/forgot").set("X-Forwarded-For", ip).send({ email: "fresh@example.com" });
+  assert.equal(limited.status, 429);
+  assert.equal(limited.body.code, "rate_limited");
+  const otherIp = await request(a).post("/api/auth/password/forgot").set("X-Forwarded-For", "198.51.100.11").send({ email: "fresh@example.com" });
+  assert.equal(otherIp.status, 503);
 });

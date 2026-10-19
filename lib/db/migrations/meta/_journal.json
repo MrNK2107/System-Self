@@ -288,6 +288,13 @@
       "when": 1792428958877,
       "tag": "0040_perf_hot_path_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792436380065,
+      "tag": "0041_retention_prune_indexes",
+      "breakpoints": true
     }
   ]
 }

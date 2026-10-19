@@ -59,3 +59,9 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 **Why I can't:** I can't operate a phone, and the browser automation tools failed to connect in this session.
 **Doing instead:** every screen is verified by typecheck, a full Android bundle export (`expo export`), unit tests, and node smoke scripts that drive the same API calls the screens make against a real local server. Run it yourself with: `docker compose up -d postgres`, migrate, `pnpm --filter @workspace/api-server dev` (and `dev:worker`), then, with `EXPO_PUBLIC_API_URL=http://<LAN IP>:3001`, `pnpm exec expo start --lan` in `artifacts/system-self` and scan the QR code. Step by step: [README.md](../README.md#dev-quick-start).
 **Resolution:**
+
+## H-11 🟩 Crash/error reporting (Sentry or similar)
+**Need:** an error-reporting account (Sentry, Bugsnag, Rollbar…) and its DSN for the API, the worker and the app.
+**Why I can't:** it needs an account in your name, and the DSN is a per-project credential.
+**Doing instead:** structured error logs plus metrics. The API and worker log every unhandled error as JSON through pino (request id, route, `err` with stack; secrets redacted), the 5xx rate is on `/metrics` (`http_request_duration_seconds_count{status=~"5.."}`), and a stalled worker shows up as a stale `worker_last_tick_timestamp_seconds` and an unhealthy container ([docs/RUNBOOK.md](RUNBOOK.md#stuck-worker-or-lease)). App crashes are only visible in the store consoles (App Store Connect, Play Console vitals) until a reporter is wired in.
+**Resolution:**

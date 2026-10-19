@@ -6,8 +6,14 @@ import { logger } from "./lib/logger";
 import { runLoop } from "./jobs/run-loop";
 import { closeWorkerMetricsServer, startWorkerMetricsServer } from "./worker-metrics";
 import type http from "node:http";
+import { writeFile } from "node:fs/promises";
 
-const WORKER_EXIT_BUDGET_MS = 60_000;
+/**
+ * Backstop after SIGTERM if a tick hangs: longer than one tick's worst case (batch + job budgets + HTTP timeouts).
+ * Keep it under the platform's stop grace period (docker-compose.prod.yml worker stop_grace_period: 75s; render.yaml
+ * maxShutdownDelaySeconds: 75), so the worker exits on its own terms before SIGKILL.
+ */
+export const WORKER_EXIT_BUDGET_MS = 60_000;
 
 /** Flushes buffered log lines (pino may write asynchronously) before exiting. */
 function flushAndExit(code: number): void {
@@ -24,7 +30,6 @@ async function main(): Promise<number> {
     process.once(signal, () => {
       logger.info({ signal }, "Worker stopping after the current user");
       controller.abort();
-      // Backstop if a tick hangs: longer than one tick's worst case (batch + job budgets + HTTP timeouts).
       setTimeout(() => {
         logger.error("Worker shutdown exceeded its budget, forcing exit");
         process.exit(1);
@@ -41,7 +46,10 @@ async function main(): Promise<number> {
     }
   }
   logger.info({ tickMs: env.WORKER_TICK_MS }, "Worker started");
-  await runLoop(db, { tickMs: env.WORKER_TICK_MS, signal: controller.signal });
+  const heartbeat = env.WORKER_HEARTBEAT_FILE;
+  // The container healthcheck checks this file's mtime (docker-compose.prod.yml), no metrics port needed.
+  const onTick = heartbeat ? () => writeFile(heartbeat, `${new Date().toISOString()}\n`) : undefined;
+  await runLoop(db, { tickMs: env.WORKER_TICK_MS, signal: controller.signal, onTick });
   if (metricsServer) await closeWorkerMetricsServer(metricsServer);
   await pool?.end();
   logger.info("Worker stopped");

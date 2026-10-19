@@ -1,5 +1,6 @@
 # Render Blueprint for SYSTEM // SELF (HOLD H-02 ready option). Dashboard: New > Blueprint.
-# Secrets are `sync: false`: Render prompts for them on first sync.
+# Secrets are `sync: false`: Render prompts for them on first sync. MAIL_FROM is not prompted: it defaults to
+# "SYSTEM // SELF <no-reply@systemself.app>" (env.ts); add it in the dashboard to send from another address.
 databases:
   - name: system-self-db
     plan: basic-256mb
@@ -23,8 +24,10 @@ services:
     plan: starter
     numInstances: 1
     healthCheckPath: /api/readyz
-    # Runs the bundled migrator (advisory-locked) before each deploy goes live.
-    preDeployCommand: sh -c "ROLE=migrate docker-entrypoint.sh"
+    # Runs the bundled migrator (advisory-locked) before each deploy goes live. The entrypoint takes the role as $1.
+    preDeployCommand: docker-entrypoint.sh migrate
+    # SIGTERM to SIGKILL: 5 s readyz drain + 20 s in-flight cut-off (index.ts) fit inside.
+    maxShutdownDelaySeconds: 30
     envVars:
       - fromGroup: system-self-shared
       - key: DATABASE_URL
@@ -36,8 +39,6 @@ services:
       - key: CORS_ORIGIN
         sync: false
       - key: RESEND_API_KEY
-        sync: false
-      - key: MAIL_FROM
         sync: false
       - key: REVENUECAT_WEBHOOK_SECRET
         sync: false
@@ -58,6 +59,10 @@ services:
     dockerfilePath: ./artifacts/api-server/Dockerfile
     dockerContext: .
     plan: starter
+    # The worker may deploy before the API: it needs the new schema too (the migrator is idempotent and locked).
+    preDeployCommand: docker-entrypoint.sh migrate
+    # The current tick finishes, then the worker exits; worker.ts forces an exit at 60 s.
+    maxShutdownDelaySeconds: 75
     envVars:
       - fromGroup: system-self-shared
       - key: DATABASE_URL
@@ -69,8 +74,6 @@ services:
       - key: CORS_ORIGIN
         sync: false
       - key: RESEND_API_KEY
-        sync: false
-      - key: MAIL_FROM
         sync: false
       - key: REVENUECAT_WEBHOOK_SECRET
         sync: false

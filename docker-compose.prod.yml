@@ -1,8 +1,9 @@
 # Production-like stack: postgres, one-shot migrate, two API instances behind nginx, one worker.
 #   docker compose -f docker-compose.prod.yml up -d --build
-# API through nginx: http://localhost:8080 ; direct: api1 on 3011, api2 on 3012.
+# API through nginx: http://localhost:8080 ; direct (debugging from the host only, bound to 127.0.0.1): api1 on 3011,
+# api2 on 3012. Only nginx is reachable from outside the host.
 # Setup:  cp .env.prod.example .env.prod   then edit it (every REPLACE value; the API refuses to start
-# in production while JWT_SECRET / REVENUECAT_WEBHOOK_SECRET still look like placeholders).
+# in production while JWT_SECRET / REVENUECAT_WEBHOOK_SECRET / the DATABASE_URL password still look like placeholders).
 # Keep POSTGRES_PASSWORD below in sync with DATABASE_URL in .env.prod.
 # Overrides (shell env or a .env file next to this one): ENV_FILE (default .env.prod), POSTGRES_PASSWORD,
 # API_IMAGE (default system-self-api:prod). CI uses all three (see .github/workflows/ci.yml, job docker-smoke).
@@ -12,6 +13,7 @@ x-app: &app
   image: ${API_IMAGE:-system-self-api:prod}
   env_file: ${ENV_FILE:-.env.prod}
   restart: unless-stopped
+  # API: 5 s readyz drain + 20 s in-flight cut-off (index.ts HARD_TIMEOUT_MS) fit inside it; the worker overrides it.
   stop_grace_period: 30s
 
 services:
@@ -19,7 +21,8 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: system_self
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-example-db-password} # CHANGE ME (and in DATABASE_URL)
+      # CHANGE ME (and in DATABASE_URL). The default is a placeholder the API refuses to start with in production.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-REPLACE-example-db-password}
       POSTGRES_DB: system_self
     volumes:
       - prod-pgdata:/var/lib/postgresql/data
@@ -47,7 +50,7 @@ services:
     environment:
       ROLE: api
     ports:
-      - "3011:3001"
+      - "127.0.0.1:3011:3001"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -60,12 +63,23 @@ services:
   api2:
     <<: *api
     ports:
-      - "3012:3001"
+      - "127.0.0.1:3012:3001"
 
   worker:
     <<: *app
     environment:
       ROLE: worker
+      # Rewritten after every completed tick; the healthcheck below needs no metrics port.
+      WORKER_HEARTBEAT_FILE: /tmp/worker-heartbeat
+    # A tick finishes its current user then stops; worker.ts forces an exit at 60 s (WORKER_EXIT_BUDGET_MS).
+    stop_grace_period: 75s
+    healthcheck:
+      # Unhealthy when no tick completed for 5 minutes (stuck loop, or the database unreachable).
+      test: ["CMD-SHELL", "find /tmp/worker-heartbeat -mmin -5 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       migrate:
         condition: service_completed_successfully

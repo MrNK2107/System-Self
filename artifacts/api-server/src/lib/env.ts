@@ -56,7 +56,11 @@ const envSchema = z.object({
   LOAD_TEST: flag("LOAD_TEST"),
   MAILER: z.enum(["log", "resend"]).optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
-  MAIL_FROM: z.string().min(1).default("SYSTEM // SELF <no-reply@systemself.app>"),
+  // A blank value (an empty dashboard field, `MAIL_FROM=` in an env file) means unset: the default sender applies.
+  MAIL_FROM: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().trim().min(1).default("SYSTEM // SELF <no-reply@systemself.app>"),
+  ),
   DATABASE_URL: z.string().min(1).optional(),
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters").optional(),
   /**
@@ -73,6 +77,8 @@ const envSchema = z.object({
   METRICS_TOKEN: z.string().min(1).optional(),
   /** Port of the worker's own /metrics listener (needs METRICS_TOKEN). Unset: no listener. */
   WORKER_METRICS_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+  /** Worker only: a file rewritten after every completed tick, for a container healthcheck on its mtime. Unset: none. */
+  WORKER_HEARTBEAT_FILE: z.string().trim().min(1).optional(),
   /** Pause between readyz flipping to 503 and closing the listener. Default 5000 in production, else 0. */
   SHUTDOWN_DRAIN_MS: z.coerce.number().int().min(0).optional(),
   /** Bearer secret of POST /api/billing/revenuecat. Unset: the webhook answers 503 and accepts nothing. */
@@ -128,6 +134,8 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
         }
         if (!v.DATABASE_URL) {
           ctx.addIssue({ code: "custom", path: ["DATABASE_URL"], message: "DATABASE_URL is required in production" });
+        } else if (PLACEHOLDER.test(databasePassword(v.DATABASE_URL))) {
+          ctx.addIssue({ code: "custom", path: ["DATABASE_URL"], message: "DATABASE_URL password is a placeholder value" });
         }
         const origins = splitOrigins(v.CORS_ORIGIN);
         if (origins.length === 0) {
@@ -150,6 +158,15 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     })
     .transform((v): Env => ({ ...v, JWT_SECRET: v.JWT_SECRET ?? DEV_JWT_SECRET }))
     .parse(source);
+}
+
+/** The password part of a connection URL ("" when there is none or the URL does not parse). */
+function databasePassword(url: string): string {
+  try {
+    return decodeURIComponent(new URL(url).password);
+  } catch {
+    return "";
+  }
 }
 
 function splitOrigins(value: string | undefined): string[] {

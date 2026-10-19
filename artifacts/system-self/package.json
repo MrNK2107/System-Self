@@ -64,6 +64,7 @@
     "@workspace/contracts": "workspace:*",
     "@workspace/engine": "workspace:*",
     "expo-audio": "~1.1.1",
+    "expo-dev-client": "~6.0.21",
     "expo-device": "~8.0.10",
     "expo-file-system": "~19.0.24",
     "expo-notifications": "~0.32.17",

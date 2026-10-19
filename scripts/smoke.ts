@@ -8,11 +8,19 @@
 // Usage: SMOKE_BASE_URL=http://localhost:8080 pnpm --filter @workspace/scripts smoke
 //   SMOKE_BASE_URL  the API origin, without /api (default http://localhost:3001)
 //   SMOKE_TIMEOUT_MS per-request timeout (default 15000)
+//   SMOKE_EMAIL_DOMAIN domain of the throwaway account's email (default example.com). Registration mails a
+//                    verification code to it: against a production API with real mail, use a domain you own or a
+//                    mailbox sink, never example.com (bounces hurt the sending domain's reputation). docs/RUNBOOK.md
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 
 const baseUrl = (process.env.SMOKE_BASE_URL ?? "http://localhost:3001").replace(/\/+$/, "");
 const timeoutMs = Number(process.env.SMOKE_TIMEOUT_MS ?? 15_000);
+const emailDomain = (process.env.SMOKE_EMAIL_DOMAIN ?? "").trim().replace(/^@/, "") || "example.com";
+if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(emailDomain)) {
+  console.error(`SMOKE_EMAIL_DOMAIN "${emailDomain}" is not a domain`);
+  process.exit(1);
+}
 
 type Json = Record<string, unknown>;
 interface Reply {
@@ -86,7 +94,7 @@ interface Quest {
 async function main(): Promise<void> {
   console.log(`smoke against ${baseUrl}`);
   const suffix = `${Date.now().toString(36)}${randomBytes(2).toString("hex")}`;
-  const email = `smoke-${suffix}@example.com`;
+  const email = `smoke-${suffix}@${emailDomain}`;
   const password = `smoke-${randomBytes(12).toString("base64url")}`;
   let userId = "";
   let quests: Quest[] = [];

@@ -1,5 +1,6 @@
 import http from "node:http";
-import { metricsAuthorized, registry } from "./lib/metrics";
+import { Registry } from "prom-client";
+import { metricsAuthorized, registry, workerRegistry } from "./lib/metrics";
 import { logger } from "./lib/logger";
 
 /**
@@ -22,7 +23,8 @@ export function startWorkerMetricsServer(
       return;
     }
     try {
-      res.writeHead(200, { "Content-Type": registry.contentType }).end(await registry.metrics());
+      const merged = Registry.merge([registry, workerRegistry]);
+      res.writeHead(200, { "Content-Type": merged.contentType }).end(await merged.metrics());
     } catch (err) {
       onError(err as Error);
       if (!res.headersSent) res.writeHead(500);

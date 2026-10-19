@@ -1,8 +1,8 @@
 # Open-source licences
 
-SYSTEM // SELF is built with 795 open-source packages. Thank you to their authors.
+SYSTEM // SELF is built with 805 open-source packages. Thank you to their authors.
 
-Licences: MIT (681), ISC (42), BSD-2-Clause (17), BSD-3-Clause (16), Apache-2.0 (13), BlueOak-1.0.0 (9), UNKNOWN (2), Unlicense (2), 0BSD (2), MPL-2.0 (2), (MIT OR CC0-1.0) (2), MIT AND OFL-1.1 (1), Python-2.0 (1), CC-BY-4.0 (1), CC0-1.0 (1), (BSD-3-Clause OR GPL-2.0) (1), Apache 2.0 (1), (BSD-2-Clause OR MIT OR Apache-2.0) (1).
+Licences: MIT (690), ISC (42), BSD-2-Clause (17), BSD-3-Clause (17), Apache-2.0 (13), BlueOak-1.0.0 (9), UNKNOWN (2), Unlicense (2), 0BSD (2), MPL-2.0 (2), (MIT OR CC0-1.0) (2), MIT AND OFL-1.1 (1), Python-2.0 (1), CC-BY-4.0 (1), CC0-1.0 (1), (BSD-3-Clause OR GPL-2.0) (1), Apache 2.0 (1), (BSD-2-Clause OR MIT OR Apache-2.0) (1).
 
 The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped with the source.
 
@@ -238,6 +238,7 @@ The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped 
 - accepts 2.0.0: MIT
 - acorn 8.16.0: MIT
 - agent-base 7.1.4: MIT
+- ajv 8.18.0: MIT
 - anser 1.4.10: MIT
 - ansi-escapes 4.3.2: MIT
 - ansi-regex 4.1.1: MIT
@@ -383,6 +384,10 @@ The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped 
 - expo-audio 1.1.1: MIT
 - expo-blur 15.0.8: MIT
 - expo-constants 18.0.13: MIT
+- expo-dev-client 6.0.21: MIT
+- expo-dev-launcher 6.0.21: MIT
+- expo-dev-menu 7.0.19: MIT
+- expo-dev-menu-interface 2.0.0: MIT
 - expo-device 8.0.10: MIT
 - expo-file-system 19.0.22: MIT
 - expo-file-system 19.0.24: MIT
@@ -390,9 +395,11 @@ The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped 
 - expo-glass-effect 0.1.10: MIT
 - expo-haptics 15.0.8: MIT
 - expo-image 3.0.11: MIT
+- expo-json-utils 0.15.0: MIT
 - expo-keep-awake 15.0.8: MIT
 - expo-linear-gradient 15.0.8: MIT
 - expo-linking 8.0.12: MIT
+- expo-manifests 1.0.11: MIT
 - expo-modules-autolinking 3.0.25: MIT
 - expo-modules-core 3.0.30: MIT
 - expo-notifications 0.32.17: MIT
@@ -404,10 +411,12 @@ The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped 
 - expo-status-bar 3.0.9: MIT
 - expo-symbols 1.0.8: MIT
 - expo-system-ui 6.0.9: MIT
+- expo-updates-interface 2.0.0: MIT
 - expo-web-browser 15.0.11: MIT
 - exponential-backoff 3.1.3: Apache-2.0
 - fast-deep-equal 3.1.3: MIT
 - fast-json-stable-stringify 2.1.0: MIT
+- fast-uri 3.1.0: BSD-3-Clause
 - fb-watchman 2.0.2: Apache-2.0
 - fbjs 3.0.5: MIT
 - fbjs-css-vars 1.0.2: MIT
@@ -499,6 +508,7 @@ The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped 
 - jsc-safe-url 0.2.4: 0BSD
 - jsesc 3.1.0: MIT
 - json-buffer 3.0.1: MIT
+- json-schema-traverse 1.0.0: MIT
 - json5 2.2.3: MIT
 - keyv 4.5.4: MIT
 - kleur 3.0.3: MIT

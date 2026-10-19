@@ -16,7 +16,7 @@ You must be **16 or older**. We ask for your birth year when you sign up and do 
 
 **Account**
 - Email address, password (stored only as a one-way hash), username, birth year, timezone, the time you accepted the terms.
-- Sign-in sessions (hashed refresh tokens, device user agent) and one-time email codes (hashed). These are deleted when they expire or when you sign out.
+- Sign-in sessions (hashed refresh tokens, device user agent) and one-time email codes (hashed). They stop working when they expire or when you sign out, and are then deleted on the schedule in section 7.
 
 **Profile and onboarding**
 - Your goal, weakness, identity setting, morning and nightly times, starting self-ratings, codenames, rank, and currency and savings target.
@@ -75,6 +75,8 @@ Google processes this data under its own terms for API customers. Do not say any
 - Your account data is kept until you delete your account.
 - **Analytics events: 90 days**, then deleted automatically.
 - **Push notification log: 30 days**, then deleted automatically. Push tokens of devices with no active session for 30 days are removed.
+- **Sign-in sessions: 30 days after they end.** A session record is deleted automatically 30 days after it expired or was ended (sign-out, password change or a newer sign-in on that device replacing it). We keep it that long to detect a stolen session being replayed.
+- **One-time email codes: 1 day after they expire.** Codes are valid for 15 minutes; used and expired codes are deleted automatically one day after expiry.
 - **Billing events: 180 days.** After you delete your account, remaining billing events are anonymised immediately (their content is wiped and they are no longer linked to you) and deleted after 180 days.
 - **Account deletion is immediate and cascading**: your profile, logs, quests, finance, gym, social and every other table keyed to you are deleted at once. Other players' notices that named you then show FORMER OPERATOR. Reports other players filed about you are kept for safety review: the report is no longer linked to your account, but it keeps the username you had when you were reported.
 - **Server request logs**: kept for the log retention period of our hosting provider: [PLACEHOLDER, to be filled in once the hosting provider is chosen (HOLD H-02)].

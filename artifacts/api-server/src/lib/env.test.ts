@@ -154,3 +154,19 @@ test("production boot without CORS_ORIGIN exits 1 with a clear message", () => {
   assert.match(r.stderr, /CORS_ORIGIN: CORS_ORIGIN is required in production/);
   assert.doesNotMatch(r.stderr, /at parseEnv|ZodError/);
 });
+
+test("production refuses a placeholder password in DATABASE_URL; real passwords and dev/test pass", () => {
+  for (const pw of ["example-db-password", "REPLACE-me", "change-me", "ChangeMe123"]) {
+    assert.throws(() => parseEnv({ ...PROD_BASE, DATABASE_URL: `postgres://system_self:${pw}@db:5432/system_self` }), /DATABASE_URL.*placeholder|placeholder/, pw);
+  }
+  // Only the password counts: a host or database name containing "example" is fine.
+  assert.doesNotThrow(() => parseEnv({ ...PROD_BASE, DATABASE_URL: "postgres://u:9f2c4e1ab7@db.example.internal:5432/example_db" }));
+  assert.doesNotThrow(() => parseEnv({ ...PROD_BASE, DATABASE_URL: "postgres://u@db:5432/x" }), "no password (e.g. peer/IAM auth)");
+  assert.doesNotThrow(() => parseEnv({ NODE_ENV: "test", DATABASE_URL: "postgres://u:example@db/x" }));
+});
+
+test("an empty MAIL_FROM (e.g. a blank dashboard field) is treated as unset and gets the default", () => {
+  assert.equal(parseEnv({ ...PROD_BASE, MAIL_FROM: "" }).MAIL_FROM, "SYSTEM // SELF <no-reply@systemself.app>");
+  assert.equal(parseEnv({ ...PROD_BASE, MAIL_FROM: "  " }).MAIL_FROM, "SYSTEM // SELF <no-reply@systemself.app>");
+  assert.equal(parseEnv({ ...PROD_BASE, MAIL_FROM: "Ops <ops@x.io>" }).MAIL_FROM, "Ops <ops@x.io>");
+});

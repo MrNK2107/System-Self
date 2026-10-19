@@ -4,7 +4,8 @@
 #   2. boots docker-compose.prod.yml (postgres, migrate, api1 + api2 behind nginx, worker) with freshly generated
 #      secrets in .env.smoke (gitignored), no Gemini key (template mode) and MAILER=log;
 #   3. waits for /api/readyz through nginx, checks /metrics, runs scripts/smoke.ts against nginx;
-#   4. checks the worker is still up; prints container logs on any failure; tears the stack down (down -v).
+#   4. checks the worker is still up and healthy (heartbeat healthcheck), the API ports are bound to 127.0.0.1 and the
+#      entrypoint runs explicit commands; prints container logs on any failure; tears the stack down (down -v).
 # It needs docker (with compose v2), curl, node and an installed workspace (pnpm install).
 # Env: SMOKE_PROJECT (compose project, default system-self-smoke), API_IMAGE (default system-self-api:smoke),
 #      SKIP_BUILD=1 (reuse an existing image), KEEP_STACK=1 (leave the stack up afterwards).
@@ -112,7 +113,29 @@ worker_id=$(compose ps -q worker)
 state=$(docker inspect -f '{{.State.Status}} restarts={{.RestartCount}}' "$worker_id")
 echo "worker: $state"
 case "$state" in "running restarts=0") ;; *) echo "worker is not healthy"; exit 1 ;; esac
-compose exec -T worker node -e "fetch('http://127.0.0.1:9464/metrics',{headers:{authorization:'Bearer '+process.env.METRICS_TOKEN}}).then(async r=>{const t=await r.text();if(!r.ok||!t.includes('job_duration_seconds'))process.exit(1);console.log('worker metrics: ok')},()=>process.exit(1))"
+compose exec -T worker node -e "fetch('http://127.0.0.1:9464/metrics',{headers:{authorization:'Bearer '+process.env.METRICS_TOKEN}}).then(async r=>{const t=await r.text();if(!r.ok||!t.includes('job_duration_seconds')||!t.includes('worker_last_tick_timestamp_seconds'))process.exit(1);console.log('worker metrics: ok')},()=>process.exit(1))"
+
+stage="worker healthcheck"
+# The compose healthcheck reads the heartbeat file's mtime; its first check runs within 30 s of start.
+health=""
+for _ in $(seq 1 30); do
+  health=$(docker inspect -f '{{.State.Health.Status}}' "$worker_id")
+  [ "$health" = "healthy" ] && break
+  sleep 2
+done
+echo "worker health: $health"
+[ "$health" = "healthy" ] || { echo "worker healthcheck is not healthy"; exit 1; }
+
+stage="loopback-only API ports"
+for port in 3011 3012; do
+  bound=$(compose port "api${port#301}" 3001)
+  case "$bound" in 127.0.0.1:*) echo "api${port#301} published on $bound" ;; *) echo "api port bound to '$bound', expected 127.0.0.1"; exit 1 ;; esac
+done
+
+stage="entrypoint runs explicit commands"
+out=$(docker run --rm "$API_IMAGE" sh -c 'echo entrypoint-ok')
+[ "$out" = "entrypoint-ok" ] || { echo "explicit command through the entrypoint printed '$out'"; exit 1; }
+echo "entrypoint: explicit command ok"
 
 stage="done"
 echo "DOCKER SMOKE PASSED"

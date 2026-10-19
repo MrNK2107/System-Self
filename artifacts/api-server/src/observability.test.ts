@@ -118,3 +118,20 @@ test("AI outcome and fallback counters increment with a fake model", async () =>
     (env as { GEMINI_API_KEY?: string }).GEMINI_API_KEY = prevKey;
   }
 });
+
+test("log redaction covers auth headers at any depth, api keys, tokens and axios-style err.config.headers", async () => {
+  const { LOG_REDACT } = await import("./lib/logger");
+  const lines: string[] = [];
+  const sink = new Writable({ write(chunk, _enc, cb) { lines.push(String(chunk)); cb(); } });
+  const log = pino({ redact: LOG_REDACT }, sink);
+  log.info({
+    req: { headers: { authorization: "Bearer sekret-1", cookie: "sid=sekret-2" } },
+    upstream: { headers: { authorization: "Bearer sekret-3", Authorization: "Bearer sekret-4", "set-cookie": "sekret-5" } },
+    client: { apiKey: "sekret-6", token: "sekret-7", accessToken: "sekret-8", refreshToken: "sekret-9" },
+    err: { message: "boom", config: { headers: { Authorization: "Bearer sekret-10" } } },
+    res: { headers: { "set-cookie": "sekret-11" } },
+  }, "redaction");
+  const out = lines.join("");
+  assert.doesNotMatch(out, /sekret/);
+  assert.match(out, /"message":"boom"/);
+});

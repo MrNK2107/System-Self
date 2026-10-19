@@ -16,11 +16,15 @@ Blocked on HOLD H-03 (store accounts and final app identity). Everything below i
 
 ## One-time setup
 
-1. `cd artifacts/system-self && pnpm exec eas login`
-2. `pnpm exec eas init` creates the EAS project and prints a project id. Set it as `EAS_PROJECT_ID` (EAS env var for each profile).
+EAS CLI is not a workspace dependency: run it with `npx eas-cli@latest` (always the current CLI, which `eas.json`'s
+`cli.version` floor `>= 12.0.0` accepts). The `development` profile builds a dev client; `expo-dev-client` is installed
+for it (`pnpm exec expo install expo-dev-client`), and Expo Go keeps working for development without it.
+
+1. `cd artifacts/system-self && npx eas-cli@latest login`
+2. `npx eas-cli@latest init` creates the EAS project and prints a project id. Set it as `EAS_PROJECT_ID` (EAS env var for each profile).
 3. Choose the real bundle id / package and set `APP_ID` the same way. It cannot change after the first store upload.
-4. Android push (FCM): create a Firebase project, add an Android app with the package name, download `google-services.json`, and upload it as an EAS file env var named `GOOGLE_SERVICES_JSON` (`eas env:create --type file`). Upload the FCM service account key under `eas credentials` for Android.
-5. iOS push (APNs): `pnpm exec eas credentials` and let EAS create the APNs key.
+4. Android push (FCM): create a Firebase project, add an Android app with the package name, download `google-services.json`, and upload it as an EAS file env var named `GOOGLE_SERVICES_JSON` (`npx eas-cli@latest env:create --type file`). Upload the FCM service account key under `npx eas-cli@latest credentials` for Android.
+5. iOS push (APNs): `npx eas-cli@latest credentials` and let EAS create the APNs key.
 6. RevenueCat: create the iOS and Android apps, copy the public SDK keys into the env vars above.
    - Products: `system_self_pro_monthly` and `system_self_pro_annual`.
    - Entitlement: `pro`, attached to both products.
@@ -31,12 +35,18 @@ Blocked on HOLD H-03 (store accounts and final app identity). Everything below i
 
 ```
 cd artifacts/system-self
-pnpm exec eas build --profile development --platform all   # dev client
-pnpm exec eas build --profile preview --platform android   # internal APK
-pnpm exec eas build --profile production --platform all    # store builds
-pnpm exec eas submit --profile production --platform ios
-pnpm exec eas submit --profile production --platform android
+npx eas-cli@latest build --profile development --platform all   # dev client (expo-dev-client)
+npx eas-cli@latest build --profile preview --platform android   # internal APK
+npx eas-cli@latest build --profile production --platform all    # store builds
+npx eas-cli@latest submit --profile production --platform ios
+npx eas-cli@latest submit --profile production --platform android
 ```
+
+Build numbers: `eas.json` sets `cli.appVersionSource: "remote"`, so EAS keeps the iOS `buildNumber` and Android
+`versionCode` on its servers and `autoIncrement` in the `production` profile bumps them for every store build. The
+values in `app.json` are ignored for builds (they only seed EAS the first time); do not bump them by hand. The
+user-facing `version` (1.0.0) still comes from `app.json`. See or set the remote values with
+`npx eas-cli@latest build:version:get` / `build:version:set`.
 
 ## Store listing checklist
 

@@ -1,6 +1,6 @@
 THIRD-PARTY SOFTWARE NOTICES: SYSTEM // SELF mobile app
 
-This product includes the following 795 third-party packages. Each is listed with its version,
+This product includes the following 805 third-party packages. Each is listed with its version,
 its licence and the licence text it ships with. Generated from the lockfile-resolved dependency graph; do not
 edit by hand.
 
@@ -234,6 +234,7 @@ edit by hand.
   accepts@2.0.0  (MIT)
   acorn@8.16.0  (MIT)
   agent-base@7.1.4  (MIT)
+  ajv@8.18.0  (MIT)
   anser@1.4.10  (MIT)
   ansi-escapes@4.3.2  (MIT)
   ansi-regex@4.1.1  (MIT)
@@ -379,6 +380,10 @@ edit by hand.
   expo-audio@1.1.1  (MIT)
   expo-blur@15.0.8  (MIT)
   expo-constants@18.0.13  (MIT)
+  expo-dev-client@6.0.21  (MIT)
+  expo-dev-launcher@6.0.21  (MIT)
+  expo-dev-menu@7.0.19  (MIT)
+  expo-dev-menu-interface@2.0.0  (MIT)
   expo-device@8.0.10  (MIT)
   expo-file-system@19.0.22  (MIT)
   expo-file-system@19.0.24  (MIT)
@@ -386,9 +391,11 @@ edit by hand.
   expo-glass-effect@0.1.10  (MIT)
   expo-haptics@15.0.8  (MIT)
   expo-image@3.0.11  (MIT)
+  expo-json-utils@0.15.0  (MIT)
   expo-keep-awake@15.0.8  (MIT)
   expo-linear-gradient@15.0.8  (MIT)
   expo-linking@8.0.12  (MIT)
+  expo-manifests@1.0.11  (MIT)
   expo-modules-autolinking@3.0.25  (MIT)
   expo-modules-core@3.0.30  (MIT)
   expo-notifications@0.32.17  (MIT)
@@ -400,10 +407,12 @@ edit by hand.
   expo-status-bar@3.0.9  (MIT)
   expo-symbols@1.0.8  (MIT)
   expo-system-ui@6.0.9  (MIT)
+  expo-updates-interface@2.0.0  (MIT)
   expo-web-browser@15.0.11  (MIT)
   exponential-backoff@3.1.3  (Apache-2.0)
   fast-deep-equal@3.1.3  (MIT)
   fast-json-stable-stringify@2.1.0  (MIT)
+  fast-uri@3.1.0  (BSD-3-Clause)
   fb-watchman@2.0.2  (Apache-2.0)
   fbjs@3.0.5  (MIT)
   fbjs-css-vars@1.0.2  (MIT)
@@ -495,6 +504,7 @@ edit by hand.
   jsc-safe-url@0.2.4  (0BSD)
   jsesc@3.1.0  (MIT)
   json-buffer@3.0.1  (MIT)
+  json-schema-traverse@1.0.0  (MIT)
   json5@2.2.3  (MIT)
   keyv@4.5.4  (MIT)
   kleur@3.0.3  (MIT)
@@ -6555,6 +6565,34 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
+ajv@8.18.0
+License: MIT
+Source: https://ajv.js.org
+
+--- LICENSE ---
+The MIT License (MIT)
+
+Copyright (c) 2015-2021 Evgeny Poberezkin
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+==============================================================================
 anser@1.4.10
 License: MIT
 Source: https://github.com/IonicaBizau/anser#readme
@@ -11295,6 +11333,34 @@ Source: https://docs.expo.dev/versions/latest/sdk/constants/
 (The package ships no licence file; its package.json declares "MIT".)
 
 ==============================================================================
+expo-dev-client@6.0.21
+License: MIT
+Source: https://docs.expo.dev/versions/latest/sdk/dev-client/
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
+expo-dev-launcher@6.0.21
+License: MIT
+Source: https://docs.expo.dev
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
+expo-dev-menu@7.0.19
+License: MIT
+Source: https://docs.expo.dev
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
+expo-dev-menu-interface@2.0.0
+License: MIT
+Source: https://docs.expo.dev
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
 expo-device@8.0.10
 License: MIT
 Source: https://docs.expo.dev/versions/latest/sdk/device/
@@ -11344,6 +11410,13 @@ Source: https://docs.expo.dev/versions/latest/sdk/image/
 (The package ships no licence file; its package.json declares "MIT".)
 
 ==============================================================================
+expo-json-utils@0.15.0
+License: MIT
+Source: https://docs.expo.dev
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
 expo-keep-awake@15.0.8
 License: MIT
 Source: https://docs.expo.dev/versions/latest/sdk/keep-awake/
@@ -11361,6 +11434,13 @@ Source: https://docs.expo.dev/versions/latest/sdk/linear-gradient/
 expo-linking@8.0.12
 License: MIT
 Source: https://docs.expo.dev/versions/latest/sdk/linking
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
+expo-manifests@1.0.11
+License: MIT
+Source: https://docs.expo.dev/versions/latest/sdk/manifests/
 
 (The package ships no licence file; its package.json declares "MIT".)
 
@@ -11438,6 +11518,13 @@ Source: https://docs.expo.dev/versions/latest/sdk/symbols/
 expo-system-ui@6.0.9
 License: MIT
 Source: https://docs.expo.dev/versions/latest/sdk/system-ui
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
+expo-updates-interface@2.0.0
+License: MIT
+Source: https://docs.expo.dev
 
 (The package ships no licence file; its package.json declares "MIT".)
 
@@ -11712,6 +11799,45 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+==============================================================================
+fast-uri@3.1.0
+License: BSD-3-Clause
+Source: https://github.com/fastify/fast-uri
+
+--- LICENSE ---
+Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
+Copyright (c) 2021-present The Fastify team
+All rights reserved.
+
+The Fastify team members are listed at https://github.com/fastify/fastify#team.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * The names of any contributors may not be used to endorse or promote
+      products derived from this software without specific prior written
+      permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS AND CONTRIBUTORS BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+                                  *   *   *
+
+The complete list of contributors can be found at:
+- https://github.com/garycourt/uri-js/graphs/contributors
 
 ==============================================================================
 fb-watchman@2.0.2
@@ -13995,6 +14121,34 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
 ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+==============================================================================
+json-schema-traverse@1.0.0
+License: MIT
+Source: https://github.com/epoberezkin/json-schema-traverse#readme
+
+--- LICENSE ---
+MIT License
+
+Copyright (c) 2017 Evgeny Poberezkin
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ==============================================================================
 json5@2.2.3

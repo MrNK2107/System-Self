@@ -49,6 +49,21 @@ jobs:
       - name: Test DB package
         run: pnpm --filter @workspace/db test
 
+      - name: Test engine
+        run: pnpm --filter @workspace/engine test
+
+      # Fails when lib/db/src/schema has changes no committed migration captures (drizzle-kit compares the schema
+      # with the latest snapshot in lib/db/migrations/meta; no database needed).
+      - name: Check drizzle migrations match the schema
+        run: |
+          pnpm --filter @workspace/db exec drizzle-kit generate --config ./drizzle.config.ts --name ci_drift_check
+          git status --porcelain -- lib/db/migrations
+          git diff --exit-code -- lib/db/migrations
+          test -z "$(git status --porcelain -- lib/db/migrations)" || { echo "::error::schema drift: run pnpm --filter @workspace/db generate and commit the migration"; exit 1; }
+
+      - name: Test docker entrypoint
+        run: sh scripts/docker-entrypoint.test.sh
+
       - name: Typecheck API server
         run: pnpm --filter @workspace/api-server typecheck
 

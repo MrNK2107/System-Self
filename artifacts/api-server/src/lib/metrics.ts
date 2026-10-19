@@ -1,5 +1,5 @@
 import { timingSafeEqual, createHash } from "node:crypto";
-import { Counter, Histogram, Registry, collectDefaultMetrics } from "prom-client";
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
 
 /** One registry per process: the API and the worker each expose their own. */
 export const registry = new Registry();
@@ -41,6 +41,19 @@ export const rolloverUsers = new Counter({
   help: "Users rolled over by the worker",
   registers: [registry],
 });
+
+/** Worker-only metrics: served by the worker's listener (merged with `registry`), never by the API's /metrics. */
+export const workerRegistry = new Registry();
+
+export const workerLastTick = new Gauge({
+  name: "worker_last_tick_timestamp_seconds",
+  help: "Unix time of the worker's last completed tick (alert when it goes stale)",
+  registers: [workerRegistry],
+});
+
+export function recordWorkerTick(nowMs: number = Date.now()): void {
+  workerLastTick.set(Math.floor(nowMs / 1000));
+}
 
 /** Times `fn` into job_duration_seconds{job}, also when it throws. */
 export async function timeJob<T>(job: "rollover" | "social" | "notifications", fn: () => Promise<T>): Promise<T> {

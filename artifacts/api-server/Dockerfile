@@ -52,7 +52,7 @@ RUN find dist -name '*.map' -delete \
     && ls dist/index.mjs.LEGAL.txt dist/worker.mjs.LEGAL.txt >/dev/null \
     && test -s dist/THIRD_PARTY_NOTICES.txt \
     && grep -q '^@node-rs/argon2@' dist/THIRD_PARTY_NOTICES.txt
-COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 FROM scratch AS runtime
 COPY --from=slim / /

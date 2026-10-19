@@ -49,7 +49,7 @@ Middleware stack:
 - `helmet` for baseline security headers.
 - `cors` with configurable origin allowlist.
 - `express-rate-limit` for abuse protection.
-- `express.json` / `express.urlencoded` payload parsing.
+- `express.json` payload parsing (JSON only, 100 KB).
 - Centralized 404 handler and error handler.
 
 ### 4.2 Environment Configuration
