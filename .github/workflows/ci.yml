@@ -55,6 +55,9 @@ jobs:
       - name: Test API server
         run: pnpm --filter @workspace/api-server test
 
+      - name: Test app
+        run: pnpm --filter @workspace/system-self test
+
       - name: Build API server
         run: pnpm --filter @workspace/api-server build
 

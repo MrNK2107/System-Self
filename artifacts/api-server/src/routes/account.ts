@@ -15,6 +15,8 @@ export function accountRoutes(db: Db, now: () => Date = () => new Date()): IRout
     max: EXPORT_RATE_LIMIT_MAX,
     standardHeaders: true,
     legacyHeaders: false,
+    // A failed export (5xx or any error response) does not use up the allowance.
+    skipFailedRequests: true,
     keyGenerator: (req) => `export:${req.user!.id}`,
     message: { error: "Too many export requests, try again later", code: "rate_limited" },
   });

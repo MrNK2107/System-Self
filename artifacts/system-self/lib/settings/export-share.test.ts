@@ -31,12 +31,18 @@ test("falls back to sharing the text when file sharing is unavailable", async ()
   assert.deepEqual(calls, ["shareText:7"]);
 });
 
-test("falls back to text when writing or sharing the file throws", async () => {
+test("falls back to text when writing the file or checking availability fails", async () => {
   const { d, calls } = deps({ writeFile: async () => { throw new Error("no fs"); } });
   assert.equal(await shareExport(payload, d), "text");
   assert.deepEqual(calls, ["shareText:7"]);
-  const second = deps({ shareFile: async () => { throw new Error("no sheet"); } });
+  const second = deps({ canShareFile: async () => { throw new Error("no module"); } });
   assert.equal(await shareExport(payload, second.d), "text");
+});
+
+test("once the file share sheet is opened a failure is reported, never followed by a second text share", async () => {
+  const { d, calls } = deps({ shareFile: async () => { throw new Error("sheet failed"); } });
+  await assert.rejects(shareExport(payload, d), /sheet failed/);
+  assert.ok(!calls.some((c) => c.startsWith("shareText")));
 });
 
 test("a large export is not forced through the text share: the user is told instead", async () => {

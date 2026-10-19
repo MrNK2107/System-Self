@@ -57,6 +57,14 @@ export interface RequestOptions<T> {
   binary?: { body: Blob | ArrayBuffer; contentType: string };
   /** Overrides the 30 s request timeout (an upload followed by an AI call needs longer). */
   timeoutMs?: number;
+  /** Return the response body as untouched text plus its Content-Disposition header, instead of parsed JSON. */
+  raw?: boolean;
+}
+
+/** What a `raw` request resolves to. */
+export interface RawResponse {
+  text: string;
+  contentDisposition: string | null;
 }
 
 export interface ApiClient {
@@ -76,6 +84,8 @@ interface Reply {
   status: number;
   ok: boolean;
   body: unknown;
+  text: string;
+  contentDisposition: string | null;
 }
 
 export function createApiClient(deps: ApiClientDeps): ApiClient {
@@ -123,7 +133,7 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
           body = null;
         }
       }
-      return { status: res.status, ok: res.ok, body };
+      return { status: res.status, ok: res.ok, body, text, contentDisposition: res.headers.get("content-disposition") };
     } catch {
       throw new ApiError({ kind: "network", message: "Network request failed" });
     } finally {
@@ -187,6 +197,7 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     }
 
     if (!res.ok) throw httpError(res.status, res.body);
+    if (opts.raw) return { text: res.text, contentDisposition: res.contentDisposition } as T;
     if (opts.schema) {
       const parsed = opts.schema.safeParse(res.body);
       if (!parsed.success) throw new ApiError({ kind: "parse", message: `Unexpected response from ${path}` });

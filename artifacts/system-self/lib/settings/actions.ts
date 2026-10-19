@@ -1,7 +1,7 @@
 // Network logic behind the settings screens. No React Native imports, so tests and the smoke script reuse it.
 import { z } from "zod";
 import type { LifeContext } from "@workspace/contracts";
-import { ApiError, type ApiClient } from "../api/client";
+import { ApiError, type ApiClient, type RawResponse } from "../api/client";
 import { AuthResponseSchema, PublicUserSchema, type PublicUser, type TokenStore } from "../api/session";
 import { PROFILE_SCHEMA, type Profile, type ScheduleTimes } from "../onboarding/actions";
 import { validateNewPassword } from "../auth/actions";
@@ -73,10 +73,14 @@ export function createSettingsActions(deps: SettingsActionDeps) {
       }
     },
 
-    /** Everything the server stores about the user, as pretty JSON text ready to save or share. 429 after a few calls an hour. */
+    /**
+     * Everything the server stores about the user: the response body as received (no parse and re-stringify) and the
+     * filename the server chose. 429 after a few calls an hour.
+     */
     async exportMyData(now: Date = new Date()): Promise<{ filename: string; text: string }> {
-      const body = await api.request<unknown>("GET", "/api/account/export", { timeoutMs: 60_000 });
-      return { filename: `system-self-export-${now.toISOString().slice(0, 10)}.json`, text: JSON.stringify(body, null, 2) };
+      const res = await api.request<RawResponse>("GET", "/api/account/export", { timeoutMs: 60_000, raw: true });
+      const named = /filename="([A-Za-z0-9._-]+\.json)"/.exec(res.contentDisposition ?? "")?.[1];
+      return { filename: named ?? `system-self-export-${now.toISOString().slice(0, 10)}.json`, text: res.text };
     },
   };
 }

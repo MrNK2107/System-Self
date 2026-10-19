@@ -16,8 +16,9 @@ const user = {
 const session: Session = { user, accessToken: "at", accessTokenExpiresAt: "2030-01-01T00:00:00.000Z", refreshToken: "rt" };
 
 type Call = { method: string; url: string; body: unknown };
+type Reply = { status: number; body?: unknown; headers?: Record<string, string> };
 
-function setup(handler: (call: Call) => { status: number; body?: unknown }) {
+function setup(handler: (call: Call) => Reply) {
   let stored: Session | null = session;
   const tokens: TokenStore = { get: async () => stored, set: async (s) => void (stored = s) };
   const calls: Call[] = [];
@@ -26,7 +27,8 @@ function setup(handler: (call: Call) => { status: number; body?: unknown }) {
     const call: Call = { method: String(init?.method), url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined };
     calls.push(call);
     const r = handler(call);
-    return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status });
+    const raw = r.body === undefined ? null : typeof r.body === "string" ? r.body : JSON.stringify(r.body);
+    return new Response(raw, { status: r.status, headers: r.headers });
   };
   const api = createApiClient({ fetch: fakeFetch, tokens, baseUrl: "http://x", onSessionExpired: () => {} });
   const actions = createSettingsActions({
@@ -158,13 +160,21 @@ test("validatePasswordChange", () => {
   assert.equal(validatePasswordChange("old", "new-password-1"), null);
 });
 
-test("exportMyData fetches the export and returns pretty JSON text with a dated filename", async () => {
-  const t = setup(() => ({ status: 200, body: { meta: { userId: "u1" }, data: { users: [{ id: "u1" }] } } }));
-  const out = await t.actions.exportMyData(new Date("2026-03-04T10:00:00Z"));
+test("exportMyData returns the server body untouched and the server's filename", async () => {
+  const raw = '{"meta":{"userId":"u1"},"data":{"users":[{"id":"u1"}]}}';
+  const t = setup(() => ({ status: 200, body: raw, headers: { "content-disposition": 'attachment; filename="system-self-export-2026-03-04.json"' } }));
+  const out = await t.actions.exportMyData(new Date("2030-01-01T00:00:00Z"));
   assert.equal(t.calls[0]!.method, "GET");
   assert.equal(t.calls[0]!.url, "http://x/api/account/export");
   assert.equal(out.filename, "system-self-export-2026-03-04.json");
-  assert.deepEqual(JSON.parse(out.text), { meta: { userId: "u1" }, data: { users: [{ id: "u1" }] } });
+  assert.equal(out.text, raw);
+});
+
+test("exportMyData falls back to a dated filename when the header is missing or odd", async () => {
+  const t = setup(() => ({ status: 200, body: "{}", headers: { "content-disposition": 'attachment; filename="../../evil name.json"' } }));
+  assert.equal((await t.actions.exportMyData(new Date("2026-03-04T10:00:00Z"))).filename, "system-self-export-2026-03-04.json");
+  const none = setup(() => ({ status: 200, body: "{}" }));
+  assert.equal((await none.actions.exportMyData(new Date("2026-03-04T10:00:00Z"))).filename, "system-self-export-2026-03-04.json");
 });
 
 test("exportMyData surfaces the hourly limit as a plain message", async () => {

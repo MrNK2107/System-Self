@@ -32,3 +32,9 @@ test("export map and exclusion list are consistent", () => {
   }
   assert.ok("users" in EXPORT_TABLES);
 });
+
+test("session and device metadata are exported; only code hashes and the replay cache are excluded", () => {
+  assert.ok("refresh_tokens" in EXPORT_TABLES);
+  assert.ok("push_tokens" in EXPORT_TABLES);
+  assert.deepEqual(Object.keys(EXPORT_EXCLUDED).sort(), ["email_codes", "idempotency_keys"]);
+});

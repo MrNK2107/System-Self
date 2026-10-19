@@ -4,9 +4,9 @@ import { resolve } from "node:path";
 import { test } from "node:test";
 import { LEGAL_DOCS } from "./documents.generated";
 
-const read = (name: string) => readFileSync(resolve(process.cwd(), "../../docs/legal", `${name}.md`), "utf8").replace(/\r\n?/g, "\n");
+const read = (name: string) => readFileSync(resolve(__dirname, "../../../../docs/legal", `${name}.md`), "utf8").replace(/\r\n?/g, "\n");
 
-// Runs from the package directory (pnpm test). The generated module is what ships. If this fails, run `pnpm run gen:legal` and commit the result.
+// The generated module is what ships. If this fails, run `pnpm run gen:legal` and commit the result.
 test("the bundled legal text matches docs/legal/*.md exactly", () => {
   assert.equal(LEGAL_DOCS.privacy, read("privacy"));
   assert.equal(LEGAL_DOCS.terms, read("terms"));
@@ -20,6 +20,9 @@ test("both documents are marked DRAFT at the top and carry the placeholders the 
   assert.match(LEGAL_DOCS.privacy, /30 days/);
   assert.match(LEGAL_DOCS.privacy, /180 days/);
   assert.match(LEGAL_DOCS.privacy, /16/);
+  assert.match(LEGAL_DOCS.privacy, /Resend/);
+  assert.match(LEGAL_DOCS.privacy, /H-02/);
+  assert.match(LEGAL_DOCS.privacy, /IP address/);
   assert.match(LEGAL_DOCS.terms, /16/);
   assert.match(LEGAL_DOCS.terms, /RevenueCat/);
 });

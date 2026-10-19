@@ -35,6 +35,9 @@ You must be **16 or older**. We ask for your birth year when you sign up and do 
 - Push notification tokens for your devices, your notification preferences, a log of notifications sent, and notices shown in the app.
 - Your subscription status and billing events from RevenueCat (event type and time, not card details).
 
+**Server logs**
+- When the app talks to our servers, our hosting provider and servers record technical request logs: your IP address, device user agent, a request id, the request path and the response status. We use them to keep the service secure, to debug problems and to enforce rate limits.
+
 **Usage and AI**
 - Basic product analytics events (for example, app opened).
 - Counts of AI features used per day, and the AI messages and quests generated for you.
@@ -63,7 +66,7 @@ Google processes this data under its own terms for API customers. Do not say any
 ## 6. Who else sees your data
 
 - **Other players** see only what your identity setting allows (a codename, or your username to clanmates or publicly if you choose). They never see your hidden score, your logs, your finance data or who rated them.
-- **Service providers** that process data for us: our hosting and database provider, our email sender, Google (Gemini), RevenueCat (subscriptions) and push delivery services (Expo, Apple, Google).
+- **Service providers** that process data for us: our hosting and database provider, our email sender (**Resend**, which delivers verification and password emails), Google (Gemini), RevenueCat (subscriptions) and push delivery services (Expo, Apple, Google).
 - **Payments** are handled entirely by the **Apple App Store and Google Play**, with entitlement management by **RevenueCat**. We never see your card or payment details.
 - We may disclose data if required by law.
 
@@ -73,7 +76,8 @@ Google processes this data under its own terms for API customers. Do not say any
 - **Analytics events: 90 days**, then deleted automatically.
 - **Push notification log: 30 days**, then deleted automatically. Push tokens of devices with no active session for 30 days are removed.
 - **Billing events: 180 days.** After you delete your account, remaining billing events are anonymised immediately (their content is wiped and they are no longer linked to you) and deleted after 180 days.
-- **Account deletion is immediate and cascading**: your profile, logs, quests, finance, gym, social and every other table keyed to you are deleted at once. Other players' notices that named you then show FORMER OPERATOR. Reports other players filed about you are kept without a link to your account, for safety review.
+- **Account deletion is immediate and cascading**: your profile, logs, quests, finance, gym, social and every other table keyed to you are deleted at once. Other players' notices that named you then show FORMER OPERATOR. Reports other players filed about you are kept for safety review: the report is no longer linked to your account, but it keeps the username you had when you were reported.
+- **Server request logs**: kept for the log retention period of our hosting provider: [PLACEHOLDER, to be filled in once the hosting provider is chosen (HOLD H-02)].
 - Backups of the database may hold deleted data for a short period before rotating out.
 
 ## 8. Your rights

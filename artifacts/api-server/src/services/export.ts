@@ -8,8 +8,8 @@
 //  - Peer ratings received are aggregates only (peer_rating_weeks); rater ids are never exported.
 //  - Built in memory: at current scale a user's data is well under a megabyte. Each table is capped at EXPORT_ROW_CAP rows
 //    and any capped table is listed in meta.truncatedTables. Revisit with streaming if a user can exceed that.
-import { eq, or, sql } from "drizzle-orm";
-import type { PgTable } from "drizzle-orm/pg-core";
+import { desc, eq, or, sql } from "drizzle-orm";
+import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import * as s from "@workspace/db/schema";
 import { users, type Db } from "@workspace/db";
 import { FORMER_OPERATOR_HANDLE } from "@workspace/contracts";
@@ -32,9 +32,7 @@ type Loader = (ctx: ExportContext) => Promise<unknown>;
 
 /** Tables with a user-id foreign key that are NOT exported, each with the reason. */
 export const EXPORT_EXCLUDED: Record<string, string> = {
-  refresh_tokens: "Session credentials (token hashes): a secret, and not personal content.",
   email_codes: "One-time verification and reset code hashes: a secret.",
-  push_tokens: "Device push tokens: device secrets that allow sending to the device.",
   idempotency_keys: "Technical replay cache of recent API responses; duplicates data exported from the real tables.",
 };
 
@@ -44,6 +42,16 @@ const omit = (row: Row, keys: readonly string[]): Row => {
   return out;
 };
 
+const ORDER_CANDIDATES = ["createdAt", "sentAt", "receivedAt", "occurredAt", "startedAt", "assignedAt", "unlockedAt", "achievedAt", "updatedAt", "localDate", "id"];
+
+/** Newest-first ordering for a capped read: the first created/timestamp/date/id column the table has, else its first column. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function newest(table: PgTable): any {
+  const t = table as unknown as Record<string, unknown>;
+  const key = ORDER_CANDIDATES.find((k) => t[k] !== undefined);
+  return desc((key ? t[key] : getTableConfig(table).columns[0]) as never);
+}
+
 /** All of the user's rows from a table keyed by a user column, minus the omitted properties. */
 function owned(table: PgTable, column: unknown, omitted: readonly string[] = []): Loader {
   return async ({ db, me }) => {
@@ -51,12 +59,29 @@ function owned(table: PgTable, column: unknown, omitted: readonly string[] = [])
       .select()
       .from(table as never)
       .where(eq(column as never, me))
+      .orderBy(newest(table))
       .limit(EXPORT_ROW_CAP)) as Row[];
     return omitted.length ? rows.map((r) => omit(r, omitted)) : rows;
   };
 }
 
+/** Only the named columns of the user's rows (the rest, such as hashes, is never read into the export). */
+function picked(table: PgTable, column: unknown, keys: readonly string[]): Loader {
+  return async ({ db, me }) => {
+    const cols = Object.fromEntries(keys.map((k) => [k, (table as unknown as Record<string, unknown>)[k]]));
+    return (await db
+      .select(cols as never)
+      .from(table as never)
+      .where(eq(column as never, me))
+      .orderBy(newest(table))
+      .limit(EXPORT_ROW_CAP)) as Row[];
+  };
+}
+
 export const EXPORT_TABLES: Record<string, Loader> = {
+  // Session and device metadata only: never a token hash or push token.
+  refresh_tokens: picked(s.refreshTokens, s.refreshTokens.userId, ["createdAt", "expiresAt", "revokedAt", "revokedReason", "userAgent"]),
+  push_tokens: picked(s.pushTokens, s.pushTokens.userId, ["platform", "createdAt", "lastSeenAt"]),
   users: owned(users, users.id, ["passwordHash", "tokenVersion"]),
   profiles: owned(s.profiles, s.profiles.userId),
   domain_scores: owned(s.domainScores, s.domainScores.userId),
@@ -98,7 +123,7 @@ export const EXPORT_TABLES: Record<string, Loader> = {
         .from(s.performedSets)
         .innerJoin(s.workoutSessions, eq(s.workoutSessions.id, s.performedSets.sessionId))
         .where(eq(s.workoutSessions.userId, me))
-        .limit(EXPORT_ROW_CAP)
+        .orderBy(newest(s.performedSets)).limit(EXPORT_ROW_CAP)
     ).map((r) => r.set),
   personal_records: owned(s.personalRecords, s.personalRecords.userId),
   body_part_scores: owned(s.bodyPartScores, s.bodyPartScores.userId),
@@ -112,10 +137,10 @@ export const EXPORT_TABLES: Record<string, Loader> = {
   finance_weeks: owned(s.financeWeeks, s.financeWeeks.userId),
   // Peer ratings: the ratings the user gave. Ratings received are exported only as the weekly aggregates below.
   peer_ratings: async (ctx) => {
-    const rows = await ctx.db.select().from(s.peerRatings).where(eq(s.peerRatings.raterId, ctx.me)).limit(EXPORT_ROW_CAP);
+    const rows = await ctx.db.select().from(s.peerRatings).where(eq(s.peerRatings.raterId, ctx.me)).orderBy(newest(s.peerRatings)).limit(EXPORT_ROW_CAP);
     return Promise.all(
       rows.map(async (r) => ({
-        ratee: await ctx.handle(r.rateeId, "clanmate"),
+        ratee: await ctx.handle(r.rateeId, "public"),
         weekKey: r.weekKey,
         rating: r.rating,
         createdAt: r.createdAt,
@@ -125,7 +150,7 @@ export const EXPORT_TABLES: Record<string, Loader> = {
   },
   peer_rating_weeks: owned(s.peerRatingWeeks, s.peerRatingWeeks.userId),
   follows: async (ctx) => {
-    const rows = await ctx.db.select().from(s.follows).where(eq(s.follows.followerId, ctx.me)).limit(EXPORT_ROW_CAP);
+    const rows = await ctx.db.select().from(s.follows).where(eq(s.follows.followerId, ctx.me)).orderBy(newest(s.follows)).limit(EXPORT_ROW_CAP);
     const [followers] = await ctx.db.select({ n: sql<number>`count(*)::int` }).from(s.follows).where(eq(s.follows.followeeId, ctx.me));
     return {
       following: await Promise.all(rows.map(async (r) => ({ handle: await ctx.handle(r.followeeId, "follower"), since: r.createdAt }))),
@@ -133,12 +158,12 @@ export const EXPORT_TABLES: Record<string, Loader> = {
     };
   },
   blocks: async (ctx) => {
-    const rows = await ctx.db.select().from(s.blocks).where(eq(s.blocks.blockerId, ctx.me)).limit(EXPORT_ROW_CAP);
+    const rows = await ctx.db.select().from(s.blocks).where(eq(s.blocks.blockerId, ctx.me)).orderBy(newest(s.blocks)).limit(EXPORT_ROW_CAP);
     return Promise.all(rows.map(async (r) => ({ handle: await ctx.handle(r.blockedId), createdAt: r.createdAt })));
   },
   // Reports the user filed. Reports about the user are moderation records naming the reporter, so they are not exported.
   user_reports: async (ctx) => {
-    const rows = await ctx.db.select().from(s.userReports).where(eq(s.userReports.reporterId, ctx.me)).limit(EXPORT_ROW_CAP);
+    const rows = await ctx.db.select().from(s.userReports).where(eq(s.userReports.reporterId, ctx.me)).orderBy(newest(s.userReports)).limit(EXPORT_ROW_CAP);
     return Promise.all(
       rows.map(async (r) => ({
         subject: r.subjectId ? await ctx.handle(r.subjectId) : (r.subjectHandle ?? FORMER_OPERATOR_HANDLE),
@@ -150,7 +175,7 @@ export const EXPORT_TABLES: Record<string, Loader> = {
   },
   ghost_rivals: owned(s.ghostRivals, s.ghostRivals.ownerId),
   rival_assignments: async (ctx) => {
-    const rows = await ctx.db.select().from(s.rivalAssignments).where(eq(s.rivalAssignments.userId, ctx.me)).limit(EXPORT_ROW_CAP);
+    const rows = await ctx.db.select().from(s.rivalAssignments).where(eq(s.rivalAssignments.userId, ctx.me)).orderBy(newest(s.rivalAssignments)).limit(EXPORT_ROW_CAP);
     return Promise.all(
       rows.map(async (r) => ({
         id: r.id,
@@ -173,7 +198,7 @@ export const EXPORT_TABLES: Record<string, Loader> = {
       .select()
       .from(s.namedChallenges)
       .where(or(eq(s.namedChallenges.challengerId, ctx.me), eq(s.namedChallenges.opponentId, ctx.me)))
-      .limit(EXPORT_ROW_CAP);
+      .orderBy(newest(s.namedChallenges)).limit(EXPORT_ROW_CAP);
     return Promise.all(
       rows.map(async (r) => {
         const mine = r.challengerId === ctx.me;
@@ -201,7 +226,7 @@ export const EXPORT_TABLES: Record<string, Loader> = {
       .select()
       .from(s.duos)
       .where(or(eq(s.duos.userA, ctx.me), eq(s.duos.userB, ctx.me)))
-      .limit(EXPORT_ROW_CAP);
+      .orderBy(newest(s.duos)).limit(EXPORT_ROW_CAP);
     return Promise.all(rows.map(async (r) => ({ id: r.id, partner: await ctx.handle(r.userA === ctx.me ? r.userB : r.userA, "duo"), createdAt: r.createdAt })));
   },
   duo_members: owned(s.duoMembers, s.duoMembers.userId),
@@ -210,7 +235,7 @@ export const EXPORT_TABLES: Record<string, Loader> = {
       .select()
       .from(s.duoInvites)
       .where(or(eq(s.duoInvites.fromId, ctx.me), eq(s.duoInvites.toId, ctx.me)))
-      .limit(EXPORT_ROW_CAP);
+      .orderBy(newest(s.duoInvites)).limit(EXPORT_ROW_CAP);
     return Promise.all(
       rows.map(async (r) => {
         const sent = r.fromId === ctx.me;
@@ -234,7 +259,7 @@ export const EXPORT_TABLES: Record<string, Loader> = {
       .select()
       .from(s.clanDispatches)
       .where(or(eq(s.clanDispatches.actorId, ctx.me), eq(s.clanDispatches.subjectId, ctx.me)))
-      .limit(EXPORT_ROW_CAP);
+      .orderBy(newest(s.clanDispatches)).limit(EXPORT_ROW_CAP);
     return Promise.all(
       rows.map(async (r) => ({
         id: r.id,
@@ -242,8 +267,8 @@ export const EXPORT_TABLES: Record<string, Loader> = {
         kind: r.kind,
         text: r.text,
         templateKey: r.templateKey,
-        actor: r.actorId ? await ctx.handle(r.actorId, "clanmate") : null,
-        subject: r.subjectId ? await ctx.handle(r.subjectId, "clanmate") : null,
+        actor: r.actorId ? await ctx.handle(r.actorId, "public") : null,
+        subject: r.subjectId ? await ctx.handle(r.subjectId, "public") : null,
         createdAt: r.createdAt,
       })),
     );
@@ -314,7 +339,7 @@ export async function buildExport(db: Db, me: string, now: Date): Promise<Export
         const others = await tx
           .select({ id: users.id })
           .from(users)
-          .where(sql`${users.id}::text in (${sql.join(found.map((f) => sql`${f}`), sql`, `)})`);
+          .where(sql`${users.id} = any(${`{${found.join(",")}}`}::uuid[])`);
         for (const o of others) {
           json = json.split(o.id).join("[REDACTED]");
           redacted += 1;

@@ -1,12 +1,13 @@
 import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import * as s from "@workspace/db/schema";
 import { app, auth, db, setup, skip } from "./game-test-helpers";
 import { EXPORT_TABLES } from "../services/export";
 import { EXPORT_RATE_LIMIT_MAX } from "./account";
+import { createApp } from "../app-factory";
 
 after(async () => {
   await closeTestDb();
@@ -117,9 +118,9 @@ async function seedEverything(me: string, b: string, c: string) {
     status: "resolved",
     respondBy: NOW,
     challengerStart: 10,
-    opponentStart: 777,
+    opponentStart: 7771234.5,
     challengerEnd: 20,
-    opponentEnd: 888,
+    opponentEnd: 8881234.5,
     winnerId: b,
     outcome: "opponent_won",
   });
@@ -189,7 +190,7 @@ test("export of a user with every kind of data: own data only, other users as ha
   }
   assert.doesNotMatch(JSON.stringify(doc.data), /password|token_?hash|code_?hash|secret|"hidden"|inviteCode|createdBy|tokenVersion/i);
   assert.ok(!text.includes("31.337"));
-  assert.ok(!text.includes("777") && !text.includes("888"), "the opponent's challenge numbers leaked");
+  assert.ok(!text.includes("7771234") && !text.includes("8881234"), "the opponent's challenge numbers leaked");
 
   // Own side only, other players as handles.
   assert.equal(doc.data.users.length, 1);
@@ -215,17 +216,78 @@ test("export of a user with every kind of data: own data only, other users as ha
   assert.equal(doc.data.user_reports.length, 1);
   assert.equal(doc.data.billing_events[0].type, "INITIAL_PURCHASE");
   assert.equal(doc.data.daily_snapshots[0].hidden, undefined);
+  // Session and device metadata, without any hash or token.
+  assert.ok(doc.data.refresh_tokens.length > 0);
+  assert.deepEqual(Object.keys(doc.data.refresh_tokens[0]).sort(), ["createdAt", "expiresAt", "revokedAt", "revokedReason", "userAgent"]);
+  assert.deepEqual(Object.keys(doc.data.push_tokens[0]).sort(), ["createdAt", "lastSeenAt", "platform"]);
 });
 
-test("a user whose partner was deleted exports FORMER OPERATOR, not an id", { skip }, async () => {
+test("a deleted opponent is exported as FORMER OPERATOR, never an id", { skip }, async () => {
   const a = app({ now: () => NOW });
   const me = await setup(a);
   const b = await setup(a, { email: "bob@example.com", username: "bob_1" });
-  await db!.insert(s.follows).values({ followerId: me.id, followeeId: b.id });
+  await db!.insert(s.namedChallenges).values({ challengerId: me.id, opponentId: b.id, domain: "BODY", days: 7, status: "active", respondBy: NOW });
+  await db!.delete(s.users).where(eq(s.users.id, b.id));
   const res = await request(a).get("/api/account/export").set(auth(me.token));
   assert.equal(res.status, 200);
   assert.ok(!res.text.includes(b.id));
-  assert.equal(JSON.parse(res.text).data.follows.following.length, 1);
+  const doc = JSON.parse(res.text);
+  assert.equal(doc.data.named_challenges.length, 1);
+  assert.equal(doc.data.named_challenges[0].opponent, "FORMER OPERATOR");
+});
+
+test("a former clanmate is shown by public handle, never by username", { skip }, async () => {
+  const a = app({ now: () => NOW });
+  const me = await setup(a);
+  const b = await setup(a, { email: "bob@example.com", username: "bob_1" });
+  const [clan] = await db!.insert(s.clans).values({ name: "Iron", nameLower: "iron", tag: "IRON", inviteCode: "INV12345678" }).returning();
+  await db!.insert(s.clanMembers).values([
+    { userId: me.id, clanId: clan!.id, role: "leader" },
+    { userId: b.id, clanId: clan!.id, role: "member" },
+  ]);
+  await db!.insert(s.peerRatings).values({ raterId: me.id, rateeId: b.id, weekKey: WEEK, rating: 4 });
+  await db!.insert(s.clanDispatches).values({ clanId: clan!.id, kind: "shame", text: "x", actorId: b.id, subjectId: me.id });
+  // B leaves the clan (B is an anonymous user: only the codename is public).
+  await db!.delete(s.clanMembers).where(eq(s.clanMembers.userId, b.id));
+  const [prof] = await db!.select({ c: s.profiles.publicCodename }).from(s.profiles).where(eq(s.profiles.userId, b.id));
+  const res = await request(a).get("/api/account/export").set(auth(me.token));
+  const doc = JSON.parse(res.text);
+  assert.ok(!res.text.includes("bob_1"), "ex-clanmate username leaked");
+  assert.equal(doc.data.peer_ratings[0].ratee, prof!.c);
+  assert.equal(doc.data.clan_dispatches[0].actor, prof!.c);
+});
+
+test("an export with more than 70k distinct ids still works (the id sweep is one array parameter)", { skip }, async () => {
+  const a = app({ now: () => NOW });
+  const me = await setup(a);
+  await db!.execute(sql`insert into logs (user_id, client_id, domain, log_type, occurred_at, local_date, free_text)
+    select ${me.id}::uuid, 'bulk-' || g, 'BODY', 'workout', now(), '2026-03-04', gen_random_uuid()::text from generate_series(1, 70000) g`);
+  await db!.execute(sql`insert into analytics_events (user_id, name) select ${me.id}::uuid, gen_random_uuid()::text from generate_series(1, 30000) g`);
+  const res = await request(a).get("/api/account/export").set(auth(me.token));
+  assert.equal(res.status, 200);
+  const doc = JSON.parse(res.text);
+  assert.equal(doc.data.logs.length, 50000); // capped, and reported as truncated
+  assert.deepEqual(doc.meta.truncatedTables, ["logs"]);
+  assert.equal(doc.data.analytics_events.length, 30000);
+});
+
+test("failed exports do not count against the hourly limit", { skip }, async () => {
+  let failing = false;
+  const flaky = new Proxy(db!, {
+    get(target, prop) {
+      if (prop === "transaction" && failing) return () => Promise.reject(new Error("boom"));
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  });
+  const a = createApp({ db: flaky, mailer: { async send() {} }, now: () => NOW });
+  const me = await setup(a as never);
+  failing = true;
+  for (let i = 0; i < EXPORT_RATE_LIMIT_MAX + 1; i += 1) {
+    assert.equal((await request(a).get("/api/account/export").set(auth(me.token))).status, 500);
+  }
+  failing = false;
+  assert.equal((await request(a).get("/api/account/export").set(auth(me.token))).status, 200);
 });
 
 test("export is rate limited per user", { skip }, async () => {

@@ -21,14 +21,17 @@ export const TEXT_SHARE_LIMIT = 200_000;
 export type ShareOutcome = "file" | "text" | "too-large";
 
 export async function shareExport(payload: ExportPayload, deps: ShareExportDeps): Promise<ShareOutcome> {
+  let uri: string | null = null;
   try {
-    if (await deps.canShareFile()) {
-      const uri = await deps.writeFile(payload.filename, payload.text);
-      await deps.shareFile(uri);
-      return "file";
-    }
+    if (await deps.canShareFile()) uri = await deps.writeFile(payload.filename, payload.text);
   } catch {
-    // Fall through to the text share (a dismissed sheet is not an error on most platforms).
+    // The file route is unavailable (module missing, cache not writable): use the text share instead.
+    uri = null;
+  }
+  if (uri !== null) {
+    // The sheet is open from here on: a failure is the caller's to report, not a reason to share the text as well.
+    await deps.shareFile(uri);
+    return "file";
   }
   if (payload.text.length > TEXT_SHARE_LIMIT) return "too-large";
   await deps.shareText(payload.text);
