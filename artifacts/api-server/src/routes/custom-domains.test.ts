@@ -239,6 +239,24 @@ test("custom logs follow the PRO-aware retroactive window", { skip }, async () =
   assert.equal(old.body.code, "retroactive_limit");
 });
 
+test("a PRO backfill inside a lapsed custom streak scores but repairs nothing", { skip }, async () => {
+  const u = await mk("backfill");
+  await grantEntitlement(db!, u.id, "pro", null, at("2026-03-10T08:00:00Z"));
+  const d = (await create(u, { name: "Words" })).body.domain;
+  assert.equal((await logTo(u, d.id)).status, 201); // 2026-03-10: streak 1, score 52.5
+  clock = at("2026-03-18T08:00:00Z");
+  const back = await logTo(u, d.id, { occurredAt: "2026-03-14T08:00:00Z" });
+  assert.equal(back.status, 201);
+  assert.equal(back.body.streak, 0, "a lapsed streak still reads 0");
+  const [row] = await db!.select().from(customDomains).where(eq(customDomains.id, d.id));
+  assert.ok(row!.score > 52.5, "the delta is applied");
+  assert.equal(row!.streak, 1, "the stored streak is untouched");
+  assert.equal(row!.lastLogDate, "2026-03-10", "lastLogDate does not move");
+  const today = await logTo(u, d.id);
+  assert.equal(today.body.streak, 1, "the next today-log starts at 1");
+  clock = at("2026-03-10T08:00:00Z");
+});
+
 test("custom log rules: validation, 48h retroactive limit, future, archived, ownership", { skip }, async () => {
   const u = await mk();
   const other = await mk("other");

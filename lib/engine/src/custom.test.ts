@@ -40,6 +40,15 @@ test("a gap resets the streak, a retroactive older date scores without moving th
   assert.ok(retro.next.score > 60);
 });
 
+test("with today given, a backdated log into a lapsed streak scores but repairs nothing", () => {
+  const lapsed = { score: 60, streak: 5, lastLogDate: "2026-01-02" };
+  const r = applyCustomLog(lapsed, "2026-01-05", "2026-01-08");
+  assert.ok(r.next.score > 60);
+  assert.equal(r.next.streak, 5);
+  assert.equal(r.next.lastLogDate, "2026-01-02");
+  assert.equal(applyCustomLog(r.next, "2026-01-08", "2026-01-08").next.streak, 1);
+});
+
 test("the custom score is capped at 100", () => {
   assert.equal(applyCustomLog({ score: 99, streak: 20, lastLogDate: "2026-01-01" }, "2026-01-02").next.score, 100);
 });

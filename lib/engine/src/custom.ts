@@ -12,9 +12,14 @@ export const CUSTOM_START_SCORE = 50;
 /** Each custom log, before the domain's own streak multiplier. */
 export const CUSTOM_LOG_DELTA = 2.5;
 
-/** A custom log on local `date`: +2.5 with the custom domain's own streak bonus, through the same applyDelta as the ranked domains. */
-export function applyCustomLog(s: StatState, date: string): { next: StatState; actualDelta: number } {
-  return applyDelta(s, CUSTOM_LOG_DELTA, { bonus: true, activity: true, date });
+/**
+ * A custom log on local `date`: +2.5 with the custom domain's own streak bonus, through the same applyDelta as the ranked
+ * domains. With `today`, a backdated log (date < today) whose streak has already lapsed only scores: it neither repairs
+ * the streak nor moves lastLogDate (lastLogDate also never moves backwards), so PRO's 30-day window cannot buy a streak.
+ */
+export function applyCustomLog(s: StatState, date: string, today?: string): { next: StatState; actualDelta: number } {
+  const lapsedBackfill = today !== undefined && date < today && s.lastLogDate !== null && s.lastLogDate < addDays(today, -1);
+  return applyDelta(s, CUSTOM_LOG_DELTA, { bonus: true, activity: !lapsedBackfill, date });
 }
 
 /** The streak to show on `today`: a streak last continued before yesterday has lapsed (it is stored until the next log resets it). */

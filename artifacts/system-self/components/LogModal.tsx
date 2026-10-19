@@ -17,7 +17,7 @@ import { CustomLogSection } from "@/components/CustomLogSection";
 import { ProLock } from "@/components/ProLock";
 import { useCustomDomainsQuery } from "@/hooks/useCustom";
 import { deviceTimezone, useAuth } from "@/context/AuthContext";
-import { FREE_DAYS_BACK, dayOptions, occurredAtFor } from "@/lib/game/log-date";
+import { FREE_DAYS_BACK, dayOptions } from "@/lib/game/log-date";
 import { FreeFormLog } from "@/components/FreeFormLog";
 import type { LogProposalDto } from "@workspace/contracts";
 import { proposalToFormValues } from "@/lib/freeform/freeform";
@@ -261,6 +261,11 @@ export function LogModal({ visible, onClose }: LogModalProps) {
       setSubmitError(check.message);
       return;
     }
+    if (daysBack > 0 && !days[daysBack]!.offered) {
+      setDaysBack(0);
+      setSubmitError("That day is no longer in range. Pick another day.");
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -273,7 +278,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
         forbidden: isForbidden,
         note,
         data: check.data,
-        ...(daysBack > 0 ? { occurredAt: occurredAtFor(new Date(), daysBack, pro) } : {}),
+        ...(daysBack > 0 ? { occurredAt: days[daysBack]!.occurredAt } : {}),
       });
     } catch {
       setSubmitError("The entry could not be recorded on this device. Sign in again, then retry.");
@@ -534,7 +539,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
           <View style={styles.section}>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DAY</Text>
             <View style={styles.typeRow}>
-              {days.slice(0, FREE_DAYS_BACK + 1).map(d => {
+              {days.slice(0, FREE_DAYS_BACK + 1).filter(d => d.offered).map(d => {
                 const on = daysBack === d.daysBack;
                 const activeColor = isForbidden ? "#9B0000" : config.color;
                 return (
@@ -567,7 +572,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
             {!pro ? <ProLock label="Older days" /> : null}
             {pro && showOlder ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeRow}>
-                {days.slice(FREE_DAYS_BACK + 1).map(d => {
+                {days.slice(FREE_DAYS_BACK + 1).filter(d => d.offered).map(d => {
                   const on = daysBack === d.daysBack;
                   return (
                     <TouchableOpacity

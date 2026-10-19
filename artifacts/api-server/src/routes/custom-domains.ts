@@ -168,7 +168,7 @@ export function customDomainsRoutes(db: Db, clock: () => Date = () => new Date()
         if (domain.archivedAt) return ARCHIVED;
 
         const logDate = localDate(occurredAt, user!.tz);
-        const { next } = applyCustomLog({ score: domain.score, streak: domain.streak, lastLogDate: domain.lastLogDate }, logDate);
+        const { next } = applyCustomLog({ score: domain.score, streak: domain.streak, lastLogDate: domain.lastLogDate }, logDate, today);
         await tx.insert(customLogs).values({
           userId,
           customDomainId: domain.id,
