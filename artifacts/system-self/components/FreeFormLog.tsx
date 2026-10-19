@@ -10,6 +10,7 @@ import type { LogProposalDto } from "@workspace/contracts";
 import { ProLock } from "@/components/ProLock";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { useCustomDomainsQuery } from "@/hooks/useCustom";
 import { api } from "@/lib/api/client";
 import {
   FREEFORM_MAX_CHARS,
@@ -36,6 +37,9 @@ export function FreeFormLog({
 }) {
   const colors = useColors();
   const { addLog } = useApp();
+  // PRO as the server last reported it (the custom stats list carries it); unknown until that loads, and then the server decides.
+  const knownPro = useCustomDomainsQuery().data?.isPro;
+  const confirming = useRef(new Set<LogProposalDto>());
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
@@ -117,6 +121,12 @@ export function FreeFormLog({
 
   const startRecording = async () => {
     if (phase !== "idle") return;
+    // A free user sees the lock without the microphone ever starting.
+    if (knownPro === false || needsPro) {
+      setNeedsPro(true);
+      setMessage(null);
+      return;
+    }
     holding.current = true;
     setMessage(null);
     try {
@@ -129,7 +139,10 @@ export function FreeFormLog({
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
       // Released while the permission prompt or the recorder was starting: do not record.
-      if (!holding.current) return;
+      if (!holding.current) {
+        await setAudioModeAsync({ allowsRecording: false });
+        return;
+      }
       recorder.record();
       recording.current = true;
       startedAt.current = Date.now();
@@ -165,13 +178,18 @@ export function FreeFormLog({
   };
 
   const confirm = async (p: LogProposalDto) => {
+    // A second tap while the first is still queueing would log it twice.
+    if (confirming.current.has(p)) return;
+    confirming.current.add(p);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       await addLog(proposalToLogInput(p, source));
     } catch {
+      confirming.current.delete(p);
       setMessage("The entry could not be recorded on this device. Sign in again, then retry.");
       return;
     }
+    confirming.current.delete(p);
     const rest = settle(p);
     setConfirmed((n) => n + 1);
     if (rest.length === 0) {

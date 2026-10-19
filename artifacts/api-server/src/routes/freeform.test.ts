@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { count, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { analyticsEvents, logs, scoreEvents } from "@workspace/db";
+import { aiUsageDaily, analyticsEvents, logs, scoreEvents, users } from "@workspace/db";
 import { ParseResponseSchema, VoiceResponseSchema } from "@workspace/contracts";
 import { PARSE_LIMIT_PER_DAY, VOICE_LIMIT_PER_DAY } from "@workspace/engine";
 import { env } from "../lib/env";
@@ -32,6 +32,7 @@ async function withKey<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 const rowCount = async (table: typeof logs | typeof scoreEvents) => (await db!.select({ n: count() }).from(table))[0]!.n;
+const usageRows = async () => (await db!.select({ n: count() }).from(aiUsageDaily))[0]!.n;
 const parse = (token: string, text: unknown, ai?: AiDeps) => request(a(ai)).post("/api/logs/parse").set(auth(token)).send({ text });
 const json = (v: unknown) => JSON.stringify(v);
 const fake = (reply: string): { ai: AiDeps; prompts: string[] } => {
@@ -194,6 +195,7 @@ test("voice: 415 for other content types and 413 above 5 MB, both before any AI 
   assert.equal(big.status, 413);
   assert.equal(big.body.code, "audio_too_large");
   assert.equal(seen.length, 0);
+  assert.equal(await usageRows(), 0); // neither refusal spends the day's budget
 });
 
 test("voice: exactly 5 MB is accepted", { skip }, async () => {
@@ -265,6 +267,37 @@ test("voice: a recording the model reports as longer than 120 s is 422; an unkno
   const ok = await withKey(() => voice(token, audio(10), "audio/m4a", unknown.ai));
   assert.equal(ok.status, 200);
   assert.deepEqual(ok.body.proposals.map((p: { logType: string }) => p.logType), ["reading"]); // keyword fallback on the transcript
+});
+
+test("voice: ai_unavailable refunds the call; audio_too_long and success keep it", { skip }, async () => {
+  const { token, id } = await setup(a());
+  await pro(id);
+  const used = async () => (await db!.select().from(aiUsageDaily).where(eq(aiUsageDaily.name, "voice_call")))[0]?.count ?? 0;
+  const boom: AiDeps = {
+    audio: async () => {
+      throw new Error("bad request");
+    },
+  };
+  assert.equal((await withKey(() => voice(token, audio(10), "audio/m4a", boom))).status, 503);
+  assert.equal(await used(), 0);
+  assert.equal((await withKey(() => voice(token, audio(10), "audio/m4a", countingAudio("nonsense").ai))).status, 503);
+  assert.equal(await used(), 0);
+  const long = countingAudio(json({ transcript: "x", durationSeconds: 500, proposals: [] }));
+  assert.equal((await withKey(() => voice(token, audio(10), "audio/m4a", long.ai))).status, 422);
+  assert.equal(await used(), 1);
+  const ok = countingAudio(json({ transcript: "hi", proposals: [] }));
+  assert.equal((await withKey(() => voice(token, audio(10), "audio/m4a", ok.ai))).status, 200);
+  assert.equal(await used(), 2);
+});
+
+test("limits read ai_usage_daily, not analytics: wiping analytics_events does not reset them; deleting the user cascades", { skip }, async () => {
+  const { token, id } = await setup(a());
+  for (let i = 0; i < PARSE_LIMIT_PER_DAY; i++) assert.equal((await parse(token, "read 3 pages")).status, 200);
+  await db!.delete(analyticsEvents);
+  assert.equal((await parse(token, "read 3 pages")).status, 429);
+  assert.equal((await db!.select().from(aiUsageDaily).where(eq(aiUsageDaily.userId, id)))[0]!.count, PARSE_LIMIT_PER_DAY);
+  await db!.delete(users).where(eq(users.id, id));
+  assert.equal(await usageRows(), 0);
 });
 
 test("voice: a model failure or unreadable answer is 503 ai_unavailable", { skip }, async () => {

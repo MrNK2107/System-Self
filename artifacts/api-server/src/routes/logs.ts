@@ -13,7 +13,7 @@ import {
 } from "@workspace/contracts";
 import { aiAvailable, type AiDeps } from "../lib/ai";
 import { parseAudio, parseText } from "../services/ai-parse";
-import { consumeDailyCall } from "../services/daily-limit";
+import { consumeDailyCall, refundDailyCall } from "../services/daily-limit";
 import { requirePro } from "../services/entitlements";
 import { withIdempotency } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
@@ -70,8 +70,9 @@ const voiceTypeGuard: RequestHandler = (req, res, next) => {
 };
 
 /** The raw body as a Buffer, limited to 5 MB: a larger Content-Length is 413 before any of it is read. */
+const rawAudio = express.raw({ type: () => true, limit: VOICE_MAX_BYTES });
 const voiceBody: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
-  express.raw({ type: () => true, limit: VOICE_MAX_BYTES })(req, res, (err?: unknown) => {
+  rawAudio(req, res, (err?: unknown) => {
     if (err && (err as { type?: string }).type === "entity.too.large") {
       res.status(413).json({ error: "Audio is larger than 5 MB", code: "audio_too_large" });
       return;
@@ -106,7 +107,8 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date(), ai: AiD
       res.status(503).json({ error: "Voice logging is unavailable", code: AI_UNAVAILABLE_CODE });
       return;
     }
-    if (!(await consumeDailyCall(db, req.user!.id, "voice_call", VOICE_LIMIT_PER_DAY, clock()))) {
+    const now = clock();
+    if (!(await consumeDailyCall(db, req.user!.id, "voice_call", VOICE_LIMIT_PER_DAY, now))) {
       res.status(429).json({ error: "Voice limit reached for today", code: VOICE_LIMIT_CODE });
       return;
     }
@@ -114,7 +116,11 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date(), ai: AiD
     const out = await parseAudio({ data: body, mimeType: MODEL_MIME[type] ?? type }, ai);
     if (!out.ok) {
       if (out.code === "audio_too_long") res.status(422).json({ error: "Recording is longer than 120 seconds", code: "audio_too_long" });
-      else res.status(503).json({ error: "Voice logging is unavailable", code: AI_UNAVAILABLE_CODE });
+      else {
+        // Our side failed, not the user's: the call does not count against the day (audio_too_long and successes do).
+        await refundDailyCall(db, req.user!.id, "voice_call", now);
+        res.status(503).json({ error: "Voice logging is unavailable", code: AI_UNAVAILABLE_CODE });
+      }
       return;
     }
     res.json({ transcript: out.transcript, proposals: out.proposals });

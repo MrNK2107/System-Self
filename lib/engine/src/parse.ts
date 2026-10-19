@@ -30,6 +30,8 @@ const NUM = String.raw`(\d[\d,]*(?:\.\d+)?)`;
 const HOURS = String.raw`(?:h|hr|hrs|hour|hours)`;
 const MINS = String.raw`(?:min|mins|minute|minutes)`;
 const UNIT = String.raw`(${MINS}|${HOURS})`;
+/** An amount is not followed by a time or count unit ("spent 2 hours studying" is not money) and is not the start of a longer number. */
+const AMOUNT = String.raw`${NUM}(?![,.]?\d)(?!\s*(?:h|hr|hrs|hours?|mins?|minutes?|days?|weeks?|months?|years?|pages?)\b)`;
 
 const toNumber = (s: string) => Number(s.replace(/,/g, ""));
 const toMinutes = (n: number, unit: string) => Math.round(/^h/i.test(unit) ? n * 60 : n);
@@ -74,7 +76,7 @@ const RULES: Rule[] = [
     return { at: m.index, domain: "BODY", logType: "sleep", data: { hours, quality: 3 }, confidence: 0.85 };
   },
   (t) => {
-    const m = new RegExp(String.raw`\b(?:spent|paid)\s+(?:rs\.?\s*|inr\s*|[₹$€£]\s*)?${NUM}(?:\s*(?:rupees|rs|inr|dollars|usd))?(?:\s+(?:on|for)\s+(?:a\s+|an\s+|the\s+|my\s+)?([a-z]+))?`, "i").exec(t);
+    const m = new RegExp(String.raw`\b(?:spent|paid)\s+(?:rs\.?\s*|inr\s*|[₹$€£]\s*)?${AMOUNT}(?:\s*(?:rupees|rs|inr|dollars|usd))?(?:\s+(?:on|for)\s+(?:a\s+|an\s+|the\s+|my\s+)?([a-z]+))?`, "i").exec(t);
     if (!m) return null;
     const amount = toNumber(m[1]!);
     if (!(amount > 0 && amount <= 1e12)) return null;
@@ -109,7 +111,7 @@ const RULES: Rule[] = [
     return { at: m.index, domain: "BODY", logType: "workout", data: { kind: WORKOUT_KINDS[m[1]!.toLowerCase()] ?? "Workout", minutes, intensity: 3 }, confidence: 0.75 };
   },
   (t) => {
-    const m = /\b(?:called|phoned|talked to|spoke (?:to|with)|met with|met|texted|caught up with)\s+(?:my\s+)?[a-z]+/i.exec(t);
+    const m = /\b(?:called|phoned|talked to|spoke (?:to|with)|met (?:up )?with|texted|caught up with)\s+(?:my\s+)?(?!(?:a|an|the|it|off|in|out|about|up)\b)[a-z]+/i.exec(t);
     if (!m) return null;
     return { at: m.index, domain: "SOCIAL", logType: "interaction", data: { kind: "meaningful", note: m[0].slice(0, 200) }, confidence: 0.6 };
   },

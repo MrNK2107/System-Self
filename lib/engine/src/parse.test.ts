@@ -56,6 +56,16 @@ test("several things in one text keep their order, at most 3", () => {
   assert.deepEqual(many.map((x) => x.logType), ["sleep", "reading", "expense"]);
 });
 
+test("expense needs an amount, not a duration; meeting a deadline is not a social contact", () => {
+  assert.deepEqual(parseFreeText("spent 2 hours studying"), []);
+  assert.deepEqual(parseFreeText("spent 12 hours on it"), []);
+  assert.deepEqual(parseFreeText("paid 30 minutes attention"), []);
+  assert.deepEqual(parseFreeText("met a deadline"), []);
+  assert.deepEqual(parseFreeText("called a meeting"), []);
+  assert.equal(parseFreeText("met with Sam").length, 1);
+  assert.equal(parseFreeText("spent 450 on food").length, 1);
+});
+
 test("nothing recognised, or out-of-range numbers, give no proposals", () => {
   assert.deepEqual(parseFreeText("had a weird day"), []);
   assert.deepEqual(parseFreeText(""), []);

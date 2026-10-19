@@ -6,6 +6,7 @@
 import { RankedDomainSchema, parseLogData, type LogProposalDto } from "@workspace/contracts";
 import { LOG_TYPES, PARSE_MAX_PROPOSALS, RANKED_DOMAINS, VOICE_MAX_SECONDS, parseFreeText } from "@workspace/engine";
 import { generateFromAudio, generateOrTemplate, type AiDeps, type AudioInput } from "../lib/ai";
+import { logger } from "../lib/logger";
 import { quoted } from "./ai-context";
 
 /** The structured types a proposal may name: what the log form offers, not the old untyped or session types. */
@@ -133,7 +134,9 @@ export async function parseAudio(audio: AudioInput, ai: AiDeps): Promise<VoiceOu
         ai.audio,
       )
     ).text;
-  } catch {
+  } catch (err) {
+    // The error message only: never the audio or the transcript.
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "voice AI call failed");
     return { ok: false, code: "ai_unavailable" };
   }
   const json = extractJson(reply);
