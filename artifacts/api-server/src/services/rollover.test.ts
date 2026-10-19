@@ -386,7 +386,7 @@ test("POST /logs catches up missed dates first: streak break applied, earlier sn
     .where(and(eq(domainScores.userId, id), eq(domainScores.domain, "BODY")));
   await addLog(id, d0);
 
-  const res = await request(a).post("/api/logs").set(auth(token)).send({ clientId: "late", domain: "BODY", logType: "x" });
+  const res = await request(a).post("/api/logs").set(auth(token)).send({ clientId: "late", domain: "BODY", logType: "generic" });
   t.mock.timers.reset();
   assert.equal(res.status, 201);
   assert.equal(res.body.results[0].streak, 1); // broken on d0+1, restarted today
@@ -561,7 +561,7 @@ test("offline log from 23:50 the day before, synced at 00:05: no streak break, s
   const res = await request(app())
     .post("/api/logs")
     .set(auth(token))
-    .send({ clientId: "offline", domain: "BODY", logType: "x", occurredAt: `${d1}T23:50:00+05:30` });
+    .send({ clientId: "offline", domain: "BODY", logType: "generic", occurredAt: `${d1}T23:50:00+05:30` });
   t.mock.timers.reset();
   assert.equal(res.status, 201);
   assert.equal(res.body.log.localDate, d1);
@@ -579,7 +579,7 @@ test("POST /logs rolls dates before the log's date, applies it, then rolls the r
   const res = await request(app())
     .post("/api/logs")
     .set(auth(token))
-    .send({ clientId: "offline-2", domain: "BODY", logType: "x", occurredAt: `${d1}T23:50:00+05:30` });
+    .send({ clientId: "offline-2", domain: "BODY", logType: "generic", occurredAt: `${d1}T23:50:00+05:30` });
   t.mock.timers.reset();
   assert.equal(res.status, 201);
   assert.equal(res.body.results[0].streak, 3);
@@ -643,7 +643,7 @@ test("a log at 01:00 (inside the grace window) first rolls the missed day: strea
   const disciplineBefore = (await score(id, "DISCIPLINE")).score;
   t.mock.timers.enable({ apis: ["Date"], now: at(d2, "01:00") });
   const { token } = await signAccessToken({ id, role: "user", tokenVersion: 0 });
-  const res = await request(app()).post("/api/logs").set(auth(token)).send({ clientId: "early", domain: "BODY", logType: "x" });
+  const res = await request(app()).post("/api/logs").set(auth(token)).send({ clientId: "early", domain: "BODY", logType: "generic" });
   t.mock.timers.reset();
   assert.equal(res.status, 201);
   assert.equal(res.body.log.localDate, d2);

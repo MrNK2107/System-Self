@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   applyDelta,
   decayPerDomain,
-  logChanges,
   refusalOutcome,
   streakBreaks,
   streakMultiplier,
@@ -62,14 +61,6 @@ test("score clamps at 100 and 0, actualDelta reflects the clamp", () => {
   const lo = applyDelta(st({ score: 0.5 }), -2, { bonus: false, activity: false, date: "2026-10-19" });
   assert.equal(lo.next.score, 0);
   assert.equal(lo.actualDelta, -0.5);
-});
-
-test("logChanges", () => {
-  assert.deepEqual(logChanges("BODY", false), [{ domain: "BODY", delta: 2.5, bonus: true, activity: true }]);
-  assert.deepEqual(logChanges("SOCIAL", true), [
-    { domain: "SOCIAL", delta: 5, bonus: false, activity: true },
-    { domain: "DISCIPLINE", delta: -2, bonus: false, activity: false },
-  ]);
 });
 
 test("streakBreaks penalty caps at 6 and includes DISCIPLINE", () => {

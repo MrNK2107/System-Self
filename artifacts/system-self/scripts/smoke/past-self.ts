@@ -80,7 +80,7 @@ async function main() {
   assert.equal(pastSelfTitle(day1.label), "YOU // DAY 1");
   step("GET /api/progress/past-self reads DAY 1, baseline = onboarding scores", { baselineDate: day1.baselineDate });
 
-  await enqueueLog(outbox, { domain: "BODY", type: "workout", note: "first session" }, newClientId("ps"));
+  await enqueueLog(outbox, { domain: "BODY", type: "workout", note: "first session", data: { kind: "Strength", minutes: 45, intensity: 4 } }, newClientId("ps"));
   assert.deepEqual(await outbox.flush(), { sent: 1, remaining: 0 });
   const now = await fetchPastSelf(api);
   assert.deepEqual(now.baseline, onboarded);

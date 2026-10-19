@@ -43,7 +43,7 @@ async function seed(userId: string, lastActivity: string | null, onboardedDaysAg
     .where(eq(userDayState.userId, userId));
 }
 
-const postLog = (a: ReturnType<typeof app>, token: string, clientId: string, domain = "BODY", logType = "workout") =>
+const postLog = (a: ReturnType<typeof app>, token: string, clientId: string, domain = "BODY", logType = "generic") =>
   request(a).post("/api/logs").set(auth(token)).send({ clientId, domain, logType, occurredAt: NOW.toISOString() });
 
 /** Marks a quest completed today without scoring it (quest routes read the real clock, these tests pin NOW). */
@@ -133,7 +133,7 @@ test("log after 5 empty days -> comeback notice, no extra score events", { skip 
   assert.equal(rows[0]!.gapDays, 5);
   assert.equal(rows[0]!.completedAt, null);
   // A second log the same day is not another comeback.
-  const again = await postLog(a, token, "back-2", "MIND", "read");
+  const again = await postLog(a, token, "back-2", "MIND", "generic");
   assert.ok(!kindsOf(again.body).includes("comeback"));
   assert.equal((await db!.select().from(comebacks)).length, 1);
   // A replay returns the stored response without a second row.
@@ -187,7 +187,7 @@ test("GET /comeback: nothing active, then the checklist completes into a returne
   ]);
   assert.equal((await db!.select().from(notices).where(eq(notices.kind, "returner_mark"))).length, 0);
 
-  await postLog(a, token, "c-mind", "MIND", "read");
+  await postLog(a, token, "c-mind", "MIND", "generic");
   await resolveQuest(q.id);
   const eventsBefore = (await db!.select().from(scoreEvents).where(eq(scoreEvents.userId, id))).length;
 
@@ -212,7 +212,7 @@ test("a second return stacks the returner count", { skip }, async () => {
   await db!.update(profiles).set({ returnerCount: 2 }).where(eq(profiles.userId, id));
   await seed(id, addDays(TODAY, -8));
   await postLog(a, token, "r-body");
-  await postLog(a, token, "r-mind", "MIND", "read");
+  await postLog(a, token, "r-mind", "MIND", "generic");
   const q = (
     await createQuests(db!, id, [
       { type: "daily", title: "Walk", description: "d", domain: "BODY", expiresAt: new Date(NOW.getTime() + 3600_000) },
@@ -408,7 +408,7 @@ test("a backdated return starts today's comeback, judged from the activity's own
   const res = await request(a)
     .post("/api/logs")
     .set(auth(token))
-    .send({ clientId: "bd", domain: "BODY", logType: "workout", occurredAt: new Date(NOW.getTime() - 30 * 3600_000).toISOString() });
+    .send({ clientId: "bd", domain: "BODY", logType: "workout", data: { kind: "Run", minutes: 30, intensity: 4 }, occurredAt: new Date(NOW.getTime() - 30 * 3600_000).toISOString() });
   assert.equal(res.status, 201);
   assert.equal(res.body.log.isRetroactive, true);
   const n = res.body.notices.find((x: { kind: string }) => x.kind === "comeback");
@@ -425,7 +425,7 @@ test("the checklist window is two days: completes on day 2, expires after", { sk
   await seed(id, addDays(TODAY, -1));
   await db!.insert(comebacks).values({ userId: id, startedOn: addDays(TODAY, -1), gapDays: 6, checklist: [] });
   await insertLog(id, "d1-body", "BODY", addDays(TODAY, -1)); // day 1
-  await postLog(a, token, "d2-mind", "MIND", "read"); // day 2: two domains across the window
+  await postLog(a, token, "d2-mind", "MIND", "generic"); // day 2: two domains across the window
   const q = await mkDaily(id);
   await resolveQuest(q.id);
   const fin = await request(a).get("/api/comeback").set(auth(token));
@@ -444,7 +444,7 @@ test("completion is evaluated at the end of a log, without GET, and the mark rid
   await postLog(a, token, "e-body"); // starts the comeback
   const q = await mkDaily(id);
   await resolveQuest(q.id);
-  const last = await postLog(a, token, "e-mind", "MIND", "read");
+  const last = await postLog(a, token, "e-mind", "MIND", "generic");
   const kinds = kindsOf(last.body);
   assert.ok(kinds.includes("returner_mark"), kinds.join());
   const mark = last.body.notices.find((x: { kind: string }) => x.kind === "returner_mark");
@@ -460,7 +460,7 @@ test("quest completion that finishes the checklist returns the mark; refused dai
   const { token, id } = await setup(a);
   await seed(id, addDays(TODAY, -7));
   await postLog(a, token, "q-body");
-  await postLog(a, token, "q-mind", "MIND", "read");
+  await postLog(a, token, "q-mind", "MIND", "generic");
   const refused = await mkDaily(id, "Skipped", "SOCIAL");
   await db!
     .update(quests)
@@ -477,7 +477,7 @@ test("an open daily blocks the quests item", { skip }, async () => {
   const { token, id } = await setup(a);
   await seed(id, addDays(TODAY, -7));
   await postLog(a, token, "o-body");
-  await postLog(a, token, "o-mind", "MIND", "read");
+  await postLog(a, token, "o-mind", "MIND", "generic");
   const done = await mkDaily(id, "Done");
   await resolveQuest(done.id);
   await mkDaily(id, "Still open", "SOCIAL");
@@ -489,11 +489,11 @@ test("forbidden logs do not tick the comeback checklist", { skip }, async () => 
   const a = clockApp();
   const { token, id } = await setup(a);
   await seed(id, addDays(TODAY, -7));
-  assert.equal((await postLog(a, token, "fz-mind", "MIND", "read")).status, 201); // starts the comeback
+  assert.equal((await postLog(a, token, "fz-mind", "MIND", "generic")).status, 201); // starts the comeback
   const bad = await request(a)
     .post("/api/logs")
     .set(auth(token))
-    .send({ clientId: "fz-body", domain: "BODY", logType: "workout", forbidden: true, occurredAt: NOW.toISOString() });
+    .send({ clientId: "fz-body", domain: "BODY", logType: "workout", data: { kind: "Run", minutes: 30, intensity: 4 }, forbidden: true, occurredAt: NOW.toISOString() });
   assert.equal(bad.status, 201);
   const cb = await request(a).get("/api/comeback").set(auth(token));
   const done = Object.fromEntries(cb.body.active.checklist.map((c: { key: string; done: boolean }) => [c.key, c.done]));

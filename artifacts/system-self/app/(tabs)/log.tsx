@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { summarizeLog } from "@workspace/engine";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type LogEntry } from "@/context/AppContext";
 import { LogModal } from "@/components/LogModal";
@@ -54,6 +55,10 @@ function LogItem({ entry }: { entry: LogEntry }) {
   const domainColor = DOMAIN_COLORS[entry.domain];
   const icon = DOMAIN_ICONS[entry.domain];
 
+  // data.note carries the free text (toLogEntry), so a generic log's summary is its note: show it once.
+  const summary = summarizeLog({ domain: entry.domain, logType: entry.type, data: entry.data, freeText: null });
+  const note = typeof entry.data.note === "string" ? entry.data.note : "";
+  const showNote = note !== "" && note !== summary;
   const date = new Date(entry.timestamp);
   const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const dateStr = date.toLocaleDateString([], { month: "short", day: "numeric" });
@@ -73,14 +78,17 @@ function LogItem({ entry }: { entry: LogEntry }) {
             <Text style={[styles.logPending, { color: colors.mutedForeground }]}>QUEUED</Text>
           )}
         </View>
-        {(entry.data.note as string) ? (
+        <Text style={[styles.logNote, { color: colors.foreground }]} numberOfLines={2}>
+          {summary}
+        </Text>
+        {showNote ? (
           <Text style={[styles.logNote, { color: colors.foreground }]} numberOfLines={2}>
             {entry.data.note as string}
           </Text>
         ) : null}
         <Text style={[styles.logTime, { color: colors.mutedForeground }]}>
           {dateStr} · {timeStr}
-          {typeof entry.data.intensity === "number" ? ` · intensity ${entry.data.intensity}/5` : ""}
+          {entry.type === "generic" && typeof entry.data.intensity === "number" ? ` · intensity ${entry.data.intensity}/5` : ""}
         </Text>
       </View>
     </View>

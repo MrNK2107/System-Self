@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import { logs, profiles, quests, users, type Db } from "@workspace/db";
 import { localDate, logChanges } from "@workspace/engine";
-import { LogListQuerySchema, LogRequestSchema } from "@workspace/contracts";
+import { LogListQuerySchema, LogRequestSchema, parseLogData } from "@workspace/contracts";
 import { withIdempotency } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
 import { track } from "../services/analytics";
@@ -47,6 +47,17 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
   router.post("/logs", async (req, res) => {
     const body = LogRequestSchema.parse(req.body);
     const userId = req.user!.id;
+    // Data is checked against the schema of its (domain, logType) before anything is stored or scored.
+    const parsedData = parseLogData(body.domain, body.logType, body.data);
+    if (!parsedData.ok) {
+      res.status(400).json({
+        error: parsedData.code === "unknown_log_type" ? "Unknown log type" : "Validation failed",
+        code: parsedData.code,
+        issues: parsedData.issues,
+      });
+      return;
+    }
+    const data = parsedData.data;
 
     await withIdempotency(db, req, res, "POST /logs", async (tx) => {
       const now = clock();
@@ -84,7 +95,7 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
           clientId: body.clientId,
           domain: body.domain,
           logType: body.logType,
-          data: body.data ?? {},
+          data,
           freeText: body.freeText ?? null,
           forbidden,
           occurredAt,
@@ -94,7 +105,7 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
         })
         .returning();
 
-      const changes = logChanges(body.domain, forbidden).map((c) => ({
+      const changes = logChanges(body.domain, body.logType, data, forbidden).map((c) => ({
         ...c,
         reason: forbidden ? ("forbidden" as const) : ("log" as const),
         refId: log!.id,
@@ -105,7 +116,7 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRoute
       await rollOverDue(tx, userId, now);
       // Only a floor session started from a refusal's floor offer completes that offer (floorUptake): the id
       // must be a quest this user refused, so a client cannot inflate the metric with arbitrary ids.
-      const refusedQuestId = body.data?.refusedQuestId;
+      const refusedQuestId = data.refusedQuestId;
       if (body.logType === "floor_session" && typeof refusedQuestId === "string" && UUID.test(refusedQuestId)) {
         const [refused] = await tx
           .select({ id: quests.id })

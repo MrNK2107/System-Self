@@ -49,7 +49,7 @@ test("past-self returns DAY 1 baseline from onboarding", { skip }, async () => {
   const log = await request(a)
     .post("/api/logs")
     .set(auth(token))
-    .send({ clientId: "ps-1", domain: "BODY", logType: "workout", occurredAt: new Date().toISOString() });
+    .send({ clientId: "ps-1", domain: "BODY", logType: "workout", data: { kind: "Run", minutes: 30, intensity: 4 }, occurredAt: new Date().toISOString() });
   assert.equal(log.status, 201);
   const moved = await request(a).get("/api/progress/past-self").set(auth(token));
   assertContract(PastSelfResponseSchema, moved.body);
@@ -81,7 +81,7 @@ test("past-self baseline survives the rollover of the onboarding date", { skip }
   const log = await request(a)
     .post("/api/logs")
     .set(auth(token))
-    .send({ clientId: "ps-roll", domain: "BODY", logType: "workout", occurredAt: new Date().toISOString() });
+    .send({ clientId: "ps-roll", domain: "BODY", logType: "workout", data: { kind: "Run", minutes: 30, intensity: 4 }, occurredAt: new Date().toISOString() });
   assert.equal(log.status, 201);
   await ensureRolledOver(db!, id, new Date(Date.now() + 2 * 86_400_000));
   const [snap] = await db!.select().from(dailySnapshots).where(eq(dailySnapshots.localDate, onboardedOn));

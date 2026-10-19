@@ -15,8 +15,18 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, getStreakMultiplier, getStreakTier, type Domain } from "@/context/AppContext";
-import { DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
-import { BASE_LOG_DELTAS, FORBIDDEN_DISCIPLINE_DELTA, FORBIDDEN_DOMAIN_DELTA } from "@workspace/engine";
+import { ALL_DOMAINS, DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
+import { FORBIDDEN_DISCIPLINE_DELTA, FORBIDDEN_DOMAIN_DELTA } from "@workspace/engine";
+import {
+  checkLogForm,
+  defaultTypeFor,
+  initialValues,
+  LOG_FIELDS,
+  previewDelta,
+  typesFor,
+  type FieldSpec,
+  type FormValues,
+} from "@/lib/game/log-form";
 
 interface LogModalProps {
   visible: boolean;
@@ -29,47 +39,17 @@ interface LogConfig {
   domain: LogDomain;
   icon: string;
   color: string;
-  types: { key: string; label: string }[];
+  types: { type: string; label: string }[];
 }
 
-const LOG_TYPES: Record<Domain, { key: string; label: string }[]> = {
-  BODY: [
-    { key: "workout", label: "Workout" },
-    { key: "home_session", label: "Home Session" },
-    { key: "sleep", label: "Sleep" },
-    { key: "meal", label: "Meal" },
-  ],
-  MIND: [
-    { key: "deep_work", label: "Deep Work" },
-    { key: "reading", label: "Reading" },
-    { key: "journal", label: "Journal" },
-  ],
-  WEALTH: [
-    { key: "income", label: "Income" },
-    { key: "expense", label: "Expense" },
-    { key: "savings", label: "Savings" },
-  ],
-  SOCIAL: [
-    { key: "conversation", label: "Conversation" },
-    { key: "outreach", label: "Outreach" },
-    { key: "gathering", label: "Gathering" },
-  ],
-  DISCIPLINE: [
-    { key: "quest_complete", label: "Quest Done" },
-    { key: "routine", label: "Routine" },
-    { key: "habit", label: "Habit" },
-  ],
-};
-
-const LOG_CONFIGS: LogConfig[] = (Object.keys(LOG_TYPES) as Domain[]).map((domain) => ({
+const LOG_CONFIGS: LogConfig[] = ALL_DOMAINS.map((domain) => ({
   domain,
   icon: DOMAIN_ICONS[domain],
   color: DOMAIN_COLORS[domain],
-  types: LOG_TYPES[domain],
+  types: typesFor(domain),
 }));
 
-// Preview only: the server applies the real delta.
-const BASE_DELTAS = BASE_LOG_DELTAS;
+const signed = (n: number) => (n < 0 ? `−${Math.abs(n).toFixed(1)}` : `+${n.toFixed(1)}`);
 // Display copy for the forbidden-log trade (the server applies it).
 const FORBIDDEN_GAIN = `+${FORBIDDEN_DOMAIN_DELTA}`;
 const FORBIDDEN_PENALTY = `−${Math.abs(FORBIDDEN_DISCIPLINE_DELTA)}`;
@@ -83,6 +63,77 @@ const TIER_COLORS: Record<string, string | null> = {
   none: null, low: "#6B7280", mid: null, high: null, max: "#D4B483",
 };
 
+function FieldInput({ field, value, color, forbidden, onChange }: {
+  field: FieldSpec;
+  value: string | number | undefined;
+  color: string;
+  forbidden: boolean;
+  onChange: (v: string | number) => void;
+}) {
+  const colors = useColors();
+  const label = field.kind === "number" && field.suffix ? `${field.label} (${field.suffix.toUpperCase()})` : field.label;
+  return (
+    <View style={styles.section}>
+      <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{label}</Text>
+      {field.kind === "scale" && (
+        <View style={styles.intensityRow}>
+          {Array.from({ length: field.max - field.min + 1 }, (_, i) => field.min + i).map(i => (
+            <TouchableOpacity
+              key={i}
+              accessibilityRole="button"
+              accessibilityLabel={`${field.label} ${i}`}
+              style={[styles.intensityBtn, { backgroundColor: typeof value === "number" && value >= i ? color : colors.muted }]}
+              onPress={() => onChange(i)}
+              activeOpacity={0.7}
+            />
+          ))}
+          <Text style={[styles.intensityLabel, { color: colors.mutedForeground }]}>
+            {typeof value === "number" ? `${value}/${field.max}${value === field.min ? `  ${field.lowLabel}` : value === field.max ? `  ${field.highLabel}` : ""}` : ""}
+          </Text>
+        </View>
+      )}
+      {field.kind === "choice" && (
+        <View style={styles.typeRow}>
+          {field.options.map(o => (
+            <TouchableOpacity
+              key={o.value}
+              style={[
+                styles.typeBtn,
+                {
+                  borderColor: value === o.value ? color : colors.border,
+                  backgroundColor: value === o.value ? color + "20" : "transparent",
+                },
+              ]}
+              onPress={() => onChange(o.value)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.typeLabel, { color: value === o.value ? color : colors.mutedForeground }]}>{o.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+      {(field.kind === "text" || field.kind === "number") && (
+        <TextInput
+          style={[
+            styles.fieldInput,
+            {
+              color: forbidden ? "#CC3333" : colors.foreground,
+              borderColor: forbidden ? "#9B000060" : colors.border,
+              backgroundColor: forbidden ? "#0A0102" : colors.card,
+            },
+          ]}
+          value={value === undefined ? "" : String(value)}
+          onChangeText={onChange}
+          keyboardType={field.kind === "number" ? (field.decimal ? "decimal-pad" : "number-pad") : "default"}
+          maxLength={field.kind === "text" ? field.max : 12}
+          placeholderTextColor={colors.mutedForeground}
+          selectTextOnFocus
+        />
+      )}
+    </View>
+  );
+}
+
 export function LogModal({ visible, onClose }: LogModalProps) {
   const router = useRouter();
   const colors = useColors();
@@ -90,9 +141,9 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const { addLog, domainScores } = useApp();
 
   const [selectedDomain, setSelectedDomain] = useState<LogDomain>("BODY");
-  const [selectedType, setSelectedType] = useState("workout");
+  const [selectedType, setSelectedType] = useState(defaultTypeFor("BODY").type);
+  const [values, setValues] = useState<FormValues>(() => initialValues("BODY", defaultTypeFor("BODY").type));
   const [note, setNote] = useState("");
-  const [intensity, setIntensity] = useState(3);
   const [submitting, setSubmitting] = useState(false);
   const [isForbidden, setIsForbidden] = useState(false);
   const [showForbiddenWarning, setShowForbiddenWarning] = useState(false);
@@ -104,9 +155,12 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const streak = domainScore?.streak ?? 0;
   const tier = getStreakTier(streak);
   const multiplier = getStreakMultiplier(streak);
-  const baseDelta = isForbidden ? FORBIDDEN_DOMAIN_DELTA : BASE_DELTAS[selectedDomain];
-  const bonusDelta = isForbidden ? FORBIDDEN_DOMAIN_DELTA : Math.round(baseDelta * multiplier * 10) / 10;
-  const bonusGain = Math.round((bonusDelta - BASE_DELTAS[selectedDomain]) * 10) / 10;
+  // Preview only: the server applies the real delta. An entry that does not check yet previews its type's defaults.
+  const check = checkLogForm(selectedDomain, selectedType, values);
+  const previewData = check.ok ? check.data : initialValues(selectedDomain, selectedType);
+  const baseDelta = isForbidden ? FORBIDDEN_DOMAIN_DELTA : previewDelta(selectedDomain, selectedType, previewData, 0);
+  const bonusDelta = isForbidden ? FORBIDDEN_DOMAIN_DELTA : previewDelta(selectedDomain, selectedType, previewData, streak);
+  const bonusGain = Math.round((bonusDelta - baseDelta) * 10) / 10;
   const tierColor = TIER_COLORS[tier] ?? config.color;
 
   const bannerOpacity = useRef(new Animated.Value(1)).current;
@@ -141,10 +195,21 @@ export function LogModal({ visible, onClose }: LogModalProps) {
     return () => loop.stop();
   }, [tier, selectedDomain]);
 
+  const selectType = (domain: LogDomain, type: string) => {
+    setSelectedType(type);
+    setValues(initialValues(domain, type));
+    setSubmitError(null);
+  };
+
   const handleDomainSelect = (domain: LogDomain, firstType: string) => {
     Haptics.selectionAsync();
     setSelectedDomain(domain);
-    setSelectedType(firstType);
+    selectType(domain, firstType);
+  };
+
+  const setValue = (key: string, value: string | number) => {
+    setValues(v => ({ ...v, [key]: value }));
+    setSubmitError(null);
   };
 
   const handleToggleForbidden = () => {
@@ -162,13 +227,17 @@ export function LogModal({ visible, onClose }: LogModalProps) {
 
   const handleSubmit = async () => {
     if (submitting) return;
+    if (!check.ok) {
+      setSubmitError(check.message);
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
       // Queued in the outbox: it is kept on the device and sent when there is a connection.
-      await addLog({ domain: selectedDomain, type: selectedType, forbidden: isForbidden, note, intensity });
+      await addLog({ domain: selectedDomain, type: selectedType, forbidden: isForbidden, note, data: check.data });
     } catch {
       setSubmitError("The entry could not be recorded on this device. Sign in again, then retry.");
       setSubmitting(false);
@@ -176,7 +245,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
     }
 
     setNote("");
-    setIntensity(3);
+    selectType(selectedDomain, selectedType);
     setIsForbidden(false);
     setShowForbiddenWarning(false);
     setSubmitting(false);
@@ -279,7 +348,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                         backgroundColor: isSelected ? activeColor + "20" : colors.card,
                       },
                     ]}
-                    onPress={() => handleDomainSelect(cfg.domain, cfg.types[0]!.key)}
+                    onPress={() => handleDomainSelect(cfg.domain, cfg.types[0]!.type)}
                     activeOpacity={0.7}
                   >
                     <View style={styles.domainBtnMain}>
@@ -342,7 +411,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                   }
                 </Text>
                 <Text style={[styles.multiplierSub, { color: colors.mutedForeground }]}>
-                  {isForbidden ? `${FORBIDDEN_PENALTY} DISCIPLINE penalty applied` : bonusGain > 0 ? `base ${baseDelta.toFixed(1)} pts  →  boosted` : ""}
+                  {isForbidden ? `${FORBIDDEN_PENALTY} DISCIPLINE penalty applied` : bonusGain > 0 ? `base ${signed(baseDelta)} pts  →  boosted` : ""}
                 </Text>
               </View>
             </View>
@@ -351,7 +420,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
                 styles.multiplierPts,
                 { color: isForbidden ? "#9B0000" : tier === "none" ? colors.mutedForeground : tierColor },
               ]}>
-                +{bonusDelta.toFixed(1)}
+                {signed(bonusDelta)}
               </Text>
               <Text style={[styles.multiplierPtsLabel, { color: colors.mutedForeground }]}>pts</Text>
             </View>
@@ -380,24 +449,24 @@ export function LogModal({ visible, onClose }: LogModalProps) {
             <View style={styles.typeRow}>
               {config.types.map(type => (
                 <TouchableOpacity
-                  key={type.key}
+                  key={type.type}
                   style={[
                     styles.typeBtn,
                     {
-                      borderColor: selectedType === type.key
+                      borderColor: selectedType === type.type
                         ? (isForbidden ? "#9B0000" : config.color)
                         : colors.border,
-                      backgroundColor: selectedType === type.key
+                      backgroundColor: selectedType === type.type
                         ? (isForbidden ? "#9B000020" : config.color + "20")
                         : "transparent",
                     },
                   ]}
-                  onPress={() => setSelectedType(type.key)}
+                  onPress={() => selectType(selectedDomain, type.type)}
                   activeOpacity={0.7}
                 >
                   <Text style={[
                     styles.typeLabel,
-                    { color: selectedType === type.key
+                    { color: selectedType === type.type
                         ? (isForbidden ? "#9B0000" : config.color)
                         : colors.mutedForeground },
                   ]}>
@@ -408,28 +477,17 @@ export function LogModal({ visible, onClose }: LogModalProps) {
             </View>
           </View>
 
-          {/* Intensity */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>INTENSITY</Text>
-            <View style={styles.intensityRow}>
-              {[1, 2, 3, 4, 5].map(i => (
-                <TouchableOpacity
-                  key={i}
-                  style={[
-                    styles.intensityBtn,
-                    { backgroundColor: intensity >= i
-                        ? (isForbidden ? "#9B0000" : config.color)
-                        : colors.muted },
-                  ]}
-                  onPress={() => setIntensity(i)}
-                  activeOpacity={0.7}
-                />
-              ))}
-              <Text style={[styles.intensityLabel, { color: colors.mutedForeground }]}>
-                {intensity}/5
-              </Text>
-            </View>
-          </View>
+          {/* Fields of the selected type, prefilled with its defaults */}
+          {(LOG_FIELDS[selectedType] ?? []).map(field => (
+            <FieldInput
+              key={`${selectedType}.${field.key}`}
+              field={field}
+              value={values[field.key]}
+              color={isForbidden ? "#9B0000" : config.color}
+              forbidden={isForbidden}
+              onChange={v => setValue(field.key, v)}
+            />
+          ))}
 
           {/* Note */}
           <View style={styles.section}>
@@ -480,7 +538,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
           <Text style={styles.submitPts}>
             {isForbidden
               ? `${FORBIDDEN_GAIN} pts / ${FORBIDDEN_PENALTY} DISC`
-              : `+${bonusDelta.toFixed(1)} pts${tier !== "none" && tier !== "low" ? `  ×${multiplier.toFixed(1)}` : ""}`
+              : `${signed(bonusDelta)} pts${tier !== "none" && tier !== "low" ? `  ×${multiplier.toFixed(1)}` : ""}`
             }
           </Text>
         </TouchableOpacity>
@@ -557,6 +615,7 @@ const styles = StyleSheet.create({
   intensityRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   intensityBtn: { width: 32, height: 6, borderRadius: 1 },
   intensityLabel: { fontSize: 11, marginLeft: 4 },
+  fieldInput: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
   input: {
     borderWidth: 1, borderRadius: 4, padding: 12,
     fontSize: 13, minHeight: 80, textAlignVertical: "top",

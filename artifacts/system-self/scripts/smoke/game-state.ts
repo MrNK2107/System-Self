@@ -95,7 +95,7 @@ async function main() {
   // 2. A BODY log through the outbox, then flush.
   const storage = memoryStorage();
   const outbox = outboxOver(api, storage);
-  const first = await enqueueLog(outbox, { domain: "BODY", type: "workout", note: "ran 5k", intensity: 4 });
+  const first = await enqueueLog(outbox, { domain: "BODY", type: "workout", note: "ran 5k", data: { kind: "Run", minutes: 30, intensity: 4 } });
   assert.deepEqual(await outbox.flush(), { sent: 1, remaining: 0 });
   step("enqueue BODY log + flush", { clientId: first.clientId });
 
@@ -132,7 +132,7 @@ async function main() {
   // 5. Offline: the log queues, shows as pending, and a quest mutation is held back behind it.
   const offlineStorage = memoryStorage();
   const offlineOutbox = outboxOver(deadApi, offlineStorage);
-  const queued = await enqueueLog(offlineOutbox, { domain: "SOCIAL", type: "conversation", intensity: 3 });
+  const queued = await enqueueLog(offlineOutbox, { domain: "SOCIAL", type: "interaction", data: { kind: "casual" } });
   assert.deepEqual(await offlineOutbox.flush(), { sent: 0, remaining: 1 });
   const view = mergeLogs(await fetchLogs(api), pendingLogEntries(offlineOutbox.pending()));
   assert.equal(view.filter((l) => l.pending).length, 1);

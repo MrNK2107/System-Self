@@ -1,10 +1,5 @@
 import { addDays } from "./dates";
-import {
-  BASE_LOG_DELTAS,
-  FORBIDDEN_DISCIPLINE_DELTA,
-  FORBIDDEN_DOMAIN_DELTA,
-  type RankedDomain,
-} from "./constants";
+import type { RankedDomain } from "./constants";
 
 export interface DomainState {
   domain: RankedDomain;
@@ -43,16 +38,6 @@ export function applyDelta(
     lastLogDate = o.date;
   }
   return { next: { domain: s.domain, score, streak, lastLogDate }, actualDelta };
-}
-
-export function logChanges(domain: RankedDomain, forbidden: boolean): ChangeSpec[] {
-  if (forbidden) {
-    return [
-      { domain, delta: FORBIDDEN_DOMAIN_DELTA, bonus: false, activity: true },
-      { domain: "DISCIPLINE", delta: FORBIDDEN_DISCIPLINE_DELTA, bonus: false, activity: false },
-    ];
-  }
-  return [{ domain, delta: BASE_LOG_DELTAS[domain], bonus: true, activity: true }];
 }
 
 export function streakBreaks(
