@@ -47,3 +47,6 @@ Thumbs.db
 # Local cache
 .cache/
 .local/
+
+# Production env (copy of .env.prod.example)
+.env.prod

@@ -588,6 +588,22 @@ test("aborted worker: tick releases unprocessed claims and runLoop exits without
   assert.ok(Date.now() - started < 5_000);
 });
 
+test("runLoop aborted during a tick finishes that tick (claims released) and then exits", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  const now = at(addDays(D0, 1));
+  const controller = new AbortController();
+  let ticks = 0;
+  // The abort lands as the tick starts (the clock is read once per tick).
+  const clock = () => {
+    ticks++;
+    controller.abort();
+    return now;
+  };
+  await runLoop(db!, { tickMs: 60_000, signal: controller.signal, clock });
+  assert.equal(ticks, 1, "exactly one tick ran, then the loop exited");
+  assert.deepEqual(await claimDueUsers(db!, 10, now), [id], "unprocessed claim was released");
+});
+
 test("runLoop re-ticks immediately after a full batch instead of sleeping", { skip }, async () => {
   const ids: string[] = [];
   for (let i = 0; i < 3; i++) ids.push((await onboardAtD0({ email: `b${i}@example.com`, username: `batch_${i}` })).id);

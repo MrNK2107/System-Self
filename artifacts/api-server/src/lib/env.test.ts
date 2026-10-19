@@ -57,3 +57,24 @@ test("TRUST_PROXY: unset=false, true/false, integer hop count; garbage rejected"
   assert.throws(() => parseEnv({ NODE_ENV: "test", TRUST_PROXY: "yes" }), /TRUST_PROXY/);
   assert.throws(() => parseEnv({ NODE_ENV: "test", TRUST_PROXY: "-1" }), /TRUST_PROXY/);
 });
+
+test("production rejects placeholder secrets (REPLACE / CHANGE / example, any case)", () => {
+  for (const bad of ["k3Jx9vQ2mP7rT5wZ8nB4cF6hL1sD0aGy-REPLACE", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxCHANGEme", "my-Example-secret-with-enough-length-1234"]) {
+    assert.throws(() => parseEnv({ ...PROD_BASE, JWT_SECRET: bad }), /JWT_SECRET/, bad);
+  }
+  assert.throws(() => parseEnv({ ...PROD_BASE, REVENUECAT_WEBHOOK_SECRET: "example-webhook-secret" }), /REVENUECAT_WEBHOOK_SECRET/);
+  assert.throws(() => parseEnv({ ...PROD_BASE, METRICS_TOKEN: "please-CHANGE-this" }), /METRICS_TOKEN/);
+  assert.doesNotThrow(() => parseEnv({ ...PROD_BASE, REVENUECAT_WEBHOOK_SECRET: STRONG, METRICS_TOKEN: STRONG }));
+  // development stays relaxed
+  assert.doesNotThrow(() => parseEnv({ NODE_ENV: "development", REVENUECAT_WEBHOOK_SECRET: "example" }));
+});
+
+test(".env.prod.example secrets trip the production guard", () => {
+  const file = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../.env.prod.example");
+  const vars: Record<string, string> = {};
+  for (const l of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const m = /^([A-Z_]+)=(.*)$/.exec(l);
+    if (m) vars[m[1]!] = m[2]!.replace(/^"|"$/g, "");
+  }
+  assert.throws(() => parseEnv(vars), /placeholder/);
+});

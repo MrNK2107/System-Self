@@ -1,12 +1,14 @@
 # Production-like stack: postgres, one-shot migrate, two API instances behind nginx, one worker.
 #   docker compose -f docker-compose.prod.yml up -d --build
 # API through nginx: http://localhost:8080 ; direct: api1 on 3011, api2 on 3012.
-# Values come from .env.prod.example; copy it to .env.prod and CHANGE ME before real use.
+# Setup:  cp .env.prod.example .env.prod   then edit it (every REPLACE value; the API refuses to start
+# in production while JWT_SECRET / REVENUECAT_WEBHOOK_SECRET still look like placeholders).
+# Keep POSTGRES_PASSWORD below in sync with DATABASE_URL in .env.prod.
 name: system-self-prod
 
 x-app: &app
   image: system-self-api:prod
-  env_file: .env.prod.example
+  env_file: .env.prod
   restart: unless-stopped
   stop_grace_period: 30s
 

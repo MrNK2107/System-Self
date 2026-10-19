@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,8 @@ function resolveMigrationsFolder(): string {
 
 export async function runMigrations(url: string): Promise<void> {
   const { db, pool } = createDb(url);
+  // The lock holds one connection while drizzle migrates on another, so the pool needs at least 2.
+  assert.ok((pool.options.max ?? 10) >= 2, "migration pool max must be >= 2 (one connection holds the advisory lock)");
   // The lock lives on one dedicated connection; drizzle migrates over the pool's other connections.
   const lock = await pool.connect();
   try {

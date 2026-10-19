@@ -39,6 +39,9 @@ export function createShutdown(opts: ShutdownOptions): (signal?: string) => Prom
       if (opts.drainDelayMs) await new Promise((r) => setTimeout(r, opts.drainDelayMs));
       const closed = new Promise<void>((resolve) => opts.server.close(() => resolve()));
       opts.server.closeIdleConnections();
+      // Keep-alive sockets that go idle after a response during the drain are dropped promptly.
+      const idleSweep = setInterval(() => opts.server.closeIdleConnections(), 250);
+      idleSweep.unref();
       const timer = setTimeout(() => {
         logger.warn({ timeoutMs }, "Shutdown timeout: closing remaining connections");
         opts.server.closeAllConnections();
@@ -46,6 +49,7 @@ export function createShutdown(opts: ShutdownOptions): (signal?: string) => Prom
       timer.unref();
       await closed;
       clearTimeout(timer);
+      clearInterval(idleSweep);
       try {
         await opts.closePool();
       } catch (err) {

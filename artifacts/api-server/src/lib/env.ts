@@ -5,6 +5,9 @@ const DEV_JWT_SECRET = "dev-insecure-secret-change-me-0123456789";
 // Public placeholder values that must never sign production tokens (keep in sync with .env.example).
 const PUBLIC_JWT_SECRETS = new Set([DEV_JWT_SECRET, "dev-only-secret-change-me-at-least-32-characters"]);
 
+/** Values that must never reach production: obvious example/placeholder secrets. */
+const PLACEHOLDER = /replace|change|example/i;
+
 const trustProxy = z
   .string()
   .trim()
@@ -38,6 +41,10 @@ const envSchema = z.object({
   ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().min(1).default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(30),
   WORKER_TICK_MS: z.coerce.number().int().min(1000).default(60_000),
+  /** Bearer token of /metrics (guarded against placeholders in production). */
+  METRICS_TOKEN: z.string().min(1).optional(),
+  /** Pause between readyz flipping to 503 and closing the listener. Default 5000 in production, else 0. */
+  SHUTDOWN_DRAIN_MS: z.coerce.number().int().min(0).optional(),
   /** Bearer secret of POST /api/billing/revenuecat. Unset: the webhook answers 503 and accepts nothing. */
   REVENUECAT_WEBHOOK_SECRET: z.string().min(1).optional(),
   /**
@@ -65,13 +72,19 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     .superRefine((v, ctx) => {
       const relaxed = isDevOrTest(v.NODE_ENV);
       if (!relaxed) {
+        for (const name of ["REVENUECAT_WEBHOOK_SECRET", "METRICS_TOKEN"] as const) {
+          const value = v[name];
+          if (value && PLACEHOLDER.test(value)) {
+            ctx.addIssue({ code: "custom", path: [name], message: `${name} is a placeholder value` });
+          }
+        }
         if (!v.JWT_SECRET) {
           ctx.addIssue({
             code: "custom",
             path: ["JWT_SECRET"],
             message: "JWT_SECRET is required unless NODE_ENV is development or test",
           });
-        } else if (/change-me/i.test(v.JWT_SECRET) || PUBLIC_JWT_SECRETS.has(v.JWT_SECRET)) {
+        } else if (PLACEHOLDER.test(v.JWT_SECRET) || PUBLIC_JWT_SECRETS.has(v.JWT_SECRET)) {
           ctx.addIssue({ code: "custom", path: ["JWT_SECRET"], message: "JWT_SECRET is a public placeholder" });
         }
         if (!v.RESEND_API_KEY && v.MAILER !== "log") {
