@@ -57,7 +57,7 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.VIBRATE",
-      "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
@@ -78,7 +78,7 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      "expo-secure-store",
+      ["expo-secure-store", { "faceIDPermission": false }],
       [
         "expo-audio",
         {
@@ -88,7 +88,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/icon.png",
+          "icon": "./assets/images/notification-icon.png",
           "color": "#3A7BD5",
           "defaultChannel": "system-self"
         }

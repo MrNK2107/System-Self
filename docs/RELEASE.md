@@ -59,7 +59,7 @@ Mapped from `docs/legal/privacy.md` section 3. Nothing is used for tracking or a
 | Purchase status and billing events (no card data) | Purchases | Purchase history | Yes | Subscription verification |
 | Server request logs (IP, user agent, request id) | Other Diagnostic Data | App info and performance | Yes | Security, debugging |
 | Usage analytics events | Product Interaction | App activity | Yes | Analytics |
-| Voice input (microphone, press and hold) | Audio Data | Voice or sound recordings | Check privacy.md for what is retained | App functionality |
+| Voice input (microphone, press and hold) | Audio Data (not retained) | Voice or sound recordings (not retained) | Yes | Not retained: sent to Google Gemini for transcription only |
 
 Also state: data is encrypted in transit, users can delete their account (below), and AI features send a game-state summary to Google Gemini. Not collected: contacts, precise location, advertising identifiers.
 
