@@ -289,12 +289,20 @@ export function noticeView(group: NoticeGroup): NoticeView {
       const title = handles.size === 1 ? `${lines.length} FAILURES BY ${[...handles][0]}` : `${handles.size} CLANMATES FAILED`;
       return { modal: "system", tone: "alert", label: "SHAME MODE", title, body: lines.join("\n") };
     }
-    case "quest_failed":
-      return {
-        modal: "failure",
-        failures: group.notices.flatMap((n) =>
-          n.kind === "quest_failed" ? [{ title: n.payload.title, type: n.payload.type, penalty: n.payload.penalty }] : [],
-        ),
-      };
+    case "quest_failed": {
+      const all = group.notices.flatMap((n) => (n.kind === "quest_failed" ? [n.payload] : []));
+      const penalised = all.filter((p) => !p.bonus);
+      if (penalised.length === 0) {
+        // Only bonus quests expired: a quiet notice. No penalty block, no failure verdict, no red.
+        return {
+          modal: "system",
+          tone: "info",
+          label: "BONUS EXPIRED",
+          title: "BONUS — no rank effect",
+          body: `${all.map((p) => p.title).join("\n")}\nThe bonus ${all.length === 1 ? "quest" : "quests"} expired. No rank effect. Logged.`,
+        };
+      }
+      return { modal: "failure", failures: penalised.map((p) => ({ title: p.title, type: p.type, penalty: p.penalty })) };
+    }
   }
 }

@@ -192,8 +192,10 @@ export default function Dashboard() {
   }, [dateChanged, refresh]);
 
   const rank = user?.rank ?? "E";
-  const activeQuests = quests.filter(q => q.status === "active");
-  const completedToday = quests.filter(q => q.status === "complete").length;
+  // Bonus quests have no rank effect: they stay out of these counts (the Quest Board lists them).
+  const rankQuests = quests.filter(q => !q.bonus);
+  const activeQuests = rankQuests.filter(q => q.status === "active");
+  const completedToday = rankQuests.filter(q => q.status === "complete").length;
   const missed = missedSlotQuest(quests, clock, computedAt, accountTz);
   // A refuse failure belongs to the banner it was raised from: when the banner's quest changes or the banner goes, so does the line.
   const missedId = missed?.id ?? null;
@@ -433,7 +435,7 @@ export default function Dashboard() {
           <View style={styles.cardHeader}>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>ACTIVE QUESTS</Text>
             <Text style={[styles.questCount, { color: colors.primary, fontFamily: "SpaceMono" }]}>
-              {completedToday}/{quests.length}
+              {completedToday}/{rankQuests.length}
             </Text>
           </View>
           {activeQuests.length === 0 ? (

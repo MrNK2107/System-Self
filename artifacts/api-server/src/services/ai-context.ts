@@ -12,7 +12,9 @@ import { isPro } from "./entitlements";
 import { notSystemLog } from "./system-logs";
 import { countsForRank } from "./quests";
 
-export const MESSAGE_PROMPT_VERSION = "system-message-v5";
+// v6: free users get the base context and 60% of the word cap. Bumping the version means a SYSTEM message cached for
+// the same local day before an upgrade is not reused afterwards (accepted: at most one regenerated message per type).
+export const MESSAGE_PROMPT_VERSION = "system-message-v6";
 export const QUESTS_PROMPT_VERSION = "system-quests-v5";
 export const WEEKLY_DEBRIEF_PROMPT_VERSION = "weekly-debrief-v2";
 

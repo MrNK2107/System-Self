@@ -162,7 +162,7 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
     if (q.chainId) await abandonChain(tx, q.chainId);
     if (q.bonus) {
       // A bonus quest has no rank effect: the result is shown (zero penalty), but no score event and no shame.
-      failNotices.push({ questId: q.id, title: q.title, type: q.type as QuestType, penalty: 0 });
+      failNotices.push({ questId: q.id, title: q.title, type: q.type as QuestType, penalty: 0, bonus: true });
       continue;
     }
     const penalty = QUEST_FAIL_PENALTY[q.type as QuestType];

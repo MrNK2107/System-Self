@@ -26,6 +26,12 @@ const failed = (n: number) => ({
   payload: { questId: id(900 + n), title: `Quest ${n}`, type: "daily", penalty: 0.8 },
   createdAt: at(),
 });
+const failedBonus = (n: number) => ({
+  id: id(n),
+  kind: "quest_failed",
+  payload: { questId: id(900 + n), title: `Bonus ${n}`, type: "daily", penalty: 0, bonus: true },
+  createdAt: at(),
+});
 const mark = () => ({ id: id(72), kind: "returner_mark", payload: { count: 1, line: "Returned ×1." }, createdAt: at() });
 const streak = (n: number) => ({
   id: id(n),
@@ -220,6 +226,23 @@ test("quest_failed notices are grouped into one batch", () => {
   assert.equal(g?.kind, "quest_failed");
   assert.deepEqual(g?.notices.map((n) => n.id), [id(1), id(2), id(3)]);
   assert.equal(nextNoticeGroup(notices, new Set([id(1), id(2), id(3)])), null);
+});
+
+test("a group of only bonus failures is a quiet system notice: no failure modal, no penalty", () => {
+  const view = noticeView({ kind: "quest_failed", notices: parseNotices([failedBonus(1), failedBonus(2)]).notices });
+  assert.equal(view.modal, "system");
+  if (view.modal !== "system") return;
+  assert.equal(view.tone, "info");
+  assert.ok(view.title.includes("BONUS — no rank effect"), view.title);
+  assert.ok(view.body.includes("Bonus 1") && view.body.includes("Bonus 2"), view.body);
+  assert.ok(!/penalty|−|-0/i.test(view.title + view.body), "no penalty copy");
+});
+
+test("a mixed group shows the failure modal with only the non-bonus quests and their penalty", () => {
+  const view = noticeView({ kind: "quest_failed", notices: parseNotices([failed(1), failedBonus(2)]).notices });
+  assert.equal(view.modal, "failure");
+  if (view.modal !== "failure") return;
+  assert.deepEqual(view.failures, [{ title: "Quest 1", type: "daily", penalty: 0.8 }]);
 });
 
 test("nextNoticeGroup skips acknowledged notices and returns null when none remain", () => {

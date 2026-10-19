@@ -75,6 +75,7 @@ export function missedSlotQuest(quests: readonly Quest[], now: Date, computedAt:
     quests.find(
       (q) =>
         q.status === "active" &&
+        !q.bonus && // a bonus quest has no rank effect: no missed-slot banner
         q.domain === "BODY" &&
         q.type === "daily" &&
         q.slotStart !== undefined &&

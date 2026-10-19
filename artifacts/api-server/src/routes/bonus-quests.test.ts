@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { notices, quests, scoreEvents, userDayState } from "@workspace/db";
+import { achievements, analyticsEvents, clanMembers, clans, comebacks, dailySnapshots, notices, quests, scoreEvents, userDayState } from "@workspace/db";
 import { localDate } from "@workspace/engine";
 import { QuestCompleteResponseSchema, QuestListResponseSchema, QuestRefuseResponseSchema, QuestSchema } from "@workspace/contracts";
 import { app, assertContract, assertStoredNoticesMatchContract, auth, db, score, setup, skip, TZ } from "./game-test-helpers";
@@ -14,6 +14,10 @@ import { buildUserContext } from "../services/ai-context";
 import { buildWeeklyRecap } from "../services/recap";
 import { computeDebriefFacts } from "../services/debrief";
 import { hiddenAndTrajectoryBatch } from "../services/state";
+import { raidMetrics } from "../services/raids";
+import { clanMembersView } from "../services/clans";
+import { evaluateComeback } from "../services/comeback";
+import { withUserLock } from "../services/user-lock";
 
 after(async () => {
   await closeTestDb();
@@ -150,6 +154,7 @@ test("a bonus quest that expires fails with no score_events, a zero-penalty noti
   const failed = await db!.select().from(notices).where(and(eq(notices.userId, id), eq(notices.kind, "quest_failed")));
   assert.equal(failed.length, 1);
   assert.equal((failed[0]!.payload as { penalty: number }).penalty, 0);
+  assert.equal((failed[0]!.payload as { bonus?: boolean }).bonus, true, "the app can tell a bonus expiry from a penalty");
 });
 
 test("shame mode cannot be enabled on a bonus quest", { skip }, async () => {
@@ -186,4 +191,83 @@ test("every ranking input ignores resolved bonus quests", { skip }, async () => 
   const deferrals = await request(a()).get("/api/adherence/deferrals").set(auth(token));
   assert.equal(deferrals.status, 200);
   assert.deepEqual(deferrals.body.items, []);
+});
+
+// ---- regression: every other ranking input -------------------------------------------------------------
+
+const row = (id: string, over: Record<string, unknown>) => ({
+  userId: id, type: "daily", title: "B", description: "d", domain: "MIND", expiresAt: clock, resolvedAt: clock,
+  resolvedLocalDate: localDate(clock, TZ), bonus: true, ...over,
+});
+
+test("bonus quests do not move the clan member %, the raid discipline metric, achievements or the comeback checklist", { skip }, async () => {
+  const { token, id } = await pro();
+  const today = localDate(clock, TZ);
+  const [clan] = await db!.insert(clans).values({ name: "C1", nameLower: "c1", tag: "TST", inviteCode: "INV00001" }).returning();
+  await db!.insert(clanMembers).values({ userId: id, clanId: clan!.id, role: "leader", joinedAt: new Date(clock.getTime() - 5 * 86_400_000) });
+  const span = { start: new Date(clock.getTime() - 86_400_000), end: new Date(clock.getTime() + 86_400_000) };
+  const rate = async () => (await clanMembersView(db!, clan!.id, id, clock)).find((m) => m.isSelf)!.questCompletionRate30d;
+  const raid = async () => (await raidMetrics(db!, [clan!.id], "discipline", span)).get(clan!.id);
+
+  await db!.insert(quests).values([
+    row(id, { status: "complete" }), row(id, { status: "failed" }), row(id, { status: "failed" }), row(id, { status: "refused", refusalReason: "x" }),
+  ]);
+  assert.equal(await rate(), null, "clan member % ignores bonus rows");
+  assert.equal(await raid(), 0, "raid discipline ignores bonus rows");
+  await db!.insert(quests).values(row(id, { bonus: false, status: "complete" }));
+  assert.equal(await rate(), 100);
+  assert.equal(await raid(), 100);
+
+  // achievements: 9 completed bonus quests plus 1 regular completion is not "quest_10"
+  await db!.insert(quests).values(Array.from({ length: 9 }, () => row(id, { status: "complete" })));
+  const [active] = await db!.insert(quests).values(row(id, { bonus: false, status: "active", resolvedAt: null, resolvedLocalDate: null, expiresAt: new Date(clock.getTime() + 3600_000) })).returning();
+  const done = await request(a()).post(`/api/quests/${active!.id}/complete`).set(auth(token)).send({});
+  assert.equal(done.status, 200, JSON.stringify(done.body));
+  const unlocked = (await db!.select().from(achievements).where(eq(achievements.userId, id))).map((x) => x.achievementId);
+  assert.ok(!unlocked.includes("quest_10"), unlocked.join());
+
+  // comeback checklist: an open bonus daily does not block "complete today's quests", a bonus completion does not satisfy it
+  const comeback = async () => {
+    await db!.delete(comebacks).where(eq(comebacks.userId, id));
+    await db!.insert(comebacks).values({ userId: id, startedOn: today, gapDays: 3 });
+    const r = await withUserLock(db!, id, (tx) => evaluateComeback(tx, id, clock));
+    return r.active?.checklist.find((c) => c.key === "quests_today")?.done;
+  };
+  await db!.delete(quests).where(eq(quests.userId, id));
+  await db!.insert(quests).values(row(id, { status: "complete" }));
+  assert.equal(await comeback(), false, "only a bonus completion");
+  await db!.insert(quests).values(row(id, { bonus: false, status: "complete" }));
+  await db!.insert(quests).values(row(id, { status: "active", resolvedAt: null, resolvedLocalDate: null, expiresAt: new Date(clock.getTime() + 3600_000) }));
+  assert.equal(await comeback(), true, "an open bonus daily does not block it");
+});
+
+test("the rollover snapshot hidden score ignores bonus quests (twin user comparison)", { skip }, async () => {
+  const x = await pro("twin_x");
+  const y = await pro("twin_y");
+  const today = localDate(clock, TZ);
+  await db!.insert(quests).values([
+    row(x.id, { status: "failed", resolvedLocalDate: today }), row(x.id, { status: "failed", resolvedLocalDate: today }),
+    row(x.id, { status: "refused", refusalReason: "x", resolvedLocalDate: today }), row(x.id, { status: "failed", resolvedLocalDate: today }),
+  ]);
+  const later = new Date(clock.getTime() + 2 * 86_400_000);
+  await ensureRolledOver(db!, x.id, later);
+  await ensureRolledOver(db!, y.id, later);
+  const snap = async (id: string) => (await db!.select().from(dailySnapshots).where(eq(dailySnapshots.userId, id))).sort((p, q) => (p.localDate < q.localDate ? 1 : -1))[0]!;
+  const sx = await snap(x.id);
+  const sy = await snap(y.id);
+  assert.equal(sx.localDate, sy.localDate);
+  assert.equal(sx.hidden, sy.hidden);
+});
+
+test("a floor_session log cannot complete a floor offer through a refused bonus quest id", { skip }, async () => {
+  const { token, id } = await pro();
+  const bonusId = (await bonus(token)).body.quest.id as string;
+  const refused = await request(a()).post(`/api/quests/${bonusId}/refuse`).set(auth(token)).send({ reason: "no" });
+  assert.equal(refused.status, 200);
+  const res = await request(a()).post("/api/logs").set(auth(token)).send({
+    clientId: "fl-1", domain: "BODY", logType: "floor_session", data: { routineId: "push_floor", minutes: 13, refusedQuestId: bonusId },
+  });
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assert.equal((await db!.select().from(analyticsEvents).where(eq(analyticsEvents.name, "floor_completed"))).length, 0);
+  void id;
 });

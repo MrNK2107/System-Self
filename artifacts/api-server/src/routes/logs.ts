@@ -20,6 +20,7 @@ import { rollOverDue } from "../services/rollover";
 import { track } from "../services/analytics";
 import { applyActivityChanges } from "../services/activity";
 import { countHomeSession } from "../services/comeback";
+import { countsForRank } from "../services/quests";
 import { checkOccurredAt } from "../services/retroactive";
 import { logger } from "../lib/logger";
 
@@ -215,7 +216,7 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date(), ai: AiD
         const [refused] = await tx
           .select({ id: quests.id })
           .from(quests)
-          .where(and(eq(quests.id, refusedQuestId), eq(quests.userId, userId), eq(quests.status, "refused")))
+          .where(and(eq(quests.id, refusedQuestId), eq(quests.userId, userId), countsForRank, eq(quests.status, "refused")))
           .limit(1);
         if (refused) await track(tx, userId, "floor_completed", { logId: log!.id, questId: refused.id });
       }

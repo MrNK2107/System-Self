@@ -66,7 +66,7 @@ export default function StatsScreen() {
   const rank = user?.rank ?? "E";
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const completedQuests = quests.filter(q => q.status === "complete").length;
+  const completedQuests = quests.filter(q => q.status === "complete" && !q.bonus).length;
   const totalLogs = logs.length;
   const forbiddenLogs = logs.filter(l => l.forbidden).length;
   const shadowPhase = getShadowPhase();

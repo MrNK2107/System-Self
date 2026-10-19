@@ -52,6 +52,8 @@ test("missedSlotQuest: active daily BODY with a passed slot only", () => {
   assert.equal(missedSlotQuest([q({ ...slot, domain: "MIND" })], at(19, 0), computed), null);
   assert.equal(missedSlotQuest([q({ ...slot, type: "weekly" })], at(19, 0), computed), null);
   assert.equal(missedSlotQuest([q()], at(19, 0), computed), null);
+  // a bonus quest has no rank effect: its slot is never shown as a missed commitment
+  assert.equal(missedSlotQuest([q({ ...slot, bonus: true })], at(19, 0), computed), null);
 });
 
 test("a cached missed state never survives a local date change", () => {
