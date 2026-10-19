@@ -20,7 +20,7 @@ import { buildOnboardingPayload, draftFromParams, type IdentitySetting } from ".
 import { followPlayer } from "../../lib/social/social";
 
 const baseUrl = process.env.SMOKE_API_URL;
-const dbUrl = process.env.SMOKE_DATABASE_URL;
+const dbUrl = process.env.SMOKE_DATABASE_URL ?? "";
 if (!baseUrl || !dbUrl) {
   console.error("SMOKE_API_URL and SMOKE_DATABASE_URL are required");
   process.exit(2);

@@ -43,8 +43,9 @@ WORKDIR /app
 COPY --from=build --chown=node:node /rt/node_modules ./node_modules
 COPY --from=build --chown=node:node /rt/package.json ./package.json
 COPY --from=build --chown=node:node /repo/artifacts/api-server/dist ./dist
-# Source maps are dropped: the image carries only the bundles and migrations.
-RUN find dist -name '*.map' -delete
+# Source maps are dropped: the image carries only the bundles, migrations and the bundled licence notices
+# (dist/*.LEGAL.txt, from esbuild legalComments; the build fails if they are missing).
+RUN find dist -name '*.map' -delete && ls dist/index.mjs.LEGAL.txt dist/worker.mjs.LEGAL.txt >/dev/null
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 FROM scratch AS runtime

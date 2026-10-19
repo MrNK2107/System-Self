@@ -79,3 +79,28 @@ jobs:
         env:
           EXPO_PUBLIC_API_URL: https://api.example.invalid
         run: pnpm exec expo export --platform android
+
+  # Boots the production image the way it ships (docker-compose.prod.yml: postgres, one-shot migrate, two APIs behind
+  # nginx, worker) with secrets generated for this run, then drives one account end to end through nginx
+  # (scripts/smoke.ts). Catches image-boot regressions (e.g. a runtime module missing from the image) and checks the
+  # image stays under 250 MB. scripts/docker-smoke.sh prints every container's logs when a step fails.
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # The smoke client only needs tsx (scripts package); the API itself runs from the image. The runner's default
+      # docker builder is BuildKit with the docker driver, so the built image lands in the local store for compose.
+      - run: pnpm install --frozen-lockfile --filter @workspace/scripts...
+      - name: Build image, boot the prod stack, run the smoke
+        env:
+          API_IMAGE: system-self-api:ci
+          SMOKE_PROJECT: system-self-ci
+        run: bash scripts/docker-smoke.sh

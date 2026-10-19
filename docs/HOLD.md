@@ -10,12 +10,12 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 ## H-01 🟥 Production secrets and accounts
 **Need:** a Gemini API key for production, plus production Postgres hosting.
 **Why I can't:** these require your billing accounts.
-**Doing instead:** everything reads from env vars (`artifacts/api-server/.env.example`). All AI paths (messages, quests, debriefs, taunts, raid dispatch rewrite, free-form parsing, voice transcription) are tested with an injected fake model; the first real-key run should exercise them once, voice especially (m4a is sent as audio/mp4). Local dev uses Docker Postgres (`docker-compose.yml`). With no key, AI falls back to deterministic templated SYSTEM messages, so the app still works.
+**Doing instead:** everything reads from env vars (`artifacts/api-server/.env.example`). All AI paths (messages, quests, debriefs, taunts, raid dispatch rewrite, free-form parsing, voice transcription) are tested with an injected fake model; the first real-key run should exercise them once, voice especially (m4a is sent as audio/mp4). Local dev uses Docker Postgres (`docker-compose.yml`). With no key, AI falls back to deterministic templated SYSTEM messages, so the app still works: the end-to-end smoke (`scripts/smoke.ts`, run in CI's `docker-smoke` job) passes register → onboarding → log → quests → debrief → export → delete with no key. Outage handling: [docs/RUNBOOK.md](RUNBOOK.md#ai-outage-template-mode).
 **Resolution:**
 
 ## H-02 🟥 Hosting provider
 **Need:** where the API and worker run (Fly.io, Render, Railway, AWS, GCP…).
-**Doing instead:** a provider-neutral Docker image (`artifacts/api-server/Dockerfile`, `ROLE=api|worker|migrate`), `docker-compose.prod.yml` (postgres, migrate, two APIs behind nginx, worker; example env in `.env.prod.example`), and a ready `render.yaml` Blueprint (web API, worker, managed Postgres, pre-deploy migrate; secrets are `sync: false`). Any container host works.
+**Doing instead:** a provider-neutral Docker image (`artifacts/api-server/Dockerfile`, `ROLE=api|worker|migrate`), `docker-compose.prod.yml` (postgres, migrate, two APIs behind nginx, worker; example env in `.env.prod.example`), and a `render.yaml` Blueprint (web API, worker, managed Postgres, pre-deploy migrate; secrets are `sync: false`) that has not been run through the Render CLI yet (`render blueprints validate render.yaml` before first use). CI's `docker-smoke` job builds the image, boots the prod compose stack and smoke-tests it through nginx on every push. Any container host works. Setup: [docs/DEPLOYMENT.md](DEPLOYMENT.md); operations: [docs/RUNBOOK.md](RUNBOOK.md).
 **Resolution:**
 
 ## H-03 🟥 App store accounts and app identity
@@ -25,13 +25,13 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 
 ## H-04 🟨 Payments (RevenueCat + store products)
 **Need:** a RevenueCat project, API keys, and store products for PRO (₹499/month, ₹3,999/year per the PRD).
-**Doing instead:** server-side entitlements (`entitlements` table), a RevenueCat webhook endpoint that verifies a shared secret, and a paywall screen. Without keys the purchase button shows "unavailable", and an admin endpoint can grant PRO for testing.
+**Doing instead:** server-side entitlements (`entitlements` table), a RevenueCat webhook endpoint that verifies a shared secret, and a paywall screen. Without keys the purchase button shows "unavailable", and an admin endpoint can grant PRO for testing ([docs/RUNBOOK.md](RUNBOOK.md#grant-pro-for-support)).
 **Transfers:** `TRANSFER` webhook events (a restore moving a purchase to another account) are only applied when `REVENUECAT_API_KEY` (the secret v1 REST key) is set; without it they are logged and change nothing.
 **Resolution:**
 
 ## H-05 🟨 Email provider (verification and password reset)
 **Need:** a transactional email provider and sending domain (e.g. Resend, Postmark, SES).
-**Doing instead:** a `Mailer` interface with a Resend transport (used when `RESEND_API_KEY` is set) and a log transport otherwise. Without email, password-reset codes are only written to server logs, so production needs this.
+**Doing instead:** a `Mailer` interface with a Resend transport (used when `RESEND_API_KEY` is set) and a log transport otherwise (`MAILER=log`). With the log transport, codes appear in the server log only in development/test; in production they are redacted (`******`), so nobody can verify an email or reset a password until a provider is set. Production needs this.
 **Resolution:**
 
 ## H-06 🟨 Legal text
@@ -57,5 +57,5 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 ## H-10 🟨 Hands-on device QA in Expo Go
 **Need:** someone to open the app in Expo Go on a real phone (iOS and Android) and walk through sign-up → onboarding → logging → quests → gym → settings, reporting anything that looks or behaves wrong.
 **Why I can't:** I can't operate a phone, and the browser automation tools failed to connect in this session.
-**Doing instead:** every screen is verified by typecheck, a full Android bundle export (`expo export`), unit tests, and node smoke scripts that drive the same API calls the screens make against a real local server. Run it yourself with: `docker compose up -d postgres`, migrate, `pnpm --filter @workspace/api-server dev`, then `pnpm exec expo start --lan` in `artifacts/system-self` and scan the QR code.
+**Doing instead:** every screen is verified by typecheck, a full Android bundle export (`expo export`), unit tests, and node smoke scripts that drive the same API calls the screens make against a real local server. Run it yourself with: `docker compose up -d postgres`, migrate, `pnpm --filter @workspace/api-server dev` (and `dev:worker`), then, with `EXPO_PUBLIC_API_URL=http://<LAN IP>:3001`, `pnpm exec expo start --lan` in `artifacts/system-self` and scan the QR code. Step by step: [README.md](../README.md#dev-quick-start).
 **Resolution:**

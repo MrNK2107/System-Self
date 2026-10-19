@@ -35,6 +35,9 @@ async function buildAll() {
     // and optional native accelerators that are require()d inside try/catch. The Dockerfile installs exactly these.
     external: RUNTIME_EXTERNALS,
     sourcemap: "linked",
+    // Third-party licence notices (/*! ... */, @license, @preserve) go to dist/<entry>.mjs.LEGAL.txt, which the
+    // Dockerfile keeps in the image; the bundles link to them.
+    legalComments: "linked",
     plugins: [
       // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
       esbuildPluginPino({ transports: ["pino-pretty"] })

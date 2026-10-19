@@ -54,3 +54,6 @@ Thumbs.db
 # Load test (scripts/load): tokens of seeded users and run results
 scripts/load/.tokens.json
 scripts/load/results/
+
+# Docker smoke (scripts/docker-smoke.sh): generated per run
+.env.smoke

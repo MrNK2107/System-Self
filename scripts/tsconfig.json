@@ -4,5 +4,5 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["src", "load", "../artifacts/api-server/src/types/express.d.ts"]
+  "include": ["src", "load", "smoke.ts", "../artifacts/api-server/src/types/express.d.ts"]
 }
