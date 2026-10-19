@@ -22,6 +22,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 COPY tsconfig.base.json tsconfig.json ./
 COPY lib ./lib
 COPY artifacts/api-server ./artifacts/api-server
+# The notices generator (dist/THIRD_PARTY_NOTICES.txt) used by build.mjs.
+COPY scripts/notices.mjs ./scripts/notices.mjs
 RUN pnpm --filter @workspace/api-server run build
 # build.mjs bundles every pure-JS dependency into dist; only RUNTIME_EXTERNALS stay outside, and of those only the
 # native @node-rs/argon2 is required (the others are optional add-ons). Install the lockfile-pinned production deps,
@@ -43,9 +45,13 @@ WORKDIR /app
 COPY --from=build --chown=node:node /rt/node_modules ./node_modules
 COPY --from=build --chown=node:node /rt/package.json ./package.json
 COPY --from=build --chown=node:node /repo/artifacts/api-server/dist ./dist
-# Source maps are dropped: the image carries only the bundles, migrations and the bundled licence notices
-# (dist/*.LEGAL.txt, from esbuild legalComments; the build fails if they are missing).
-RUN find dist -name '*.map' -delete && ls dist/index.mjs.LEGAL.txt dist/worker.mjs.LEGAL.txt >/dev/null
+# Source maps are dropped: the image carries only the bundles, migrations and the licence notices: the full
+# dist/THIRD_PARTY_NOTICES.txt (every shipped package with its licence text, from build.mjs) and dist/*.LEGAL.txt
+# (esbuild legalComments). The build fails if any of them is missing or the notices file is empty.
+RUN find dist -name '*.map' -delete \
+    && ls dist/index.mjs.LEGAL.txt dist/worker.mjs.LEGAL.txt >/dev/null \
+    && test -s dist/THIRD_PARTY_NOTICES.txt \
+    && grep -q '^@node-rs/argon2@' dist/THIRD_PARTY_NOTICES.txt
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 FROM scratch AS runtime

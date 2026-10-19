@@ -12,6 +12,8 @@ export const HANDLE_NOTICE_KINDS = ["shame", "duo_checkin", "challenge_received"
  * the user get FORMER OPERATOR as the handle, reports about the user are kept (the subject id goes null, the handle
  * snapshot stays for admin review), then the user row goes and everything it owns cascades. Clan dispatches name the
  * user by id and render FORMER OPERATOR once it is gone.
+ * Used by DELETE /auth/account and POST /admin/users/:id/delete. docs/RUNBOOK.md has a last-resort SQL copy of these
+ * steps: keep it in sync when this changes.
  */
 export async function deleteAccount(tx: Tx, userId: string): Promise<void> {
   const [me] = await tx

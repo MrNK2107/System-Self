@@ -8,6 +8,7 @@
     "build": "node scripts/build.js",
     "serve": "node server/serve.js",
     "gen:legal": "node scripts/gen-legal.mjs",
+    "gen:notices": "node scripts/gen-notices.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test --test-concurrency=1 \"lib/**/*.test.ts\""
   },

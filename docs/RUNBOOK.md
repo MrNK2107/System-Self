@@ -29,6 +29,7 @@ external connection string.
 - [User data export or deletion request](#user-data-export-or-deletion-request)
 - [Grant PRO for support](#grant-pro-for-support)
 - [Reproduce the load test](#reproduce-the-load-test)
+- [Appendix: deletion by SQL (last resort)](#appendix-deletion-by-sql-last-resort)
 
 ## Deploy
 
@@ -142,7 +143,7 @@ Each one is: change the value, then deploy the API (and the worker where noted).
    from a checkout.
 4. **Re-apply deletions.** Account deletions made after the backup point are back in the restored copy. Find them in
    the API logs (`"event":"account_deleted"` with `userId`, from the backup time onward) and delete those users again
-   with the SQL in [User data export or deletion request](#user-data-export-or-deletion-request).
+   with `POST /api/admin/users/:id/delete` ([User data export or deletion request](#user-data-export-or-deletion-request)).
 5. **Switch.** Point `DATABASE_URL` at the restored database on the API and worker, start them, and run the smoke.
 6. Keep the old database read-only for a week before you drop it.
 
@@ -259,29 +260,33 @@ curl -s -X DELETE -H "Authorization: Bearer $TOKEN" -H 'content-type: applicatio
 ```
 
 **By an admin** (the user cannot sign in, or a legal request arrives by email). Verify identity first, for example a
-reply from the account's email address. There is no admin export or delete endpoint.
-- Export: restore their access with the password-reset flow, then they export in the app.
-- Delete: run the same steps as the API's `deleteAccount` (`artifacts/api-server/src/services/account.ts`) in one
-  transaction:
+reply from the account's email address. Both routes need an admin access token, log an `admin_action` line (actor,
+action, target id and status; never the request body or the data) and answer 400 for a malformed id and 404 for an
+unknown one.
 
-```sql
-\set uid '<user-uuid>'
-begin;
-select pg_advisory_xact_lock(hashtext(:'uid'));
-update notices set payload = jsonb_set(payload, '{handle}', to_jsonb('FORMER OPERATOR'::text))
- where user_id <> :'uid'
-   and kind in ('shame', 'duo_checkin', 'challenge_received', 'challenge_result')
-   and payload->>'handle' in (select username from users where id = :'uid'
-                              union select public_codename from profiles where user_id = :'uid');
-update user_reports set subject_handle = (select username from users where id = :'uid')
- where subject_id = :'uid' and subject_handle is null;
-update billing_events set payload = '{}' where user_id = :'uid';
-delete from users where id = :'uid';   -- everything the user owns cascades
-commit;
+```sh
+ADMIN_TOKEN=$(curl -s -X POST $API/api/auth/login -H 'content-type: application/json' \
+  -d '{"email":"<admin email>","password":"<password>"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).accessToken')
+# user id and username: psql "$DATABASE_URL" -c "select id, username from users where lower(email) = lower('<email>');"
+
+# Export: the same JSON document and attachment the user gets from Settings > Export my data.
+curl -s -H "Authorization: Bearer $ADMIN_TOKEN" $API/api/admin/users/<user-uuid>/export -o export-<user-uuid>.json
+
+# Delete: confirm must be the user's username (409 confirm_mismatch otherwise). Same effect as the in-app delete:
+# deleteAccount under the user's lock. An admin cannot delete their own account here (409 self_delete).
+curl -s -X POST $API/api/admin/users/<user-uuid>/delete \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -H 'Idempotency-Key: deletion-<ticket-id>' \
+  -d '{"confirm":"<username>"}'                  # 200 {"deleted":true,"id":"<user-uuid>"}
 ```
 
-Find the id with `select id, username from users where lower(email) = lower('<email>');`. Record the request and the
-date it was done. If a backup is restored later, re-apply it ([Restore a backup](#restore-a-backup)).
+The Idempotency-Key makes the delete safe to retry: a repeat with the same key replays the 200. Without a key a repeat
+answers 404, because the account is gone. Send the export to the requester over a channel tied to their verified
+identity, then delete your local copy. Record the request, the ticket and the date it was done. If a backup is
+restored later, re-apply the deletion ([Restore a backup](#restore-a-backup)).
+
+If the API is down and a deletion cannot wait, use the SQL in
+[Appendix: deletion by SQL](#appendix-deletion-by-sql-last-resort).
 
 ## Grant PRO for support
 
@@ -309,3 +314,25 @@ Seed, start a production-mode API with `LOAD_TEST=1 RATE_LIMIT_DISABLED=1` again
 database, then run the scenarios. The commands, the targets (`GET /api/state` p95 < 250 ms at 100 req/s, `POST
 /api/logs` p95 < 300 ms at 50 req/s, zero 5xx) and the last results are in
 [PERFORMANCE.md](PERFORMANCE.md#reproduce). Never point the load test, or `RATE_LIMIT_DISABLED`, at production.
+
+## Appendix: deletion by SQL (last resort)
+
+Only when the API cannot serve `POST /api/admin/users/:id/delete`. **This must mirror `deleteAccount` in
+`artifacts/api-server/src/services/account.ts`.** Check that function before running this; if it has changed, update
+this block first. Run it in one transaction:
+
+```sql
+\set uid '<user-uuid>'
+begin;
+select pg_advisory_xact_lock(hashtext(:'uid'));
+update notices set payload = jsonb_set(payload, '{handle}', to_jsonb('FORMER OPERATOR'::text))
+ where user_id <> :'uid'
+   and kind in ('shame', 'duo_checkin', 'challenge_received', 'challenge_result')
+   and payload->>'handle' in (select username from users where id = :'uid'
+                              union select public_codename from profiles where user_id = :'uid');
+update user_reports set subject_handle = (select username from users where id = :'uid')
+ where subject_id = :'uid' and subject_handle is null;
+update billing_events set payload = '{}' where user_id = :'uid';
+delete from users where id = :'uid';   -- everything the user owns cascades
+commit;
+```

@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { cp, rm } from "node:fs/promises";
+import { cp, rm, writeFile } from "node:fs/promises";
+import { bundledDependencyDirs, collectPackages, prodDependencyDirs, renderNotices } from "../../scripts/notices.mjs";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -17,7 +18,9 @@ async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
-  await esbuild({
+  const result = await esbuild({
+    absWorkingDir: artifactDir,
+    metafile: true,
     entryPoints: {
       index: path.resolve(artifactDir, "src/index.ts"),
       worker: path.resolve(artifactDir, "src/worker.ts"),
@@ -56,6 +59,16 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
   });
 
   await cp(path.resolve(artifactDir, "../../lib/db/migrations"), path.resolve(distDir, "migrations"), { recursive: true });
+
+  // dist/THIRD_PARTY_NOTICES.txt: every package that ships, i.e. everything esbuild bundled (from the metafile) plus the
+  // production dependency graph walked through node_modules (which covers the externals the image installs, such as @node-rs/argon2 and its
+  // platform binary), each with its licence file text. The Dockerfile refuses to build an image without it.
+  const packages = collectPackages([
+    ...bundledDependencyDirs(result.metafile, artifactDir),
+    ...prodDependencyDirs(artifactDir),
+  ]);
+  await writeFile(path.resolve(distDir, "THIRD_PARTY_NOTICES.txt"), renderNotices("SYSTEM // SELF API server and worker", packages));
+  console.log(`  dist/THIRD_PARTY_NOTICES.txt  ${packages.length} packages`);
 }
 
 buildAll().catch((err) => {

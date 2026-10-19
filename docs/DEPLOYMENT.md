@@ -68,8 +68,13 @@ docker build -f artifacts/api-server/Dockerfile -t system-self-api:<tag> .
 
 - Multi-stage, `node:22-alpine` flattened onto `scratch`, non-root `node` user, `tini` as PID 1, `NODE_ENV=production`.
 - `build.mjs` bundles every pure-JS dependency into `dist`; the only runtime `node_modules` is the native
-  `@node-rs/argon2` and its platform binary. Source maps are removed from the image. Third-party licence notices from
-  the bundled code are kept as `dist/index.mjs.LEGAL.txt` and `dist/worker.mjs.LEGAL.txt` (esbuild `legalComments`).
+  `@node-rs/argon2` and its platform binary. Source maps are removed from the image.
+- Third-party notices: `build.mjs` writes `dist/THIRD_PARTY_NOTICES.txt` with the name, version, licence and licence
+  file text of every package that ships (everything esbuild bundled, from its metafile, plus the production dependency
+  graph walked through node_modules, which covers the native externals). The licence comments kept inline are in
+  `dist/index.mjs.LEGAL.txt` and `dist/worker.mjs.LEGAL.txt` (esbuild `legalComments`). The image build fails if any
+  of these is missing. The app's list is `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shown in the app as
+  Settings > Open-source licences (`pnpm --filter @workspace/system-self gen:notices` after changing app dependencies).
 - Size: **212 MB** in `docker images` on Docker Desktop (that figure counts unpacked plus compressed content; the root
   filesystem is about 150 MB). The budget is 250 MB, and CI's `docker-smoke` job fails the build above it
   (`docker image inspect` Size). Details: [PERFORMANCE.md](PERFORMANCE.md).
@@ -261,7 +266,7 @@ retention in the privacy policy (HOLD H-06).
 - Rotating `JWT_SECRET` without logging anyone out uses `JWT_SECRET_PREVIOUS`; the procedure is in [RUNBOOK.md](RUNBOOK.md#rotate-the-jwt-secret). Refresh tokens are opaque database rows, not signed with `JWT_SECRET`, so a rotation never signs anyone out.
 - Email codes (verification, password reset) are capped at 5 per account and purpose per hour: `/api/auth/email/verify/request` then answers 429 `code_rate_limited`; `/api/auth/password/forgot` still answers 204 but sends nothing.
 - Password change/reset bumps the user's `tokenVersion` and revokes all refresh tokens. `/api/auth/password/change` then returns a fresh session (200, same body as login) so the caller stays signed in; reset returns 204 and the user signs in again.
-- Operator access: users with `role = "admin"` can use `/api/admin/users`, `PATCH /api/admin/users/:id/role` and `POST /api/admin/users/:id/entitlement`. Demoting the last remaining admin is refused with 409 `last_admin`.
+- Operator access: users with `role = "admin"` can use `/api/admin/users`, `PATCH /api/admin/users/:id/role`, `POST /api/admin/users/:id/entitlement`, and the support routes `GET /api/admin/users/:id/export` and `POST /api/admin/users/:id/delete` (body `{"confirm":"<username>"}`; [RUNBOOK.md](RUNBOOK.md#user-data-export-or-deletion-request)). Each support call logs an `admin_action` line with the actor, action, target id and status. Demoting the last remaining admin is refused with 409 `last_admin`.
 - Bootstrap the first admin (the user must already be registered): from a repo checkout, `DATABASE_URL=... pnpm --filter @workspace/api-server admin:grant <email>`. It exits non-zero when no user has that email. The image has no `tsx`, so from a host with only database access use `update users set role = 'admin' where email = '<email>';`.
 - Email codes are stored as HMAC-SHA256 keyed with `JWT_SECRET`, so rotating `JWT_SECRET` also invalidates outstanding codes (they expire within 15 minutes anyway).
 - Raw tokens and codes are never logged; the `authorization` and `cookie` headers are redacted.

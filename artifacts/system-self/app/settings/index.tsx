@@ -257,6 +257,8 @@ export default function SettingsScreen() {
         <Separator />
         <SettingsRow icon="shield" label="Privacy" onPress={() => router.push("/legal/privacy")} />
         <Separator />
+        <SettingsRow icon="book-open" label="Open-source licences" onPress={() => router.push("/legal/licenses")} />
+        <Separator />
         <SettingsRow icon="download" label="Export my data" trailing={null} busy={exporting} onPress={() => void exportData()} />
       </SettingsCard>
 

@@ -1,10 +1,22 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import type { Db } from "@workspace/db";
 import { buildExport } from "../services/export";
 
 export const EXPORT_RATE_LIMIT_MAX = 3;
 export const EXPORT_RATE_LIMIT_WINDOW_MS = 60 * 60_000;
+
+/** Sends an export document as the JSON attachment both the user and the admin export routes return. */
+export function sendExport(res: Response, json: string, at: Date): void {
+  res
+    .status(200)
+    .set({
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": `attachment; filename="system-self-export-${at.toISOString().slice(0, 10)}.json"`,
+      "Cache-Control": "no-store",
+    })
+    .send(json);
+}
 
 /** GET /api/account/export (authed): everything stored about the caller, as a JSON attachment. */
 export function accountRoutes(db: Db, now: () => Date = () => new Date()): IRouter {
@@ -26,14 +38,7 @@ export function accountRoutes(db: Db, now: () => Date = () => new Date()): IRout
     const { json, redacted } = await buildExport(db, req.user!.id, at);
     if (redacted > 0) req.log.warn({ event: "export_redacted", redacted }, "export_safety_net");
     req.log.info({ event: "account_export", bytes: Buffer.byteLength(json) }, "account_event");
-    res
-      .status(200)
-      .set({
-        "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="system-self-export-${at.toISOString().slice(0, 10)}.json"`,
-        "Cache-Control": "no-store",
-      })
-      .send(json);
+    sendExport(res, json, at);
   });
 
   return router;

@@ -85,6 +85,8 @@ jobs:
   # (scripts/smoke.ts). Catches image-boot regressions (e.g. a runtime module missing from the image) and checks the
   # image stays under 250 MB. scripts/docker-smoke.sh prints every container's logs when a step fails.
   docker-smoke:
+    # Only after typecheck, tests and the API build pass: a red validate makes the image run pointless.
+    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
