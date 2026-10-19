@@ -20,7 +20,8 @@ import { RankBadge } from "@/components/RankBadge";
 import { SystemMessage } from "@/components/SystemMessage";
 import { LogModal } from "@/components/LogModal";
 import { useQuery } from "@tanstack/react-query";
-import { useComebackQuery, useGameUserId } from "@/hooks/useGameState";
+import { useComebackQuery, useGameStateQuery, useGameUserId } from "@/hooks/useGameState";
+import { seasonChipLine } from "@/lib/game/life";
 import { api } from "@/lib/api/client";
 import { briefingKey } from "@/lib/game/keys";
 import { fallbackMessage, msUntilLocalMidnight, tryFetchMessage } from "@/lib/game/messages";
@@ -163,6 +164,7 @@ export default function Dashboard() {
   const { user, domainScores, quests, shadowSelf, trajectory, loading, loadError, refresh, refuseQuest, questsUpdatedAt } = useApp();
   const { pendingDebrief, acknowledgeDebrief, debriefText } = useNightlyDebrief();
   const comeback = useComebackQuery().data?.active ?? null;
+  const season = useGameStateQuery().data?.profile.season ?? null;
 
   const [logVisible, setLogVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -325,6 +327,15 @@ export default function Dashboard() {
           </View>
         )}
 
+        {season && (
+          <View
+            style={[styles.seasonChip, { borderColor: colors.primary + "60", backgroundColor: colors.card }]}
+            accessibilityLabel={`Season: ${seasonChipLine(season).title} ${seasonChipLine(season).meta}`}
+          >
+            <Text style={[styles.seasonLine, { color: colors.foreground }]}>{seasonChipLine(season).title}</Text>
+            <Text style={[styles.seasonMeta, { color: colors.mutedForeground }]}>{seasonChipLine(season).meta}</Text>
+          </View>
+        )}
         {comeback && <ComebackCard gapDays={comeback.gapDays} checklist={comeback.checklist} />}
 
         {floorOffer?.floor && (
@@ -450,6 +461,9 @@ export default function Dashboard() {
 import { Platform } from "react-native";
 
 const styles = StyleSheet.create({
+  seasonChip: { borderWidth: 1, borderRadius: 4, padding: 12, gap: 4 },
+  seasonLine: { fontSize: 12, fontWeight: "700" as const, letterSpacing: 0.5 },
+  seasonMeta: { fontSize: 11 },
   container: { flex: 1 },
   center: { alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
   stateLine: { fontSize: 13, lineHeight: 20, textAlign: "center" },

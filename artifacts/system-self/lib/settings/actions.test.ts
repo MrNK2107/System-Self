@@ -50,6 +50,8 @@ const profileBody = {
   dayNumber: 1,
   onboarded: true,
   homePathActive: false,
+  lifeContext: "student",
+  season: null,
 };
 
 test("requestEmailVerification posts to the request endpoint", async () => {

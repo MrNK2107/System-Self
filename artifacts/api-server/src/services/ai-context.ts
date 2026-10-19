@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gt, gte, inArray, isNotNull } from "drizzle-orm";
 import { logs, quests, users, type Db } from "@workspace/db";
-import { RANKED_DOMAINS, addDays, type RankedDomain } from "@workspace/engine";
+import { RANKED_DOMAINS, SEASON_PROMPT_LINE, addDays, lifeContext, type RankedDomain } from "@workspace/engine";
 import { generateOrTemplate, type AiDeps } from "../lib/ai";
 import { templateQuests, templateSystemMessage, type TemplateQuest } from "../lib/ai-fallback";
 import type { MessageType } from "@workspace/contracts";
@@ -9,7 +9,7 @@ import type { WeeklyRecap } from "./recap";
 import { buildGameState } from "./state";
 
 export const MESSAGE_PROMPT_VERSION = "system-message-v4";
-export const QUESTS_PROMPT_VERSION = "system-quests-v4";
+export const QUESTS_PROMPT_VERSION = "system-quests-v5";
 export const WEEKLY_DEBRIEF_PROMPT_VERSION = "weekly-debrief-v2";
 
 export const SYSTEM_PROMPT = `You are THE SYSTEM — a transmission from the user's future self.
@@ -56,6 +56,10 @@ export interface PromptContext {
   lockedSlots: string[];
   /** The user is on the home path (Tier I): BODY quests are home sessions. */
   homePathActive: boolean;
+  /** Life context key; shapes quest content only. */
+  lifeContext: string;
+  /** A season is active today: quests shrink, the count does not change. */
+  season: string | null;
   weeklyRecap?: WeeklyRecap;
 }
 
@@ -150,6 +154,8 @@ export async function buildUserContext(
       .filter((q) => q.domain === "BODY" && q.slotStart && q.slotEnd)
       .map((q) => `${q.slotStart}–${q.slotEnd}`),
     homePathActive: state.profile.homePathActive,
+    lifeContext: state.profile.lifeContext,
+    season: state.profile.season?.kind ?? null,
   };
 }
 
@@ -388,7 +394,9 @@ ${RANK_INTENSITY[ctx.rank] ?? RANK_INTENSITY["E"]}
 Generate ${parts.join(", ")} for this user.
 Focus on the weakest domain (${ctx.weakestDomain}) but vary the domains across all quests.
 
-Rules:${ctx.homePathActive ? `
+Rules:
+- ${lifeContext(ctx.lifeContext).promptLine}${ctx.season ? `
+- ${SEASON_PROMPT_LINE}` : ""}${ctx.homePathActive ? `
 - The user is on the home path. BODY quests must be bodyweight sessions doable at home in under 25 minutes. Use the words "home session".` : ""}
 - Each quest title is under 10 words
 - Each description is 1 sentence, specific, actionable, referencing real domain data
@@ -431,7 +439,7 @@ export async function generateQuestCandidates(ctx: PromptContext, need: QuestNee
     ai.call,
   );
   const fallback = {
-    candidates: templateQuests({ weakestDomain: ctx.weakestDomain, homePathActive: ctx.homePathActive }),
+    candidates: templateQuests({ weakestDomain: ctx.weakestDomain, homePathActive: ctx.homePathActive, seasonActive: ctx.season !== null }),
     model: "template",
     promptVersion: QUESTS_PROMPT_VERSION,
     attempts: result.attempts,
@@ -454,8 +462,9 @@ export function pickQuests(
   need: QuestNeed,
   weakestDomain: string,
   homePathActive = false,
+  seasonActive = false,
 ): TemplateQuest[] {
-  const templates = templateQuests({ weakestDomain, homePathActive });
+  const templates = templateQuests({ weakestDomain, homePathActive, seasonActive });
   const picked: TemplateQuest[] = [];
   for (const type of ["daily", "weekly", "arc"] as const) {
     const wanted = need[type];

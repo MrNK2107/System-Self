@@ -180,7 +180,7 @@ const state = {
     nightlyTime: "21:00",
     dayNumber: 1,
     onboarded: true,
-    homePathActive: false,
+    homePathActive: false, lifeContext: "student", season: null,
   },
   scores: [{ domain: "BODY", score: 20, streak: 0, lastLogDate: null }],
   tierProgress: 40,
@@ -293,7 +293,7 @@ test("setHomePath flushes the outbox first, then POSTs the flag with an idempote
   const profile = {
     username: "a", codename: "C", rank: "E", rankSince: "2026-10-01T00:00:00.000Z", identitySetting: "anonymous",
     primaryGoal: "Build a disciplined life", biggestWeakness: "BODY", morningTime: "07:00", nightlyTime: "21:00",
-    dayNumber: 1, onboarded: true, homePathActive: true,
+    dayNumber: 1, onboarded: true, homePathActive: true, lifeContext: "student", season: null,
   };
   const api = fakeApi(() => profile);
   const blocked = await setHomePath(api, { flushBeforeMutation: async () => false }, true, "hp-0");

@@ -14,6 +14,8 @@ export const deferralsKey = (userId: string | null) => ["deferrals", userId] as 
 export const shadowTakeoversKey = (userId: string | null) => ["shadow-takeovers", userId] as const;
 /** Today's comeback checklist (GET /api/comeback). */
 export const comebackKey = (userId: string | null) => ["comeback", userId] as const;
+/** Active and scheduled seasons (GET /api/seasons). */
+export const seasonsKey = (userId: string | null) => ["seasons", userId] as const;
 /** Further unseen notices (GET /api/notices), fetched only when the state says there are more. */
 export const noticesKey = (userId: string | null) => ["notices", userId] as const;
 

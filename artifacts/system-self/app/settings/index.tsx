@@ -205,6 +205,10 @@ export default function SettingsScreen() {
       {error ? <AuthNotice message={error} /> : null}
 
       <SettingsCard>
+        <SettingsRow icon="sun" label="Life context" value={profile?.season ? "Season active" : undefined} onPress={() => router.push("/settings/life")} />
+      </SettingsCard>
+
+      <SettingsCard>
         <SettingsRow icon="life-buoy" label="Need support?" onPress={() => router.push("/settings/support")} />
         <Separator />
         <SettingsRow icon="file-text" label="Terms" onPress={() => router.push("/legal/terms")} />

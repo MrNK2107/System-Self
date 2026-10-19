@@ -3,7 +3,7 @@
 // Rivals, challenges and taunts are still simulated on the device until P5 (useLocalRivals).
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQueryClient } from "@tanstack/react-query";
-import type { FloorRoutineDto } from "@workspace/contracts";
+import type { FloorRoutineDto, SeasonKind } from "@workspace/contracts";
 import { streakMultiplier } from "@workspace/engine";
 import type { OutboxItem } from "@/lib/api/outbox";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -36,6 +36,7 @@ import {
   type MutationResult,
 } from "@/lib/game/actions";
 import { invalidateGame } from "@/lib/game/keys";
+import { cancelSeason as cancelSeasonRequest, scheduleSeason as scheduleSeasonRequest } from "@/lib/game/life";
 import { pendingSetChanged, trackSentLogs } from "@/lib/game/pending";
 import { cleanupLegacyKeys } from "@/lib/game/legacy-cleanup";
 import {
@@ -133,6 +134,10 @@ interface AppContextType {
   setQuestSlot: (questId: string, slot: { slotStart: string; slotEnd: string } | null) => Promise<GameMutationResult>;
   /** Opt in to or out of the home path (Tier I home sessions before the gym). */
   setHomePath: (active: boolean) => Promise<GameMutationResult>;
+  /** Schedules a season (from tomorrow, 1-14 days). */
+  scheduleSeason: (input: { kind: SeasonKind; startsOn: string; lengthDays: number }) => Promise<GameMutationResult>;
+  /** Cancels a scheduled season (not one that has started). */
+  cancelSeason: (id: string) => Promise<GameMutationResult>;
   startQuestChain: (templateKey: string) => Promise<GameMutationResult>;
   generateQuests: () => Promise<GameMutationResult>;
 
@@ -299,6 +304,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }),
     [runGuarded],
   );
+  const scheduleSeason = useCallback(
+    (input: { kind: SeasonKind; startsOn: string; lengthDays: number }) =>
+      runGuarded("season", async (id) => {
+        const r = await scheduleSeasonRequest(api, getOutbox(), input, id);
+        return r.ok ? { ok: true as const, value: undefined } : r;
+      }),
+    [runGuarded],
+  );
+  const cancelSeason = useCallback(
+    (seasonId: string) =>
+      runGuarded("season-cancel", async (id) => {
+        const r = await cancelSeasonRequest(api, getOutbox(), seasonId, id);
+        return r.ok ? { ok: true as const, value: undefined } : r;
+      }),
+    [runGuarded],
+  );
   const startQuestChain = useCallback(
     (templateKey: string) => runGuarded("chain", (id) => startChain(api, getOutbox(), templateKey, id)),
     [runGuarded],
@@ -351,6 +372,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refuseQuest,
       setQuestSlot,
       setHomePath,
+      scheduleSeason,
+      cancelSeason,
       startQuestChain,
       generateQuests,
       syncBlocked,
@@ -364,7 +387,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
       state, stateQ.isError, stateQ.error, questsQ.data, questsQ.dataUpdatedAt, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
-      getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, setHomePath, startQuestChain, generateQuests, syncBlocked, online,
+      getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
       pendingCount, outboxSnap.failed.length, retryFailed, discardFailed, rivalsState,
     ],
   );

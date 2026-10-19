@@ -29,6 +29,7 @@ import {
 } from "@workspace/engine";
 import { NOTICE_PAGE_SIZE, type GameState, type Notice, type NoticeKind } from "@workspace/contracts";
 import { toNotice, toShadowState } from "./scoring";
+import { currentSeasons } from "./seasons";
 
 /**
  * The oldest NOTICE_PAGE_SIZE unseen notices, and whether more are waiting. With `kinds` only those kinds are
@@ -108,6 +109,7 @@ export async function buildGameState(
   }
 
   const unseen = await unseenNotices(db, userId, opts.noticeKinds);
+  const { active: season } = await currentSeasons(db, userId, today);
 
   const achievementRows = await db
     .select()
@@ -135,6 +137,8 @@ export async function buildGameState(
       dayNumber: daysBetween(localDate(profile.onboardedAt, user.timezone), today) + 1,
       onboarded: true,
       homePathActive: profile.homePathActive,
+      lifeContext: profile.lifeContext as GameState["profile"]["lifeContext"],
+      season: season ? { kind: season.kind, endsOn: season.endsOn, line: season.line } : null,
     },
     scores,
     tierProgress: tierProgress(hidden, rank),

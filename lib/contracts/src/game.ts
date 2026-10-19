@@ -9,6 +9,14 @@ export type Rank = z.infer<typeof RankSchema>;
 
 export const IdentitySettingSchema = z.enum(["anonymous", "semi-public", "public"]);
 
+export const LIFE_CONTEXT_VALUES = ["student", "professional", "shift_worker", "athlete", "founder", "parent", "traveling"] as const;
+export const LifeContextSchema = z.enum(LIFE_CONTEXT_VALUES);
+export type LifeContext = z.infer<typeof LifeContextSchema>;
+
+export const SEASON_KIND_VALUES = ["exam", "crunch", "competition", "launch", "away"] as const;
+export const SeasonKindSchema = z.enum(SEASON_KIND_VALUES);
+export type SeasonKind = z.infer<typeof SeasonKindSchema>;
+
 const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:MM");
 
 /** The runtime's canonical spelling of an IANA zone ("america/new_york" -> "America/New_York"), or null if unknown. */
@@ -54,6 +62,8 @@ export const OnboardingRequestSchema = z.object({
   clientId: z.string().min(1).max(200).optional(),
   /** Start on the home path (Tier I home sessions before the gym). */
   homePathActive: z.boolean().optional(),
+  /** Life context shaping quest content (default student). */
+  lifeContext: LifeContextSchema.optional(),
 });
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
 
@@ -64,6 +74,7 @@ export const ProfileUpdateSchema = z
     nightlyTime: HHMM,
     identitySetting: IdentitySettingSchema,
     primaryGoal: z.string().trim().min(5).max(200),
+    lifeContext: LifeContextSchema,
   })
   .partial()
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "Nothing to update" });
@@ -155,6 +166,9 @@ export const GameStateSchema = z.object({
     onboarded: z.boolean(),
     /** True while BODY quests are generated as home sessions (Tier I). */
     homePathActive: z.boolean(),
+    lifeContext: LifeContextSchema,
+    /** The season running today, or null. */
+    season: z.object({ kind: SeasonKindSchema, endsOn: z.string(), line: z.string() }).nullable(),
   }),
   scores: z.array(
     z.object({
@@ -670,3 +684,28 @@ export const HomePathRequestSchema = z.object({
   active: z.boolean(),
   clientId: ClientIdSchema.optional(),
 });
+
+// --- life context and seasons ----------------------------------------------
+
+export const SeasonRequestSchema = z.object({
+  kind: z.string().min(1).max(40),
+  startsOn: z.string().min(1).max(20),
+  lengthDays: z.number(),
+});
+export type SeasonRequest = z.infer<typeof SeasonRequestSchema>;
+
+export const SeasonSchema = z.object({
+  id: z.string(),
+  kind: SeasonKindSchema,
+  startsOn: z.string(),
+  endsOn: z.string(),
+  line: z.string(),
+});
+export type Season = z.infer<typeof SeasonSchema>;
+
+export const SeasonsResponseSchema = z.object({
+  active: SeasonSchema.nullable(),
+  scheduled: SeasonSchema.nullable(),
+  availableKinds: z.array(SeasonKindSchema),
+});
+export type SeasonsResponse = z.infer<typeof SeasonsResponseSchema>;

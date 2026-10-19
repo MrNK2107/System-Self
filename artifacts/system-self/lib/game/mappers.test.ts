@@ -28,6 +28,8 @@ const profile: GameState["profile"] = {
   dayNumber: 12,
   onboarded: true,
   homePathActive: false,
+  lifeContext: "student",
+  season: null,
 };
 
 test("toAppUser maps profile + auth user to the old User shape", () => {

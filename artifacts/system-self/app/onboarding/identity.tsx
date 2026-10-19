@@ -45,7 +45,7 @@ export default function IdentityScreen() {
 
   const handleNext = () => {
     router.push({
-      pathname: "/onboarding/calibrating",
+      pathname: "/onboarding/life",
       params: { ...params, identity },
     });
   };

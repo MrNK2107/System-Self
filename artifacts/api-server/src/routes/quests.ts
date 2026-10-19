@@ -139,7 +139,7 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
         .limit(1);
       if (batch) return boardResult(tx, userId, at, false);
       const need = await questNeed(tx, userId, await activeBoard(tx, userId, at));
-      const picked = pickQuests(generated.candidates, need, ctx.weakestDomain, ctx.homePathActive);
+      const picked = pickQuests(generated.candidates, need, ctx.weakestDomain, ctx.homePathActive, ctx.season !== null);
       if (picked.length === 0) return boardResult(tx, userId, at, false);
 
       const [created] = await tx

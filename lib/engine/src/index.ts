@@ -11,3 +11,4 @@ export * from "./chains";
 export * from "./floor";
 export * from "./dungeon";
 export * from "./comeback";
+export * from "./life";

@@ -49,6 +49,7 @@ export function onboardingRoutes(db: Db): IRouter {
           onboardedAt: now,
           onboardingRatings: body.ratings,
           homePathActive: body.homePathActive ?? false,
+          lifeContext: body.lifeContext ?? "student",
         });
         await tx
           .insert(domainScores)

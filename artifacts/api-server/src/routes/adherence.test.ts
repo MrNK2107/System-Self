@@ -187,6 +187,8 @@ const baseCtx: PromptContext = {
   deferralsThisWeek: 0,
   lockedSlots: [],
   homePathActive: false,
+  lifeContext: "student",
+  season: null,
 };
 
 test("morning briefing and nightly debrief prompts carry the deferral instruction only when deferrals exist", () => {

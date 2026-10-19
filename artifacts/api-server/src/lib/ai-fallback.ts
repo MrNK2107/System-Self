@@ -91,11 +91,23 @@ const HOME_QUESTS: Record<"daily" | "weekly" | "arc", { title: string; descripti
   arc: { title: "Three week home session arc", description: "Do a bodyweight home session at least four days in each of the next three weeks." },
 };
 
-export function templateQuests(ctx: { weakestDomain: string; homePathActive?: boolean }): TemplateQuest[] {
+/** During a season every template shrinks: BODY goes home-based, the rest ask for a short version. */
+const SEASON_QUESTS: Record<string, { title: string; description: string }> = {
+  MIND: { title: "One short focus block", description: "Complete one focused block of 25 minutes and log it." },
+  WEALTH: { title: "Five minute money check", description: "Review today's spending in five minutes and log it." },
+  SOCIAL: { title: "One short message", description: "Send one real message to a person who matters." },
+  DISCIPLINE: { title: "Keep the streak small", description: "Log one entry today. Keep it short." },
+};
+
+export function templateQuests(ctx: { weakestDomain: string; homePathActive?: boolean; seasonActive?: boolean }): TemplateQuest[] {
   const first = DOMAIN_QUESTS[ctx.weakestDomain] ? ctx.weakestDomain : "DISCIPLINE";
   const domains = [first, ...DOMAIN_ORDER.filter((d) => d !== first)].slice(0, 3);
   const pick = (domain: string, type: "daily" | "weekly" | "arc", base: { title: string; description: string }) =>
-    ctx.homePathActive && domain === "BODY" ? HOME_QUESTS[type] : base;
+    (ctx.homePathActive || ctx.seasonActive) && domain === "BODY"
+      ? HOME_QUESTS[type]
+      : ctx.seasonActive && type === "daily" && SEASON_QUESTS[domain]
+        ? SEASON_QUESTS[domain]!
+        : base;
   return [
     ...domains.map((domain) => ({ ...pick(domain, "daily", DOMAIN_QUESTS[domain]!), domain, type: "daily" as const })),
     { ...pick(first, "weekly", WEEKLY_QUESTS[first]!), domain: first, type: "weekly" as const },

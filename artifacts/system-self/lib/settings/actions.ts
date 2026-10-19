@@ -1,5 +1,6 @@
 // Network logic behind the settings screens. No React Native imports, so tests and the smoke script reuse it.
 import { z } from "zod";
+import type { LifeContext } from "@workspace/contracts";
 import { ApiError, type ApiClient } from "../api/client";
 import { AuthResponseSchema, PublicUserSchema, type PublicUser, type TokenStore } from "../api/session";
 import { PROFILE_SCHEMA, type Profile, type ScheduleTimes } from "../onboarding/actions";
@@ -26,6 +27,10 @@ export function createSettingsActions(deps: SettingsActionDeps) {
 
     updateIdentity(identitySetting: IdentitySetting): Promise<Profile> {
       return api.request("PATCH", "/api/profile", { body: { identitySetting }, schema: PROFILE_SCHEMA });
+    },
+
+    updateLifeContext(lifeContext: LifeContext): Promise<Profile> {
+      return api.request("PATCH", "/api/profile", { body: { lifeContext }, schema: PROFILE_SCHEMA });
     },
 
     /** Sends a verification code to the account email. 429 code_rate_limited when requested too often. */

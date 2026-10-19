@@ -1,6 +1,6 @@
 // Builds the POST /api/onboarding body from what the onboarding screens collect. No React Native imports,
 // so the screens, the unit tests and the smoke script share it.
-import { RANKED_DOMAIN_VALUES, type OnboardingRequest, type RankedDomain } from "@workspace/contracts";
+import { LIFE_CONTEXT_VALUES, RANKED_DOMAIN_VALUES, type LifeContext, type OnboardingRequest, type RankedDomain } from "@workspace/contracts";
 
 export type { RankedDomain };
 export const RANKED_DOMAINS: readonly RankedDomain[] = RANKED_DOMAIN_VALUES;
@@ -24,6 +24,8 @@ export interface OnboardingDraft {
   timezone: string;
   /** "Haven't trained in a while? START AT HOME FIRST": begin on the home path. */
   homePath?: boolean;
+  /** Chosen on the life step; the server defaults to student when absent. */
+  lifeContext?: LifeContext;
 }
 
 /** The request body (schema input shape: the server canonicalises the timezone). */
@@ -38,6 +40,7 @@ export interface OnboardingPayload {
   timezone: string;
   clientId?: string;
   homePathActive?: boolean;
+  lifeContext?: LifeContext;
 }
 
 /** The zone to onboard with: the device's, else the account's, else UTC. */
@@ -57,6 +60,7 @@ export function buildOnboardingPayload(draft: OnboardingDraft, clientId?: string
     nightlyTime: DEFAULT_NIGHTLY_TIME,
     timezone: draft.timezone,
     ...(draft.homePath ? { homePathActive: true } : {}),
+    ...(draft.lifeContext ? { lifeContext: draft.lifeContext } : {}),
     ...(clientId ? { clientId } : {}),
   };
 }
@@ -65,6 +69,7 @@ type Params = Record<string, string | string[] | undefined>;
 
 const one = (v: string | string[] | undefined): string => (Array.isArray(v) ? (v[0] ?? "") : (v ?? ""));
 const isDomain = (v: string): v is RankedDomain => (RANKED_DOMAINS as readonly string[]).includes(v);
+const isLifeContext = (v: string): v is LifeContext => (LIFE_CONTEXT_VALUES as readonly string[]).includes(v);
 const isIdentity = (v: string): v is IdentitySetting => v === "anonymous" || v === "semi-public" || v === "public";
 
 /** Ratings out of the `ratings` route param; a missing or damaged entry falls back to DEFAULT_RATING. */
@@ -93,6 +98,7 @@ export function draftFromParams(params: Params, timezone: string): OnboardingDra
   const weakness = one(params.weakness);
   if (primaryGoal.length < MIN_GOAL_LENGTH || !isDomain(weakness)) return null;
   const identity = one(params.identity);
+  const life = one(params.lifeContext);
   return {
     ratings: parseRatings(params.ratings),
     primaryGoal,
@@ -101,5 +107,6 @@ export function draftFromParams(params: Params, timezone: string): OnboardingDra
     identity: isIdentity(identity) ? identity : "semi-public",
     timezone,
     homePath: one(params.homePath) === "1",
+    ...(isLifeContext(life) ? { lifeContext: life } : {}),
   };
 }

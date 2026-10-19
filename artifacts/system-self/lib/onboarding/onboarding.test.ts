@@ -45,6 +45,8 @@ const profile = {
   dayNumber: 1,
   onboarded: true,
   homePathActive: false,
+  lifeContext: "student",
+  season: null,
 };
 const gameState = {
   profile,
@@ -104,6 +106,17 @@ test("payload: START AT HOME FIRST sends homePathActive; off omits it; the param
   const params = { ratings: JSON.stringify(draft.ratings), primaryGoal: "Run 5km without stopping", weakness: "BODY", identity: "public" };
   assert.equal(draftFromParams({ ...params, homePath: "1" }, "UTC")!.homePath, true);
   assert.equal(draftFromParams(params, "UTC")!.homePath, false);
+});
+
+test("payload: lifeContext is sent when chosen, omitted otherwise; the param round-trips and a bad one is dropped", () => {
+  assert.equal("lifeContext" in buildOnboardingPayload(draft), false);
+  const p = buildOnboardingPayload({ ...draft, lifeContext: "founder" });
+  assert.equal(p.lifeContext, "founder");
+  assert.equal(OnboardingRequestSchema.safeParse(p).success, true);
+  const params = { ratings: JSON.stringify(draft.ratings), primaryGoal: "Run 5km without stopping", weakness: "BODY", identity: "public" };
+  assert.equal(draftFromParams({ ...params, lifeContext: "parent" }, "UTC")!.lifeContext, "parent");
+  assert.equal(draftFromParams({ ...params, lifeContext: "pirate" }, "UTC")!.lifeContext, undefined);
+  assert.equal(draftFromParams(params, "UTC")!.lifeContext, undefined);
 });
 
 test("params: round trip, defaults for damage, null when out of order", () => {

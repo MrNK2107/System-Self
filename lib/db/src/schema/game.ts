@@ -46,6 +46,8 @@ export const profiles = pgTable("profiles", {
   homeSessions: integer("home_sessions").notNull().default(0),
   /** Completed comeback checklists ("Returned ×n"). Recognition only, never a score. */
   returnerCount: integer("returner_count").notNull().default(0),
+  /** Life context shaping quest content (never the score). */
+  lifeContext: text("life_context").notNull().default("student"),
 });
 
 export const domainScores = pgTable(
@@ -301,4 +303,18 @@ export const comebacks = pgTable(
     completedAt: ts("completed_at"),
   },
   (t) => [uniqueIndex("comebacks_user_started_idx").on(t.userId, t.startedOn)],
+);
+
+/** A scheduled stretch (1-14 days) in which quests shrink. Scoring is unchanged. */
+export const seasons = pgTable(
+  "seasons",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: userIdCol(),
+    kind: text("kind").notNull(),
+    startsOn: date("starts_on", { mode: "string" }).notNull(),
+    endsOn: date("ends_on", { mode: "string" }).notNull(),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("seasons_user_ends_idx").on(t.userId, t.endsOn)],
 );
