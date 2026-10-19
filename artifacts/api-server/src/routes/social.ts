@@ -8,6 +8,8 @@ import { withIdempotency, type HandlerResult } from "../services/idempotency";
 import { loadProjectionSubjects, projectUser, type Relation } from "../services/projection";
 import { dissolveBetween } from "../services/duo";
 import { isBlockedEitherWay, resolveHandle } from "../services/social";
+import { rematchTies } from "../services/rivals";
+import { voidActiveBetween } from "../services/challenges";
 
 const SEARCH_LIMIT = 20;
 const FOLLOWING_LIMIT = 200;
@@ -18,6 +20,10 @@ const CODENAME_PREFIX_LEN = "USER // ".length;
 
 const notFound = (): HandlerResult => ({ status: 404, body: { error: "Player not found", code: "not_found" } });
 const noContent = (): HandlerResult => ({ status: 204, body: null });
+
+/** The username kept on a report for admin review (it survives the subject's account). */
+const usernameOf = async (db: Pick<Db, "select">, userId: string) =>
+  (await db.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1))[0]?.username ?? null;
 
 /** `%`, `_` and `\` in user input match literally in a LIKE pattern. */
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -102,10 +108,11 @@ export function socialRoutes(db: Db, clock: () => Date = () => new Date()): IRou
       if (!target) return notFound();
       if (target.self) return { status: 400, body: { error: "You cannot follow yourself", code: "self_target" } };
       if (target.identitySetting === "anonymous") return notFound();
-      if (await isBlockedEitherWay(tx, me, target.userId)) {
-        return { status: 403, body: { error: "Blocked", code: "blocked" } };
-      }
+      // A block answers exactly like an unknown player (no block oracle).
+      if (await isBlockedEitherWay(tx, me, target.userId)) return notFound();
       await tx.insert(follows).values({ followerId: me, followeeId: target.userId }).onConflictDoNothing();
+      // A follow relation never stays a rival pairing (either side would be de-anonymised).
+      await rematchTies(tx, me, clock());
       return noContent();
     });
   });
@@ -159,8 +166,9 @@ export function socialRoutes(db: Db, clock: () => Date = () => new Date()): IRou
       if (!target) return notFound();
       if (target.self) return { status: 400, body: { error: "You cannot block yourself", code: "self_target" } };
       await tx.insert(blocks).values({ blockerId: me, blockedId: target.userId }).onConflictDoNothing();
-      // Blocking ends a Party of Two between the two.
+      // Blocking ends a Party of Two between the two, and voids their active named challenge (no result, no score).
       await dissolveBetween(tx, me, target.userId);
+      await voidActiveBetween(tx, me, target.userId, clock());
       // Blocking severs follows in both directions.
       await tx
         .delete(follows)
@@ -205,11 +213,12 @@ export function socialRoutes(db: Db, clock: () => Date = () => new Date()): IRou
       }
       // One open report per (reporter, subject) is enforced by the partial unique index user_reports_open_uq;
       // the insert runs in a savepoint so its violation answers 409 instead of aborting the transaction.
+      const subjectHandle = await usernameOf(tx, target.userId);
       try {
         const [row] = await tx.transaction((sp) =>
           sp
             .insert(userReports)
-            .values({ reporterId: me, subjectId: target.userId, reason: body.reason, createdAt: now })
+            .values({ reporterId: me, subjectId: target.userId, subjectHandle, reason: body.reason, createdAt: now })
             .returning({ id: userReports.id }),
         );
         return { status: 201, body: { id: row!.id } };

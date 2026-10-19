@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, gte, inArray, lte, max, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, max, ne, sql } from "drizzle-orm";
 import {
   achievements,
+  blocks,
   clanMembers,
   dailySnapshots,
   domainScores,
@@ -94,10 +95,17 @@ async function notifyShame(tx: Tx, userId: string, username: string, titles: rea
   if (titles.length === 0) return;
   const [mine] = await tx.select({ clanId: clanMembers.clanId }).from(clanMembers).where(eq(clanMembers.userId, userId)).limit(1);
   if (!mine) return;
+  // A clanmate with a block either way with the owner is told nothing.
   const mates = await tx
     .select({ userId: clanMembers.userId })
     .from(clanMembers)
-    .where(and(eq(clanMembers.clanId, mine.clanId), ne(clanMembers.userId, userId)))
+    .where(
+      and(
+        eq(clanMembers.clanId, mine.clanId),
+        ne(clanMembers.userId, userId),
+        sql`not exists (select 1 from ${blocks} b where (b.blocker_id = ${clanMembers.userId} and b.blocked_id = ${userId}) or (b.blocker_id = ${userId} and b.blocked_id = ${clanMembers.userId}))`,
+      ),
+    )
     .orderBy(asc(clanMembers.userId));
   for (const questTitle of titles) {
     for (const m of mates) await insertNotice(tx, m.userId, "shame", { handle: username, questTitle }, now);

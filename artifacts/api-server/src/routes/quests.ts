@@ -16,7 +16,7 @@ import type { AiDeps } from "../lib/ai";
 import { generateQuestsRequestSchema } from "../lib/schemas";
 import { findReplay, readKey, withIdempotency, type HandlerResult } from "../services/idempotency";
 import { rollOverBeforeToday } from "../services/rollover";
-import { requirePro } from "../services/entitlements";
+import { proRequiredUnlessPro } from "../services/entitlements";
 import { membershipOf } from "../services/clans";
 import { abandonChain, activeBoard, createQuests, hasActiveChain, slotStateOf, toQuestDto } from "../services/quests";
 import { track } from "../services/analytics";
@@ -301,10 +301,8 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
    * PRO Shame Mode, opt-in per quest (PRD 11): when this quest fails the clan is told its title (see rollover).
    * Enabling needs PRO and a clan; disabling is always allowed (a lapsed subscriber can turn it off).
    */
-  const proToEnable = requirePro(db, clock);
   router.patch(
     "/quests/:id/shame",
-    (req, res, next) => ((req.body as { enabled?: unknown } | undefined)?.enabled === false ? next() : proToEnable(req, res, next)),
     async (req, res) => {
       const questId = String(req.params.id);
       const userId = req.user!.id;
@@ -315,6 +313,10 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
       }
       await withIdempotency(db, req, res, `PATCH /quests/${questId}/shame`, async (tx) => {
         const now = clock();
+        if (body.enabled) {
+          const noPro = await proRequiredUnlessPro(tx, userId, now);
+          if (noPro) return noPro;
+        }
         await rollOverBeforeToday(tx, userId, now);
         const [quest] = await tx
           .select()

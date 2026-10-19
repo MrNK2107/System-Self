@@ -26,6 +26,7 @@ import { grantEntitlement } from "../services/entitlements";
 import { ensureRolledOver } from "../services/rollover";
 import { lockOrder, resolveChallengeById, resolveNamedChallenges } from "../services/challenges";
 import { runSocialJobs } from "../jobs/social";
+import { recentDispatches } from "../services/clans";
 import { withUserLock } from "../services/user-lock";
 
 after(async () => {
@@ -419,7 +420,8 @@ test("the social job rolls both participants and resolves a due challenge", { sk
   const { x, y } = await pair();
   const id = await active(x, y);
   await bump(y.id, "MIND", 6);
-  const out = await runSocialJobs(db!, after2h(END));
+  // The job only takes windows that ended before today (UTC): the day after the end date.
+  const out = await runSocialJobs(db!, after2h(addDays(END, 1)));
   assert.notEqual(out.challenges, "skipped");
   const r = await row(id);
   assert.equal(r.status, "resolved");
@@ -565,7 +567,7 @@ test("the job rotates: an attempted challenge goes to the back, so a stuck one c
     assert.equal((await respond(y, r.body.id, "accept")).status, 200);
     ids.push(r.body.id);
   }
-  const now = after2h(END);
+  const now = after2h(addDays(END, 1));
   const seen: string[] = [];
   const stuckFirst = async (_db: unknown, id: string) => {
     seen.push(id);
@@ -621,8 +623,12 @@ test("start fallback: the live score when the user has no snapshot at all", { sk
   assert.equal(r.challengerEnd, 77);
 });
 
+/** The clan's challenge dispatches as its members read them (rendered at read time), oldest first. */
 const dispatchTexts = async (clanId: string) =>
-  (await db!.select().from(clanDispatches).where(and(eq(clanDispatches.clanId, clanId), eq(clanDispatches.kind, "challenge"))).orderBy(clanDispatches.createdAt)).map((d) => d.text);
+  (await recentDispatches(db!, clanId, clock, 50))
+    .filter((d) => d.kind === "challenge")
+    .reverse()
+    .map((d) => d.text);
 
 test("accept and result post a clan dispatch to each participant's clan, with handles by that clan's view and no numbers", { skip }, async () => {
   const x = await mk("xena_1"); // semi-public (codename outside)

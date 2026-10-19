@@ -16,6 +16,7 @@ import { consumeEmailCode, createEmailCode, type CodePurpose } from "../lib/auth
 import { toPublicUser, type PublicUser } from "../lib/auth/public-user";
 import type { Mailer } from "../lib/mailer";
 import { rollOverDue } from "../services/rollover";
+import { deleteAccount } from "../services/account";
 import { withUserLock } from "../services/user-lock";
 
 const MIN_AGE = 16;
@@ -318,7 +319,8 @@ export function authRoutes(deps: { db: Db | null; mailer: Mailer; requireAuth: R
       res.status(401).json({ error: "Invalid password", code: "invalid_password" });
       return;
     }
-    await database().delete(users).where(eq(users.id, user.id));
+    // Under the user's lock, so no request of theirs is mid-flight; one transaction with the scrub below.
+    await withUserLock(database(), user.id, (tx) => deleteAccount(tx, user.id));
     req.log.info({ event: "account_deleted", userId: user.id }, "auth_event");
     res.status(204).end();
   });

@@ -210,6 +210,7 @@ export function rivalsRoutes(db: Db, ai: AiDeps, clock: () => Date = () => new D
     // third-person template.
     if (step1.isGhost && (FIRST_PERSON.test(generated.message) || generated.message.includes(SIGNATURE_DASH))) {
       generated.message = step1.template;
+      generated.model = "template";
     }
 
     await withIdempotency(db, req, res, TAUNT_ROUTE, async (tx) => {

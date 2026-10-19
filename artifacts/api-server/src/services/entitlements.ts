@@ -34,6 +34,17 @@ export async function grantEntitlement(
   return row!;
 }
 
+/** The 402 answer of a PRO-only request (also the body requirePro sends). */
+export const proRequiredResult = () => ({ status: 402, body: { error: "PRO required", code: PRO_REQUIRED_CODE } });
+
+/**
+ * Inside withIdempotency, after the replay lookup: a replay of a request that succeeded while the user held PRO still
+ * answers with its stored result once PRO lapses; only new work needs PRO. Mutating PRO routes use this, not requirePro.
+ */
+export async function proRequiredUnlessPro(db: Pick<Db, "select">, userId: string, now: Date) {
+  return (await isPro(db, userId, now)) ? null : proRequiredResult();
+}
+
 /** Route guard for PRO features: 402 `{ code: "pro_required" }` for everyone else. Mount after requireAuth. */
 export function requirePro(db: Pick<Db, "select">, clock: () => Date = () => new Date()): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {

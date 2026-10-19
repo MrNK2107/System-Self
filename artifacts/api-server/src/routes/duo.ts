@@ -19,6 +19,7 @@ import { withIdempotency, type HandlerResult } from "../services/idempotency";
 import { loadProjectionSubjects, projectUser } from "../services/projection";
 import { insertNotice } from "../services/scoring";
 import { isBlockedEitherWay, resolveHandle } from "../services/social";
+import { rematchTies } from "../services/rivals";
 
 const IdSchema = z.string().uuid();
 const DAY_MS = 86_400_000;
@@ -117,6 +118,8 @@ export function duoRoutes(db: Db, clock: () => Date = () => new Date()): IRouter
       }
       await tx.update(duoInvites).set({ status: "accepted" }).where(eq(duoInvites.id, inv.id));
       await cancelOpenInvites(tx, [inv.fromId, me]);
+      // A duo partner is never a rival: re-match a rival slot that pairs the two.
+      await rematchTies(tx, me, now);
       await track(tx, me, "duo_formed", {});
       return { status: 200, body: await duoView(tx, me, now) };
     });

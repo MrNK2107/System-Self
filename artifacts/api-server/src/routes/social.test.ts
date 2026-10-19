@@ -197,7 +197,7 @@ test("only public and semi-public users can be followed; non-public usernames do
   assert.equal((await db!.select().from(follows)).length, 0);
 });
 
-test("follow a blocked user -> 403 (either direction); blocking removes follows; unblock restores", { skip }, async () => {
+test("follow a blocked user -> 404 like an unknown player (either direction); blocking removes follows; unblock restores", { skip }, async () => {
   const a = app();
   const me = await mk(a, "me_1", "public");
   const pub = await mk(a, "pubby_1", "public");
@@ -209,9 +209,9 @@ test("follow a blocked user -> 403 (either direction); blocking removes follows;
   assert.equal((await db!.select().from(blocks)).length, 1);
 
   const f1 = await request(a).post(`/api/social/follow/${pub.name}`).set(auth(me.token));
-  assert.equal(f1.status, 403);
-  assert.equal(f1.body.code, "blocked");
-  assert.equal((await request(a).post(`/api/social/follow/${me.name}`).set(auth(pub.token))).status, 403);
+  assert.equal(f1.status, 404);
+  assert.equal(f1.body.code, "not_found");
+  assert.equal((await request(a).post(`/api/social/follow/${me.name}`).set(auth(pub.token))).status, 404);
   assert.equal((await request(a).get(`/api/social/profile/${pub.name}`).set(auth(me.token))).status, 404);
 
   assert.equal((await request(a).delete(`/api/social/block/${pub.name}`).set(auth(me.token))).status, 204);

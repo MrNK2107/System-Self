@@ -277,6 +277,8 @@ test("score raid sums members' hidden-score movement; only the clan sum is store
   await snap(a.members[1]!, "2026-11-21", 28);
   await snap(b.members[0]!, "2026-11-15", 50);
   await snap(b.members[0]!, "2026-11-20", 51);
+  // Three contributors per clan, so the totals may be shown (fewer would reveal personal movement).
+  for (const m of [a.members[2]!, b.members[1]!, b.members[2]!]) await snap(m, "2026-11-15", 30);
   await resolveWeeklyRaids(db!, new Date("2026-11-23T00:00:00Z"));
   const rows = await raidRows("2026-W47");
   assert.equal(rows.find((r) => r.clanId === a.id)!.metricValue, 2); // +4 and -2
@@ -390,6 +392,7 @@ test("live score-raid standings hide the values (positions only) until the raid 
   await snap(ca.members[0]!, "2026-11-17", 47);
   await snap(cb.members[0]!, "2026-11-15", 50);
   await snap(cb.members[0]!, "2026-11-17", 51);
+  for (const m of [...ca.members.slice(1), ...cb.members.slice(1)]) await snap(m, "2026-11-15", 30); // 3 contributors each
   const live = assertContract(RaidResponseSchema, (await request(a()).get("/api/clans/raid").set(auth(viewer.token))).body).raid!;
   assert.equal(live.type, "score");
   assert.equal(live.resolved, false);

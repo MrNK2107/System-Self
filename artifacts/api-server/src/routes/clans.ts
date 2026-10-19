@@ -13,7 +13,7 @@ import {
 } from "@workspace/contracts";
 import { z } from "zod";
 import { raidSummaryFor } from "../services/raids";
-import { requirePro } from "../services/entitlements";
+import { proRequiredUnlessPro } from "../services/entitlements";
 import { withIdempotency, type HandlerResult } from "../services/idempotency";
 import {
   addDispatch,
@@ -30,6 +30,7 @@ import {
   toLeaderboardItems,
   toSummaries,
 } from "../services/clans";
+import { rematchTies } from "../services/rivals";
 import type { Tx } from "../services/user-lock";
 
 const IdSchema = z.string().uuid();
@@ -53,9 +54,6 @@ const stillLeader = async (tx: Tx, userId: string, clanId: string) => {
   return !!m && m.clanId === clanId && m.role === "leader";
 };
 
-const usernameOf = async (tx: Pick<Tx, "select">, userId: string) =>
-  (await tx.select({ username: users.username }).from(users).where(eq(users.id, userId)).limit(1))[0]?.username ?? "operator";
-
 /** True for a unique violation of `constraint` (drizzle wraps the pg error in `cause`). */
 function uniqueViolation(e: unknown, constraint: string): boolean {
   const x = e as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } };
@@ -74,8 +72,10 @@ async function joinClan(tx: Tx, me: string, clanId: string, now: Date): Promise<
   if (n >= CLAN_MAX_MEMBERS) return err(409, "clan_full", "Clan is full");
   if (await blockedWithMember(tx, me, clan.id)) return err(403, "blocked", "Blocked");
   await tx.insert(clanMembers).values({ userId: me, clanId: clan.id, role: "member", joinedAt: now });
-  await addDispatch(tx, clan.id, "joined", `OPERATOR ${await usernameOf(tx, me)} JOINED. Roster: ${n + 1}.`, now);
+  await addDispatch(tx, clan.id, "joined", `OPERATOR {actor} JOINED. Roster: ${n + 1}.`, now, { templateKey: "member_joined", actorId: me });
   await syncClanStatus(tx, clan, now);
+  // A clanmate is never a rival: re-match a rival slot that pairs the joiner with a member.
+  await rematchTies(tx, me, now);
   return noContent();
 }
 
@@ -83,12 +83,14 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
   const router = Router();
 
   /** Founds a clan (PRO + verified email); the creator leads it. */
-  router.post("/clans", requirePro(db, clock), async (req, res) => {
+  router.post("/clans", async (req, res) => {
     const body = ClanCreateRequestSchema.parse(req.body ?? {});
     const me = req.user!.id;
     await withIdempotency(db, req, res, "POST /clans", async (tx) => {
       const now = clock();
-      const [u] = await tx.select({ verified: users.emailVerifiedAt, username: users.username }).from(users).where(eq(users.id, me)).limit(1);
+      const noPro = await proRequiredUnlessPro(tx, me, now);
+      if (noPro) return noPro;
+      const [u] = await tx.select({ verified: users.emailVerifiedAt }).from(users).where(eq(users.id, me)).limit(1);
       if (!u?.verified) return err(403, "email_unverified", "Verify your email to found a clan");
       if (await membershipOf(tx, me)) return alreadyInClan();
       // Inserts run in savepoints so a unique violation answers 409 (or retries the code) instead of aborting.
@@ -117,7 +119,10 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
       }
       if (!created) throw new Error("could not allocate an invite code");
       await tx.insert(clanMembers).values({ userId: me, clanId: created.id, role: "leader", joinedAt: now });
-      await addDispatch(tx, created.id, "founded", `CLAN ${created.name} [${created.tag}] FOUNDED BY ${u.username}. Forming. 8 operators required.`, now);
+      await addDispatch(tx, created.id, "founded", `CLAN ${created.name} [${created.tag}] FOUNDED BY {actor}. Forming. 8 operators required.`, now, {
+        templateKey: "clan_founded",
+        actorId: me,
+      });
       return { status: 201, body: await toClanDto(tx, created, "leader") };
     });
   });
@@ -166,7 +171,7 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
     const body: MyClanResponse = {
       clan: await toClanDto(db, clan, m.role as "leader" | "member"),
       members: await clanMembersView(db, clan.id, me, now),
-      dispatches: await recentDispatches(db, clan.id),
+      dispatches: await recentDispatches(db, clan.id, now),
       raid: null, // the app reads GET /api/clans/raid (no duplicate live computation here)
     };
     res.json(body);
@@ -201,7 +206,7 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
         return noContent();
       }
       await tx.delete(clanMembers).where(eq(clanMembers.userId, me));
-      await addDispatch(tx, clan.id, "left", `OPERATOR ${await usernameOf(tx, me)} LEFT THE CLAN.`, now);
+      await addDispatch(tx, clan.id, "left", "OPERATOR {actor} LEFT THE CLAN.", now, { templateKey: "member_left", actorId: me });
       await syncClanStatus(tx, clan, now);
       return noContent();
     });
@@ -235,7 +240,7 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
         return err(409, "not_flagged", "Only members flagged as dead weight can be removed");
       }
       await tx.delete(clanMembers).where(eq(clanMembers.userId, t.userId));
-      await addDispatch(tx, clan.id, "removed", `OPERATOR ${await usernameOf(tx, t.userId)} REMOVED. Dead weight.`, now);
+      await addDispatch(tx, clan.id, "removed", "OPERATOR {subject} REMOVED. Dead weight.", now, { templateKey: "member_removed", actorId: me, subjectId: t.userId });
       await syncClanStatus(tx, clan, now);
       return noContent();
     });
@@ -263,7 +268,7 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
       // Demote first: the partial unique index allows one leader per clan.
       await tx.update(clanMembers).set({ role: "member" }).where(eq(clanMembers.userId, me));
       await tx.update(clanMembers).set({ role: "leader" }).where(eq(clanMembers.userId, userId));
-      await addDispatch(tx, clan.id, "leader", `LEADERSHIP TRANSFERRED TO ${await usernameOf(tx, userId)}.`, now);
+      await addDispatch(tx, clan.id, "leader", "LEADERSHIP TRANSFERRED TO {subject}.", now, { templateKey: "leader_transferred", actorId: me, subjectId: userId });
       return noContent();
     });
   });

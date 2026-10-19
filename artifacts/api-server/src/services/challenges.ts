@@ -12,7 +12,7 @@
  * other user and merely tries the lock of a LOWER one (deferring on failure; the next rollover or the social job
  * resolves it). Nothing ever blocks from a higher id to a lower one, so no wait cycle can form.
  */
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { clanMembers, dailySnapshots, domainScores, follows, namedChallenges, profiles, userDayState, users, type Db, type NamedChallenge } from "@workspace/db";
 import {
   CHALLENGE_IGNORED_LINE,
@@ -22,6 +22,7 @@ import {
   type Notice,
 } from "@workspace/contracts";
 import { addDays, localDate, type RankedDomain } from "@workspace/engine";
+import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { addDispatch } from "./clans";
 import { loadProjectionSubjects, projectUser } from "./projection";
@@ -144,12 +145,28 @@ export async function openBetween(db: Reader, a: string, b: string): Promise<boo
 export async function voidOrphans(db: Pick<Db, "update">, now: Date, userId?: string): Promise<void> {
   await db
     .update(namedChallenges)
-    .set({ status: "void", resolvedAt: now })
+    .set({ status: "void", outcome: "void", resolvedAt: now })
     .where(
       and(
         inArray(namedChallenges.status, [...OPEN_STATUSES]),
         or(isNull(namedChallenges.challengerId), isNull(namedChallenges.opponentId)),
         userId ? or(eq(namedChallenges.challengerId, userId), eq(namedChallenges.opponentId, userId)) : undefined,
+      ),
+    );
+}
+
+/** A block between the two voids their active challenge: no result, no score events. Runs in the blocker's request. */
+export async function voidActiveBetween(db: Pick<Db, "update">, a: string, b: string, now: Date): Promise<void> {
+  await db
+    .update(namedChallenges)
+    .set({ status: "void", outcome: "void", resolvedAt: now })
+    .where(
+      and(
+        eq(namedChallenges.status, "active"),
+        or(
+          and(eq(namedChallenges.challengerId, a), eq(namedChallenges.opponentId, b)),
+          and(eq(namedChallenges.challengerId, b), eq(namedChallenges.opponentId, a)),
+        ),
       ),
     );
 }
@@ -261,34 +278,39 @@ async function handleFor(tx: Reader, viewerId: string, otherId: string, now: Dat
 
 /**
  * Posts a challenge line to each participant's clan (once when both share one). No scores or gains: only handles,
- * domain and days. A handle is the username for a member of that clan, else the public projection (codename unless the
- * player is public).
+ * domain and days. The line names players by `{actor}` / `{subject}` placeholders that each clan renders at read time
+ * (see renderDispatch): a member of that clan by username, anyone else by the public projection.
  */
 export async function postChallengeDispatch(
   tx: Tx,
   c: { challengerId: string; opponentId: string },
-  line: (handleOf: (userId: string) => string) => string,
+  line: { text: string; templateKey?: string; actorId?: string; subjectId?: string },
   now: Date,
 ): Promise<void> {
-  const ids = [c.challengerId, c.opponentId];
-  const members = await tx.select({ userId: clanMembers.userId, clanId: clanMembers.clanId }).from(clanMembers).where(inArray(clanMembers.userId, ids));
+  const members = await tx
+    .select({ clanId: clanMembers.clanId })
+    .from(clanMembers)
+    .where(inArray(clanMembers.userId, [c.challengerId, c.opponentId]));
   const clanIds = [...new Set(members.map((m) => m.clanId))].sort();
-  if (clanIds.length === 0) return;
-  const subjects = await loadProjectionSubjects(tx, ids, now);
   for (const clanId of clanIds) {
-    const handleOf = (userId: string) => {
-      const subject = subjects.get(userId);
-      if (!subject) return "OPERATOR";
-      const inside = members.some((m) => m.userId === userId && m.clanId === clanId);
-      return projectUser(subject, inside ? "clanmate" : "public").handle;
-    };
-    await addDispatch(tx, clanId, "challenge", line(handleOf), now);
+    await addDispatch(
+      tx,
+      clanId,
+      "challenge",
+      line.text,
+      now,
+      line.templateKey ? { templateKey: line.templateKey, actorId: line.actorId ?? null, subjectId: line.subjectId ?? null } : undefined,
+    );
   }
 }
 
-/** The dispatch line for a newly accepted challenge (challenger first). */
-export const challengeStartedLine = (handleA: string, handleB: string, domain: string, days: number) =>
-  `CHALLENGE — ${handleA} vs ${handleB} — ${domain}, ${days} days.`;
+/** The dispatch line for a newly accepted challenge: challenger (actor) vs opponent (subject). */
+export const challengeStartedLine = (c: { challengerId: string; opponentId: string }, domain: string, days: number) => ({
+  text: `CHALLENGE — {actor} vs {subject} — ${domain}, ${days} days.`,
+  templateKey: "challenge_started",
+  actorId: c.challengerId,
+  subjectId: c.opponentId,
+});
 
 /**
  * Settles one active challenge. With no `holder` it takes both user locks itself (lowest id first); with a `holder`
@@ -308,7 +330,7 @@ export async function resolveChallenge(
   if (!seen.challengerId || !seen.opponentId) {
     const [v] = await tx
       .update(namedChallenges)
-      .set({ status: "void", resolvedAt: now })
+      .set({ status: "void", outcome: "void", resolvedAt: now })
       .where(and(eq(namedChallenges.id, id), eq(namedChallenges.status, "active")))
       .returning({ id: namedChallenges.id });
     return none(v ? "void" : "inactive");
@@ -318,7 +340,7 @@ export async function resolveChallenge(
   const [c] = await tx.select().from(namedChallenges).where(eq(namedChallenges.id, id)).for("update");
   if (!c || c.status !== "active") return none("inactive");
   if (!c.challengerId || !c.opponentId) {
-    await tx.update(namedChallenges).set({ status: "void", resolvedAt: now }).where(eq(namedChallenges.id, id));
+    await tx.update(namedChallenges).set({ status: "void", outcome: "void", resolvedAt: now }).where(eq(namedChallenges.id, id));
     return none("void");
   }
   const challengerId = c.challengerId;
@@ -345,7 +367,16 @@ export async function resolveChallenge(
 
   const [done] = await tx
     .update(namedChallenges)
-    .set({ status: "resolved", challengerStart, opponentStart, challengerEnd, opponentEnd, winnerId, resolvedAt: now })
+    .set({
+      status: "resolved",
+      challengerStart,
+      opponentStart,
+      challengerEnd,
+      opponentEnd,
+      winnerId,
+      outcome: winnerId === null ? "draw" : winnerId === challengerId ? "challenger_won" : "opponent_won",
+      resolvedAt: now,
+    })
     .where(and(eq(namedChallenges.id, id), eq(namedChallenges.status, "active")))
     .returning({ id: namedChallenges.id });
   if (!done) return none("inactive");
@@ -353,7 +384,9 @@ export async function resolveChallenge(
   await postChallengeDispatch(
     tx,
     { challengerId, opponentId },
-    (handleOf) => (winnerId === null ? `CHALLENGE RESULT — draw in ${domain}.` : `CHALLENGE RESULT — ${handleOf(winnerId)} took ${domain}.`),
+    winnerId === null
+      ? { text: `CHALLENGE RESULT — draw in ${domain}.` }
+      : { text: `CHALLENGE RESULT — {actor} took ${domain}.`, templateKey: "challenge_result", actorId: winnerId },
     now,
   );
   const out: Notice[] = [];
@@ -413,27 +446,32 @@ export async function resolveChallengeById(db: Db, id: string, now: Date): Promi
 
 /**
  * The social job pass: voids challenges of deleted accounts, ignores pending ones past 48 h, then settles active
- * challenges whose window ended (rolling both participants first so their end-date snapshots exist). Returns the
- * number settled as resolved or void by this pass.
+ * challenges whose window ended before today (UTC; a window ending today is still being played somewhere, and each
+ * player's own rollover settles it), rolling both participants first so their end-date snapshots exist. Stops once
+ * `budgetMs` of wall time is spent (after at least one challenge); the next tick resumes. Returns the number settled
+ * as resolved or void by this pass.
  */
 export async function resolveNamedChallenges(
   db: Db,
   now: Date,
   limit = JOB_BATCH,
-  opts: { resolve?: typeof resolveChallengeById } = {},
+  opts: { resolve?: typeof resolveChallengeById; budgetMs?: number; nowMs?: () => number } = {},
 ): Promise<number> {
+  const budgetMs = opts.budgetMs ?? env.SOCIAL_JOB_BUDGET_MS;
+  const nowMs = opts.nowMs ?? Date.now;
+  const started = nowMs();
   await voidOrphans(db, now);
   await expirePending(db, now);
   const utcToday = now.toISOString().slice(0, 10);
   const due = await db
     .select()
     .from(namedChallenges)
-    .where(and(eq(namedChallenges.status, "active"), lte(namedChallenges.endDate, utcToday)))
+    .where(and(eq(namedChallenges.status, "active"), lt(namedChallenges.endDate, utcToday)))
     // Least recently attempted first (never attempted before all): a challenge that keeps deferring goes to the back.
     .orderBy(sql`${namedChallenges.lastAttemptAt} asc nulls first`, asc(namedChallenges.endDate), asc(namedChallenges.createdAt))
     .limit(limit);
   let settled = 0;
-  for (const c of due) {
+  for (const [i, c] of due.entries()) {
     try {
       await db.update(namedChallenges).set({ lastAttemptAt: now }).where(eq(namedChallenges.id, c.id));
       for (const userId of [c.challengerId, c.opponentId]) if (userId) await ensureRolledOver(db, userId, now);
@@ -442,11 +480,23 @@ export async function resolveNamedChallenges(
     } catch (err) {
       logger.error({ err, challengeId: c.id }, "Challenge resolution failed");
     }
+    if (nowMs() - started >= budgetMs && i < due.length - 1) {
+      logger.info({ settled, pending: due.length - i - 1 }, "Challenge resolution stopped at its time budget");
+      break;
+    }
   }
   return settled;
 }
 
 // --- reads -----------------------------------------------------------------------------------------
+
+/** A resolved challenge's result for one side, from the stored outcome (rows resolved before it existed: the winner id). */
+function viewerOutcome(r: NamedChallenge, isChallenger: boolean): "win" | "loss" | "draw" {
+  const o = r.outcome ?? (r.winnerId === null ? "draw" : r.winnerId === r.challengerId ? "challenger_won" : "opponent_won");
+  if (o === "challenger_won") return isChallenger ? "win" : "loss";
+  if (o === "opponent_won") return isChallenger ? "loss" : "win";
+  return "draw";
+}
 
 /** The challenges as `viewerId` sees them (contract shape). Handles come from projectUser; numbers are domain gains only. */
 export async function toChallengeDtos(db: Reader, viewerId: string, rows: readonly NamedChallenge[], now: Date): Promise<Challenge[]> {
@@ -509,7 +559,7 @@ export async function toChallengeDtos(db: Reader, viewerId: string, rows: readon
       endDate: r.endDate,
       myGain,
       theirGain,
-      outcome: r.status === "resolved" ? (r.winnerId === null ? "draw" : r.winnerId === viewerId ? "win" : "loss") : null,
+      outcome: r.status === "resolved" ? viewerOutcome(r, isChallenger) : null,
       line: isChallenger && r.status === "ignored" ? CHALLENGE_IGNORED_LINE : null,
     };
   });

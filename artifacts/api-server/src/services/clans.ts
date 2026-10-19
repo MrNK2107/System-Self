@@ -7,6 +7,7 @@ import {
   CLAN_INACTIVE_DAYS,
   CLAN_MIN_ACTIVE,
   CLAN_SCORE_MIN_ACTIVE,
+  FORMER_OPERATOR_HANDLE,
   type Clan,
   type ClanDispatch,
   type ClanLeaderboardItem,
@@ -72,8 +73,43 @@ export async function memberCount(db: Reader, clanId: string): Promise<number> {
   return row?.n ?? 0;
 }
 
-export async function addDispatch(tx: Pick<Db, "insert">, clanId: string, kind: string, text: string, now: Date) {
-  await tx.insert(clanDispatches).values({ clanId, kind, text, createdAt: now });
+/** The players a dispatch line names: `text` then carries `{actor}` / `{subject}` placeholders (see renderDispatch). */
+export interface DispatchRefs {
+  templateKey: string;
+  actorId?: string | null;
+  subjectId?: string | null;
+}
+
+export async function addDispatch(tx: Pick<Db, "insert">, clanId: string, kind: string, text: string, now: Date, refs?: DispatchRefs) {
+  await tx.insert(clanDispatches).values({
+    clanId,
+    kind,
+    text,
+    createdAt: now,
+    templateKey: refs?.templateKey ?? null,
+    actorId: refs?.actorId ?? null,
+    subjectId: refs?.subjectId ?? null,
+  });
+}
+
+/**
+ * Fills a templated dispatch for a member of `clanId`: a player still in the clan by username (the clanmate
+ * projection), a former member by the public projection (codename unless public), a deleted account (the id went
+ * null) as FORMER OPERATOR, which also replaces a leading `OPERATOR `. Rows without a template key render as stored.
+ */
+export function renderDispatch(
+  row: { text: string; templateKey: string | null; actorId: string | null; subjectId: string | null },
+  handleOf: (userId: string) => string | null,
+): string {
+  if (!row.templateKey) return row.text;
+  let text = row.text;
+  for (const [role, id] of [["actor", row.actorId], ["subject", row.subjectId]] as const) {
+    const token = `{${role}}`;
+    if (!text.includes(token)) continue;
+    const handle = id ? handleOf(id) : null;
+    text = handle === null ? text.split(`OPERATOR ${token}`).join(FORMER_OPERATOR_HANDLE).split(token).join(FORMER_OPERATOR_HANDLE) : text.split(token).join(handle);
+  }
+  return text;
 }
 
 /**
@@ -231,14 +267,28 @@ export async function clanMembersView(db: Reader, clanId: string, viewerId: stri
   return out;
 }
 
-export async function recentDispatches(db: Reader, clanId: string, limit = 10): Promise<ClanDispatch[]> {
+/** The clan's latest dispatches as its members see them now (names rendered at read time, see renderDispatch). */
+export async function recentDispatches(db: Reader, clanId: string, now: Date, limit = 10): Promise<ClanDispatch[]> {
   const rows = await db
     .select()
     .from(clanDispatches)
     .where(eq(clanDispatches.clanId, clanId))
     .orderBy(desc(clanDispatches.createdAt), desc(clanDispatches.id))
     .limit(limit);
-  return rows.map((r) => ({ id: r.id, kind: r.kind, text: r.text, createdAt: r.createdAt.toISOString() }));
+  const ids = [...new Set(rows.flatMap((r) => (r.templateKey ? [r.actorId, r.subjectId].filter((x): x is string => !!x) : [])))];
+  const subjects = await loadProjectionSubjects(db, ids, now);
+  const members = ids.length
+    ? new Set(
+        (await db.select({ userId: clanMembers.userId }).from(clanMembers).where(and(eq(clanMembers.clanId, clanId), inArray(clanMembers.userId, ids)))).map(
+          (m) => m.userId,
+        ),
+      )
+    : new Set<string>();
+  const handleOf = (userId: string) => {
+    const s = subjects.get(userId);
+    return s ? projectUser(s, members.has(userId) ? "clanmate" : "public").handle : null;
+  };
+  return rows.map((r) => ({ id: r.id, kind: r.kind, text: renderDispatch(r, handleOf), createdAt: r.createdAt.toISOString() }));
 }
 
 // --- daily jobs ---------------------------------------------------------------------------------

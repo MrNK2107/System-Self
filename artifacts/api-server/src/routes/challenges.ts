@@ -10,7 +10,7 @@ import {
 } from "@workspace/contracts";
 import { addDays, localDate, type RankedDomain } from "@workspace/engine";
 import { z } from "zod";
-import { requirePro } from "../services/entitlements";
+import { proRequiredUnlessPro } from "../services/entitlements";
 import { withIdempotency, type HandlerResult } from "../services/idempotency";
 import { ensureRolledOver, rollOverDue } from "../services/rollover";
 import { insertNotice } from "../services/scoring";
@@ -44,11 +44,13 @@ export function challengesRoutes(db: Db, clock: () => Date = () => new Date()): 
   const router = Router();
 
   /** Issues a named challenge (PRO) to a followed user or a clanmate. */
-  router.post("/challenges", requirePro(db, clock), async (req, res) => {
+  router.post("/challenges", async (req, res) => {
     const body = ChallengeCreateRequestSchema.parse(req.body ?? {});
     const me = req.user!.id;
     await withIdempotency(db, req, res, "POST /challenges", async (tx) => {
       const now = clock();
+      const noPro = await proRequiredUnlessPro(tx, me, now);
+      if (noPro) return noPro;
       const opp = await resolveOpponent(tx, me, body.opponent);
       if (!opp) return err(404, "not_found", "Player not found");
       if (opp.userId === me) return err(400, "self_challenge", "You cannot challenge yourself");
@@ -117,7 +119,7 @@ export function challengesRoutes(db: Db, clock: () => Date = () => new Date()): 
         return { status: 200, body: (await toChallengeDtos(tx, me, [row], now))[0]! };
       }
       if (!c.challengerId) {
-        await tx.update(namedChallenges).set({ status: "void", resolvedAt: now }).where(eq(namedChallenges.id, c.id));
+        await tx.update(namedChallenges).set({ status: "void", outcome: "void", resolvedAt: now }).where(eq(namedChallenges.id, c.id));
         return notPending();
       }
       if (c.respondBy.getTime() <= now.getTime()) {
@@ -126,7 +128,7 @@ export function challengesRoutes(db: Db, clock: () => Date = () => new Date()): 
       }
       if (!(await mayChallenge(tx, c.challengerId, me))) {
         // The challenger unfollowed or a block appeared: the challenge is withdrawn. Nothing reveals which.
-        await tx.update(namedChallenges).set({ status: "void", resolvedAt: now }).where(eq(namedChallenges.id, c.id));
+        await tx.update(namedChallenges).set({ status: "void", outcome: "void", resolvedAt: now }).where(eq(namedChallenges.id, c.id));
         return err(409, "not_pending", "This challenge was withdrawn");
       }
       const domain = c.domain as RankedDomain;
@@ -147,12 +149,7 @@ export function challengesRoutes(db: Db, clock: () => Date = () => new Date()): 
         .returning();
       if (!row) return notPending();
       const challengerId = c.challengerId;
-      await postChallengeDispatch(
-        tx,
-        { challengerId, opponentId: me },
-        (handleOf) => challengeStartedLine(handleOf(challengerId), handleOf(me), domain, c.days),
-        now,
-      );
+      await postChallengeDispatch(tx, { challengerId, opponentId: me }, challengeStartedLine({ challengerId, opponentId: me }, domain, c.days), now);
       return { status: 200, body: (await toChallengeDtos(tx, me, [row], now))[0]! };
     });
   };

@@ -4,11 +4,10 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, count, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { clanMembers, clanRaids, clans, users, type Db } from "@workspace/db";
-import type { RaidStanding as RaidStandingDto, RaidSummary } from "@workspace/contracts";
+import { CLAN_SCORE_MIN_ACTIVE, type RaidStanding as RaidStandingDto, type RaidSummary } from "@workspace/contracts";
 import {
   groupClans,
   raidDispatchText,
-  raidRivalValue,
   raidStandings,
   raidTypeForWeek,
   raidWeekOf,
@@ -43,11 +42,27 @@ export interface RaidSpan {
  * - domain: MIND logs. body: BODY logs (a completed gym session already writes its own BODY gym_session log, so
  *   sessions are not counted twice).
  * - discipline: completed / resolved quests (complete, failed, refused) resolved in the span, in percent.
- * - score: the sum over members of their hidden-score movement (daily snapshots, UTC dates of the span);
- *   a member's contribution is never exposed, only the clan's sum.
+ * - score: the sum over members of their hidden-score movement (daily snapshots dated within the span's UTC days,
+ *   the end exclusive: a snapshot of the closing Monday is the next week's); a member's contribution is never
+ *   exposed, only the clan's sum.
  */
 export async function raidMetrics(db: Reader, clanIds: string[], type: RaidType, span: RaidSpan): Promise<Map<string, number>> {
-  const out = new Map<string, number>(clanIds.map((id) => [id, 0]));
+  return new Map([...(await raidMetricsDetailed(db, clanIds, type, span))].map(([id, m]) => [id, m.value]));
+}
+
+/**
+ * raidMetrics plus, per clan, how many members made up a score-raid total (`contributors`: members with a snapshot
+ * in or before the span). Other raid types report null contributors (their totals are counts, not personal scores).
+ */
+export async function raidMetricsDetailed(
+  db: Reader,
+  clanIds: string[],
+  type: RaidType,
+  span: RaidSpan,
+): Promise<Map<string, { value: number; contributors: number | null }>> {
+  const out = new Map<string, { value: number; contributors: number | null }>(
+    clanIds.map((id) => [id, { value: 0, contributors: type === "score" ? 0 : null }]),
+  );
   if (clanIds.length === 0) return out;
   const inClan = sql`m.clan_id in (${idList(clanIds)}) and m.joined_at < ${ts(span.start)}`;
   const inSpan = (col: string) => sql`${sql.raw(col)} >= ${ts(span.start)} and ${sql.raw(col)} < ${ts(span.end)}`;
@@ -57,7 +72,7 @@ export async function raidMetrics(db: Reader, clanIds: string[], type: RaidType,
       select m.clan_id, count(*)::int as n from clan_members m join logs l on l.user_id = m.user_id
       where ${inClan} and ${domainFilter} and not l.forbidden and ${inSpan("l.occurred_at")}
       group by m.clan_id`);
-    for (const r of logsQ.rows as { clan_id: string; n: number }[]) out.set(r.clan_id, Number(r.n));
+    for (const r of logsQ.rows as { clan_id: string; n: number }[]) out.set(r.clan_id, { value: Number(r.n), contributors: null });
   } else if (type === "discipline") {
     const q = await db.execute(sql`
       select m.clan_id, count(*) filter (where q.status = 'complete')::int as done, count(*)::int as resolved
@@ -65,20 +80,23 @@ export async function raidMetrics(db: Reader, clanIds: string[], type: RaidType,
       where ${inClan} and q.status in ('complete', 'failed', 'refused') and ${inSpan("q.resolved_at")}
       group by m.clan_id`);
     for (const r of q.rows as { clan_id: string; done: number; resolved: number }[]) {
-      out.set(r.clan_id, Number(r.resolved) > 0 ? round2((Number(r.done) / Number(r.resolved)) * 100) : 0);
+      out.set(r.clan_id, { value: Number(r.resolved) > 0 ? round2((Number(r.done) / Number(r.resolved)) * 100) : 0, contributors: null });
     }
   } else {
     const startDate = utcDay(span.start);
+    // Exclusive: the span closes at a UTC midnight, so the close's own date belongs to the next span.
     const endDate = utcDay(span.end);
     const q = await db.execute(sql`
-      select m.clan_id, coalesce(sum(e.hidden - coalesce(b1.hidden, b2.hidden)), 0)::float8 as v
+      select m.clan_id, coalesce(sum(e.hidden - coalesce(b1.hidden, b2.hidden)), 0)::float8 as v, count(*)::int as n
       from clan_members m
-      cross join lateral (select hidden from daily_snapshots s where s.user_id = m.user_id and s.local_date <= ${endDate}::date order by s.local_date desc limit 1) e
+      cross join lateral (select hidden from daily_snapshots s where s.user_id = m.user_id and s.local_date < ${endDate}::date order by s.local_date desc limit 1) e
       left join lateral (select hidden from daily_snapshots s where s.user_id = m.user_id and s.local_date < ${startDate}::date order by s.local_date desc limit 1) b1 on true
-      left join lateral (select hidden from daily_snapshots s where s.user_id = m.user_id and s.local_date >= ${startDate}::date and s.local_date <= ${endDate}::date order by s.local_date asc limit 1) b2 on true
+      left join lateral (select hidden from daily_snapshots s where s.user_id = m.user_id and s.local_date >= ${startDate}::date and s.local_date < ${endDate}::date order by s.local_date asc limit 1) b2 on true
       where ${inClan}
       group by m.clan_id`);
-    for (const r of q.rows as { clan_id: string; v: number }[]) out.set(r.clan_id, round2(Number(r.v)));
+    for (const r of q.rows as { clan_id: string; v: number; n: number }[]) {
+      out.set(r.clan_id, { value: round2(Number(r.v)), contributors: Number(r.n) });
+    }
   }
   return out;
 }
@@ -153,6 +171,13 @@ export async function raidDispatch(template: string, ai: AiDeps): Promise<string
   return numbersIn(template).every((n) => have.has(n)) ? text : template;
 }
 
+/** The clan `clanId` is compared with (as raidRivalValue picks it): the best other clan, which for the leader is the runner-up. */
+function raidRivalClan(standings: readonly { clanId: string; value: number }[], clanId: string): string | null {
+  const others = standings.filter((s) => s.clanId !== clanId);
+  if (others.length === 0) return null;
+  return others.reduce((best, s) => (s.value > best.value ? s : best)).clanId;
+}
+
 /** Locks the group's rows and runs `write` unless the group was settled meanwhile. */
 async function settle(db: Db, groupId: string, now: Date, write: (tx: Tx) => Promise<void>): Promise<boolean> {
   return db.transaction(async (tx) => {
@@ -180,15 +205,28 @@ export async function resolveRaidGroup(db: Db, groupId: string, now: Date, ai: A
 
   if (rows.length < 2) return settle(db, groupId, now, async () => {});
 
-  const metrics = await raidMetrics(db, clanIds, type, { start: window.start, end: window.close });
+  const metrics = await raidMetricsDetailed(db, clanIds, type, { start: window.start, end: window.close });
+  // A score total of fewer than CLAN_SCORE_MIN_ACTIVE members would reveal their hidden-score movement: it still
+  // ranks, but its value is withheld everywhere it would be shown (dispatch, notice, standings).
+  const withheld = new Set(
+    clanIds.filter((id) => {
+      const c = metrics.get(id)?.contributors;
+      return c !== null && c !== undefined && c < CLAN_SCORE_MIN_ACTIVE;
+    }),
+  );
   const active = await activeMemberCounts(db, clanIds, window.close);
   // A clan that dropped to forming mid-week still resolves with its position but is ineligible to win the bonus.
   const forming = new Set(
     (await db.select({ id: clans.id }).from(clans).where(and(inArray(clans.id, clanIds), sql`${clans.status} <> 'active'`))).map((c) => c.id),
   );
-  const standings = raidStandings(clanIds.map((clanId) => ({ clanId, value: metrics.get(clanId) ?? 0 }))).map((s) =>
+  const standings = raidStandings(clanIds.map((clanId) => ({ clanId, value: metrics.get(clanId)?.value ?? 0 }))).map((s) =>
     forming.has(s.clanId) ? { ...s, winner: false } : s,
   );
+  const shownValue = (clanId: string) => (withheld.has(clanId) ? null : (standings.find((x) => x.clanId === clanId)?.value ?? 0));
+  const shownRival = (clanId: string) => {
+    const rival = raidRivalClan(standings, clanId);
+    return rival ? shownValue(rival) : shownValue(clanId);
+  };
   const lines = new Map<string, string>();
   for (const s of standings) {
     const template = raidDispatchText({
@@ -196,8 +234,8 @@ export async function resolveRaidGroup(db: Db, groupId: string, now: Date, ai: A
       position: s.position,
       count: standings.length,
       type,
-      value: s.value,
-      rivalValue: raidRivalValue(standings, s.clanId),
+      value: shownValue(s.clanId),
+      rivalValue: shownRival(s.clanId),
     });
     lines.set(s.clanId, await raidDispatch(template, ai));
   }
@@ -208,7 +246,7 @@ export async function resolveRaidGroup(db: Db, groupId: string, now: Date, ai: A
       const bonus = s.winner ? round2(RAID_WIN_BONUS_PER_ACTIVE * (active.get(s.clanId) ?? 0)) : 0;
       await tx
         .update(clanRaids)
-        .set({ metricValue: s.value, position: s.position, winner: s.winner, resolvedAt: now })
+        .set({ metricValue: s.value, valueHidden: withheld.has(s.clanId), position: s.position, winner: s.winner, resolvedAt: now })
         .where(and(eq(clanRaids.groupId, groupId), eq(clanRaids.clanId, s.clanId)));
       if (s.winner) {
         await tx
@@ -236,8 +274,8 @@ export async function resolveRaidGroup(db: Db, groupId: string, now: Date, ai: A
             position: s.position,
             count: standings.length,
             won: s.winner,
-            value: s.value,
-            rivalValue: raidRivalValue(standings, s.clanId),
+            value: shownValue(s.clanId),
+            rivalValue: shownRival(s.clanId),
             bonus,
             line,
           },
@@ -281,6 +319,7 @@ export async function raidSummaryFor(db: Reader, clanId: string, now: Date): Pro
   const w = raidWindow(row.weekKey);
   const resolved = group.every((g) => g.resolvedAt);
   let entries: { clanId: string; value: number }[];
+  const withheld = new Set(resolved ? group.filter((g) => g.valueHidden).map((g) => g.clanId) : []);
   if (resolved) {
     entries = group.map((g) => ({ clanId: g.clanId, value: g.metricValue }));
   } else {
@@ -293,7 +332,7 @@ export async function raidSummaryFor(db: Reader, clanId: string, now: Date): Pro
   const standings: RaidStandingDto[] = raidStandings(entries).flatMap((s) => {
     const c = info.find((i) => i.id === s.clanId);
     if (!c) return [];
-    return [{ clanId: c.id, name: c.name, tag: c.tag, clanRank: c.clanRank, isMine: c.id === clanId, metricValue: hideValues ? null : s.value, position: s.position }];
+    return [{ clanId: c.id, name: c.name, tag: c.tag, clanRank: c.clanRank, isMine: c.id === clanId, metricValue: hideValues || withheld.has(c.id) ? null : s.value, position: s.position }];
   });
   const me = standings.find((s) => s.isMine);
   if (!me || standings.length < 2) return null;

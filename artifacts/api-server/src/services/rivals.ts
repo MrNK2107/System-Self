@@ -7,8 +7,11 @@
 import { and, asc, count, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   blocks,
+  clanMembers,
   dailySnapshots,
   domainScores,
+  duoMembers,
+  follows,
   ghostRivals,
   logs,
   notices,
@@ -89,6 +92,60 @@ async function blockedWith(db: Reader, userId: string): Promise<Set<string>> {
   return new Set(rows.map((r) => (r.blocker === userId ? r.blocked : r.blocker)));
 }
 
+/**
+ * Players tied to `userId` by a relation that already shows them to each other: current clanmates, the duo partner,
+ * and follows in either direction. A tied player is never a rival (the rival codename would be de-anonymised by
+ * comparing scores and trajectories with the clan roster, the duo or the following list).
+ */
+export async function socialTiesOf(db: Reader, userId: string): Promise<Set<string>> {
+  const out = new Set<string>();
+  const [clan] = await db.select({ clanId: clanMembers.clanId }).from(clanMembers).where(eq(clanMembers.userId, userId)).limit(1);
+  if (clan) {
+    for (const m of await db.select({ userId: clanMembers.userId }).from(clanMembers).where(eq(clanMembers.clanId, clan.clanId))) out.add(m.userId);
+  }
+  const [duo] = await db.select({ duoId: duoMembers.duoId }).from(duoMembers).where(eq(duoMembers.userId, userId)).limit(1);
+  if (duo) {
+    for (const m of await db.select({ userId: duoMembers.userId }).from(duoMembers).where(eq(duoMembers.duoId, duo.duoId))) out.add(m.userId);
+  }
+  const rows = await db
+    .select({ follower: follows.followerId, followee: follows.followeeId })
+    .from(follows)
+    .where(or(eq(follows.followerId, userId), eq(follows.followeeId, userId)));
+  for (const r of rows) out.add(r.follower === userId ? r.followee : r.follower);
+  out.delete(userId);
+  return out;
+}
+
+/**
+ * Re-matches every real rival slot that now pairs `actorId` with a tied player (see socialTiesOf), right after the
+ * actor's request created the tie (a follow, a clan join, a duo accept). The actor's own slots are re-matched under
+ * the actor's lock, which the caller holds. The other side's slots need that player's lock: it is only tried (never
+ * waited for, so no lock cycle can form) and, when busy, their next read or the social job re-matches them, because
+ * ensureAssignments drops tied rivals too.
+ */
+export async function rematchTies(tx: Tx, actorId: string, now: Date): Promise<void> {
+  const ties = await socialTiesOf(tx, actorId);
+  if (ties.size === 0) return;
+  const tied = [...ties];
+  const rows = await tx
+    .select({ userId: rivalAssignments.userId })
+    .from(rivalAssignments)
+    .where(
+      or(
+        and(eq(rivalAssignments.userId, actorId), inArray(rivalAssignments.rivalUserId, tied)),
+        and(eq(rivalAssignments.rivalUserId, actorId), inArray(rivalAssignments.userId, tied)),
+      ),
+    );
+  const owners = [...new Set(rows.map((r) => r.userId))].sort();
+  for (const owner of owners) {
+    if (owner !== actorId) {
+      const res = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${owner})) as ok`);
+      if (!(res.rows[0] as { ok: boolean } | undefined)?.ok) continue;
+    }
+    await ensureAssignments(tx, owner, now);
+  }
+}
+
 /** Current scores of each assignment's rival (the ghost's, or the real player's domain scores). */
 export async function rivalScores(db: Reader, assignments: readonly RivalAssignment[]): Promise<Map<string, Scores>> {
   const out = new Map<string, Scores>();
@@ -126,7 +183,7 @@ export async function expireAssignments(tx: Pick<Tx, "update">, userId: string, 
   await tx.update(rivalAssignments).set({ expiresAt: now }).where(and(eq(rivalAssignments.userId, userId), sql`${rivalAssignments.expiresAt} > ${now}`));
 }
 
-/** Closes an open challenge without a winner (its rival is gone or blocked). No notice, outside the record. */
+/** Closes an open challenge without a winner (its rival is gone, blocked or now tied). No notice, outside the record. */
 async function voidChallenge(tx: Pick<Tx, "update">, id: string, now: Date): Promise<void> {
   await tx
     .update(rivalChallenges)
@@ -135,9 +192,10 @@ async function voidChallenge(tx: Pick<Tx, "update">, id: string, now: Date): Pro
 }
 
 /**
- * Fills the user's empty and expired slots (and slots whose real rival is now blocked) with a real match or a
- * ghost. A slot with an open challenge is kept until the challenge resolves (unless its rival is blocked: the
- * challenge is voided). Called by GET /api/rivals and the social job. Must run inside withUserLock.
+ * Fills the user's empty and expired slots (and slots whose real rival is now blocked or tied to the user, see
+ * socialTiesOf) with a real match or a ghost. A slot with an open challenge is kept until the challenge resolves
+ * (unless its rival is blocked or tied: the challenge is voided). Called by GET /api/rivals, the social job and
+ * rematchTies. Must run inside withUserLock.
  */
 export async function ensureAssignments(tx: Tx, userId: string, now: Date, opts: { candidateLimit?: number } = {}): Promise<void> {
   const [me] = await tx
@@ -156,12 +214,13 @@ export async function ensureAssignments(tx: Tx, userId: string, now: Date, opts:
     .from(rivalChallenges)
     .where(and(eq(rivalChallenges.userId, userId), isNull(rivalChallenges.outcome)));
   const blocked = await blockedWith(tx, userId);
+  const ties = await socialTiesOf(tx, userId);
 
   const kept: RivalAssignment[] = [];
   const replaced: RivalAssignment[] = [];
   for (const a of current) {
     const challenge = open.find((c) => c.assignmentId === a.id);
-    if (a.rivalUserId && blocked.has(a.rivalUserId)) {
+    if (a.rivalUserId && (blocked.has(a.rivalUserId) || ties.has(a.rivalUserId))) {
       if (challenge) await voidChallenge(tx, challenge.id, now);
       replaced.push(a);
     } else if (a.expiresAt.getTime() <= now.getTime() && !challenge) replaced.push(a);
@@ -176,7 +235,7 @@ export async function ensureAssignments(tx: Tx, userId: string, now: Date, opts:
   }
 
   const myScores = (await scoresOf(tx, [userId])).get(userId)!;
-  const picks = rank === "E" ? [] : await matchCandidates(tx, userId, rank, today, myScores, kept, blocked, now, opts.candidateLimit ?? CANDIDATE_LIMIT);
+  const picks = rank === "E" ? [] : await matchCandidates(tx, userId, rank, today, myScores, kept, new Set([...blocked, ...ties]), now, opts.candidateLimit ?? CANDIDATE_LIMIT);
   const taken = new Set(kept.map((a) => a.codename));
   const real = await scoresOf(tx, picks);
 
@@ -217,8 +276,9 @@ export async function ensureAssignments(tx: Tx, userId: string, now: Date, opts:
 }
 
 /**
- * Real players for the user's free slots, best first: same rank, active in the last 7 days, not blocked, not
- * already one of the user's rivals, hidden score within MATCH_WINDOW (preferred) or WIDE_MATCH_WINDOW.
+ * Real players for the user's free slots, best first: same rank, active in the last 7 days, not blocked or tied
+ * (`excluded`: blocks, clanmates, the duo partner, follows either way), not already one of the user's rivals,
+ * hidden score within MATCH_WINDOW (preferred) or WIDE_MATCH_WINDOW.
  */
 async function matchCandidates(
   tx: Tx,
@@ -227,11 +287,11 @@ async function matchCandidates(
   today: string,
   myScores: Scores,
   kept: readonly RivalAssignment[],
-  blocked: ReadonlySet<string>,
+  excluded: ReadonlySet<string>,
   now: Date,
   candidateLimit: number,
 ): Promise<string[]> {
-  const exclude = new Set([userId, ...blocked, ...kept.flatMap((a) => (a.rivalUserId ? [a.rivalUserId] : []))]);
+  const exclude = new Set([userId, ...excluded, ...kept.flatMap((a) => (a.rivalUserId ? [a.rivalUserId] : []))]);
   const since = new Date(now.getTime() - ACTIVE_WINDOW_MS);
   const mine = (await hiddenAndTrajectoryBatch(tx, [{ userId, today, scoreMap: myScores }])).get(userId)!.hidden;
   // Pre-sort in SQL by the distance between each candidate's latest daily snapshot hidden score and mine, so the

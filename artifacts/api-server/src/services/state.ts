@@ -90,13 +90,25 @@ export async function hiddenAndTrajectoryBatch(
     .as("ranked");
   const recent = await db.select().from(ranked).where(lte(ranked.rn, 30));
 
+  // Grouped by user once, so a batch of N users costs O(rows), not O(N x rows).
+  const group = <T extends { userId: string }>(rows: readonly T[]) => {
+    const m = new Map<string, T[]>();
+    for (const r of rows) {
+      const list = m.get(r.userId);
+      if (list) list.push(r);
+      else m.set(r.userId, [r]);
+    }
+    return m;
+  };
+  const resolvedBy = group(resolved);
+  const recentBy = group(recent);
+
   for (const e of entries) {
     const since = addDays(e.today, -29);
-    const mine = resolved.filter((q) => q.userId === e.userId && q.day !== null && q.day >= since);
+    const mine = (resolvedBy.get(e.userId) ?? []).filter((q) => q.day !== null && q.day >= since);
     const completed = mine.filter((q) => q.status === "complete").length;
     const hidden = hiddenScore(e.scoreMap, completionMultiplier(mine.length, completed));
-    const snapshots = recent
-      .filter((r) => r.userId === e.userId)
+    const snapshots = [...(recentBy.get(e.userId) ?? [])]
       .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0))
       .map((r) => ({ date: r.date, hidden: r.hidden }));
     out.set(e.userId, { hidden, trajectory: trajectory(snapshots, hidden) });
