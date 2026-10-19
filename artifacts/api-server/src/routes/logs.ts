@@ -1,8 +1,20 @@
-import { Router, type IRouter } from "express";
+import express, { Router, type IRouter, type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import { logs, profiles, quests, users, type Db } from "@workspace/db";
-import { localDate, logChanges } from "@workspace/engine";
-import { LogListQuerySchema, LogRequestSchema, parseLogData } from "@workspace/contracts";
+import { PARSE_LIMIT_PER_DAY, VOICE_LIMIT_PER_DAY, localDate, logChanges } from "@workspace/engine";
+import {
+  AI_UNAVAILABLE_CODE,
+  LogListQuerySchema,
+  LogRequestSchema,
+  PARSE_LIMIT_CODE,
+  ParseRequestSchema,
+  VOICE_LIMIT_CODE,
+  parseLogData,
+} from "@workspace/contracts";
+import { aiAvailable, type AiDeps } from "../lib/ai";
+import { parseAudio, parseText } from "../services/ai-parse";
+import { consumeDailyCall } from "../services/daily-limit";
+import { requirePro } from "../services/entitlements";
 import { withIdempotency } from "../services/idempotency";
 import { rollOverDue } from "../services/rollover";
 import { track } from "../services/analytics";
@@ -40,8 +52,73 @@ function decodeCursor(c: string): { at: Date; id: string } | null {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function logsRoutes(db: Db, clock: () => Date = () => new Date()): IRouter {
+/** Voice uploads: the container formats the app's recorder produces. Audio never exceeds 5 MB (about 120 s of speech). */
+const VOICE_TYPES = ["audio/m4a", "audio/mp4", "audio/aac", "audio/webm"] as const;
+const VOICE_MAX_BYTES = 5 * 1024 * 1024;
+/** Gemini takes m4a as an MP4 container. */
+const MODEL_MIME: Record<string, string> = { "audio/m4a": "audio/mp4" };
+
+const contentTypeOf = (req: Request) => (req.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
+
+/** 415 for any other content type, before the body is read. */
+const voiceTypeGuard: RequestHandler = (req, res, next) => {
+  if (!(VOICE_TYPES as readonly string[]).includes(contentTypeOf(req))) {
+    res.status(415).json({ error: "Unsupported audio type", code: "unsupported_media_type" });
+    return;
+  }
+  next();
+};
+
+/** The raw body as a Buffer, limited to 5 MB: a larger Content-Length is 413 before any of it is read. */
+const voiceBody: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
+  express.raw({ type: () => true, limit: VOICE_MAX_BYTES })(req, res, (err?: unknown) => {
+    if (err && (err as { type?: string }).type === "entity.too.large") {
+      res.status(413).json({ error: "Audio is larger than 5 MB", code: "audio_too_large" });
+      return;
+    }
+    next(err);
+  });
+};
+
+export function logsRoutes(db: Db, clock: () => Date = () => new Date(), ai: AiDeps = {}): IRouter {
   const router = Router();
+
+  // Free-form text to proposals. Read-only: nothing is logged or scored until the client posts a confirmed proposal
+  // to POST /logs with the text as freeText.
+  router.post("/logs/parse", async (req, res) => {
+    const { text } = ParseRequestSchema.parse(req.body);
+    if (!(await consumeDailyCall(db, req.user!.id, "parse_call", PARSE_LIMIT_PER_DAY, clock()))) {
+      res.status(429).json({ error: "Parse limit reached for today", code: PARSE_LIMIT_CODE });
+      return;
+    }
+    res.json({ proposals: await parseText(text, ai) });
+  });
+
+  // PRO voice log: a recording to { transcript, proposals }. Read-only too, and the audio is kept in memory for
+  // this request only: it is never stored, and neither it nor the transcript is logged.
+  router.post("/logs/voice", requirePro(db, clock), voiceTypeGuard, voiceBody, async (req, res) => {
+    const body: unknown = req.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      res.status(400).json({ error: "No audio received", code: "empty_audio" });
+      return;
+    }
+    if (!aiAvailable()) {
+      res.status(503).json({ error: "Voice logging is unavailable", code: AI_UNAVAILABLE_CODE });
+      return;
+    }
+    if (!(await consumeDailyCall(db, req.user!.id, "voice_call", VOICE_LIMIT_PER_DAY, clock()))) {
+      res.status(429).json({ error: "Voice limit reached for today", code: VOICE_LIMIT_CODE });
+      return;
+    }
+    const type = contentTypeOf(req);
+    const out = await parseAudio({ data: body, mimeType: MODEL_MIME[type] ?? type }, ai);
+    if (!out.ok) {
+      if (out.code === "audio_too_long") res.status(422).json({ error: "Recording is longer than 120 seconds", code: "audio_too_long" });
+      else res.status(503).json({ error: "Voice logging is unavailable", code: AI_UNAVAILABLE_CODE });
+      return;
+    }
+    res.json({ transcript: out.transcript, proposals: out.proposals });
+  });
 
   router.post("/logs", async (req, res) => {
     const body = LogRequestSchema.parse(req.body);

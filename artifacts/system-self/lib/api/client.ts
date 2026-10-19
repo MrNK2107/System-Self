@@ -52,6 +52,10 @@ export interface RequestOptions<T> {
   idempotencyKey?: string;
   /** Default true. false sends no token and never refreshes (login, register, ...). */
   auth?: boolean;
+  /** A raw (non-JSON) request body, for example a voice recording. Replaces `body`. */
+  binary?: { body: Blob | ArrayBuffer; contentType: string };
+  /** Overrides the 30 s request timeout (an upload followed by an AI call needs longer). */
+  timeoutMs?: number;
 }
 
 export interface ApiClient {
@@ -95,17 +99,18 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
   // The timeout covers the whole exchange, including reading the body.
   async function send(method: string, path: string, opts: RequestOptions<unknown>, token: string | null): Promise<Reply> {
     const headers: Record<string, string> = { Accept: "application/json" };
-    if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+    if (opts.binary) headers["Content-Type"] = opts.binary.contentType;
+    else if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (token) headers.Authorization = `Bearer ${token}`;
     if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS);
     try {
       const res = await deps.fetch(`${deps.baseUrl}${path}`, {
         method,
         headers,
-        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        body: opts.binary ? opts.binary.body : opts.body === undefined ? undefined : JSON.stringify(opts.body),
         signal: controller.signal,
       });
       const text = await res.text();

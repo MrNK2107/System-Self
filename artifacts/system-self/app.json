@@ -14,7 +14,10 @@
       "backgroundColor": "#111318"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "THE SYSTEM listens only while you hold the button."
+      }
     },
     "android": {
       "softwareKeyboardLayoutMode": "pan"
@@ -26,7 +29,13 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "THE SYSTEM listens only while you hold the button."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -33,9 +33,19 @@ function isRetryableError(error: unknown): boolean {
 
 export type ModelCaller = (model: string, options: AiCallOptions) => Promise<string>;
 
+/** The audio of a voice log, sent inline to the model. It lives in memory for the request only. */
+export interface AudioInput {
+  data: Buffer;
+  mimeType: string;
+}
+
+export type AudioModelCaller = (model: string, options: AiCallOptions, audio: AudioInput) => Promise<string>;
+
 /** Injectable AI dependency (tests pass a fake model; production leaves it unset for Gemini). */
 export interface AiDeps {
   call?: ModelCaller;
+  /** Audio-input model call (voice logs). */
+  audio?: AudioModelCaller;
 }
 
 export function aiAvailable(): boolean {
@@ -51,6 +61,28 @@ async function callModel(model: string, options: AiCallOptions): Promise<string>
   const response = await ai.models.generateContent({
     model,
     contents: options.prompt,
+    config: {
+      systemInstruction: options.systemInstruction,
+      maxOutputTokens: options.maxOutputTokens,
+      temperature: options.temperature,
+    },
+  });
+  return (response.text ?? "").trim();
+}
+
+async function callAudioModel(model: string, options: AiCallOptions, audio: AudioInput): Promise<string> {
+  if (!env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY must be set.");
+  }
+  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+  const response = await ai.models.generateContent({
+    model,
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: options.prompt }, { inlineData: { mimeType: audio.mimeType, data: audio.data.toString("base64") } }],
+      },
+    ],
     config: {
       systemInstruction: options.systemInstruction,
       maxOutputTokens: options.maxOutputTokens,
@@ -113,4 +145,17 @@ export async function generateOrTemplate(
     logger.warn({ err: error instanceof Error ? error.message : String(error) }, "AI generation failed; using template");
     return { text: "", model: "template", attempts: env.GEMINI_RETRY_COUNT + 1 };
   }
+}
+
+/**
+ * Audio input through the same model order, retries and fallback as text. Throws when every attempt fails.
+ * Without a key it resolves with model "template" and empty text, like generateWithFallback: voice callers check
+ * aiAvailable first and answer 503 ai_unavailable.
+ */
+export function generateFromAudio(
+  options: AiCallOptions,
+  audio: AudioInput,
+  call: AudioModelCaller = callAudioModel,
+): Promise<AiCallResult> {
+  return generateWithFallback(options, (model, o) => call(model, o, audio));
 }

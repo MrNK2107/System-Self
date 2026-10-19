@@ -63,6 +63,7 @@
     "@tanstack/react-query-persist-client": "^5.104.4",
     "@workspace/contracts": "workspace:*",
     "@workspace/engine": "workspace:*",
+    "expo-audio": "~1.1.1",
     "expo-secure-store": "~15.0.8"
   }
 }

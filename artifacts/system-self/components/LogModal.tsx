@@ -14,6 +14,9 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CustomLogSection } from "@/components/CustomLogSection";
+import { FreeFormLog } from "@/components/FreeFormLog";
+import type { LogProposalDto } from "@workspace/contracts";
+import { proposalToFormValues } from "@/lib/freeform/freeform";
 import { useColors } from "@/hooks/useColors";
 import { useApp, getStreakMultiplier, getStreakTier, type Domain } from "@/context/AppContext";
 import { ALL_DOMAINS, DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
@@ -216,6 +219,18 @@ export function LogModal({ visible, onClose }: LogModalProps) {
     setSubmitError(null);
   };
 
+  // EDIT on a free-form proposal: the structured form opens prefilled, the original text becomes the note.
+  const handleEditProposal = (p: LogProposalDto, text: string) => {
+    Haptics.selectionAsync();
+    setIsForbidden(false);
+    setShowForbiddenWarning(false);
+    setSelectedDomain(p.domain);
+    setSelectedType(p.logType);
+    setValues(proposalToFormValues(p));
+    setNote(text.slice(0, 2000));
+    setSubmitError(null);
+  };
+
   const handleToggleForbidden = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     if (!isForbidden) {
@@ -287,6 +302,8 @@ export function LogModal({ visible, onClose }: LogModalProps) {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false}>
+          <FreeFormLog onLogged={onClose} onEdit={handleEditProposal} />
+
           {/* Forbidden mode toggle */}
           <TouchableOpacity
             style={[

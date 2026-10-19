@@ -117,3 +117,17 @@ test("shouldRetryQuery retries only network / 5xx, at most twice", () => {
   assert.equal(shouldRetryQuery(0, s404), false);
   assert.equal(shouldRetryQuery(0, new Error("boom")), false);
 });
+
+test("a binary body is sent as is with its own content type, authorised, and a longer timeout can be set", async () => {
+  const seen: { type: string | null; body: unknown; auth: string | null }[] = [];
+  const fetchImpl = (async (_url: string, init?: RequestInit) => {
+    const h = new Headers(init?.headers);
+    seen.push({ type: h.get("content-type"), body: init?.body, auth: h.get("authorization") });
+    return json(200, { ok: true });
+  }) as unknown as typeof fetch;
+  const client = createApiClient({ fetch: fetchImpl, tokens: memoryTokens(session(1)), baseUrl: "http://x.test", onSessionExpired: () => {} });
+  const audio = new Uint8Array([1, 2, 3]).buffer;
+  const out = await client.request("POST", "/api/logs/voice", { binary: { body: audio, contentType: "audio/m4a" }, timeoutMs: 60_000 });
+  assert.deepEqual(out, { ok: true });
+  assert.deepEqual(seen, [{ type: "audio/m4a", body: audio, auth: "Bearer access-1" }]);
+});

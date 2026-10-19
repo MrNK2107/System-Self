@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { RankedDomain } from "./game";
+import { RankedDomainSchema, type RankedDomain } from "./game";
 
 const int = (min: number, max: number) => z.number().int().min(min).max(max);
 const money = z.number().positive().finite().max(1e12);
@@ -65,3 +65,27 @@ export function parseLogData(domain: RankedDomain, logType: string, data: unknow
   const out = Object.fromEntries(Object.entries(parsed.data as Record<string, unknown>).filter(([, v]) => v !== undefined));
   return { ok: true, data: out };
 }
+
+/** Free-form logging (PRD 18). A proposal is a suggestion only: nothing is logged until the client posts it to /api/logs. */
+export const PARSE_TEXT_MAX_CHARS = 1000;
+export const PARSE_LIMIT_CODE = "parse_limit";
+export const VOICE_LIMIT_CODE = "voice_limit";
+export const AI_UNAVAILABLE_CODE = "ai_unavailable";
+
+export const ParseRequestSchema = z.object({ text: z.string().trim().min(1).max(PARSE_TEXT_MAX_CHARS) });
+export type ParseRequest = z.infer<typeof ParseRequestSchema>;
+
+export const LogProposalSchema = z.object({
+  domain: RankedDomainSchema,
+  logType: z.string().min(1).max(40),
+  data: z.record(z.string(), z.unknown()),
+  confidence: z.number().min(0).max(1),
+});
+export type LogProposalDto = z.infer<typeof LogProposalSchema>;
+
+export const ParseResponseSchema = z.object({ proposals: z.array(LogProposalSchema).max(3) });
+export type ParseResponse = z.infer<typeof ParseResponseSchema>;
+
+/** The transcript is the `freeText` the client attaches to each confirmed proposal (that field takes at most 2000 characters). */
+export const VoiceResponseSchema = z.object({ transcript: z.string().max(2000), proposals: z.array(LogProposalSchema).max(3) });
+export type VoiceResponse = z.infer<typeof VoiceResponseSchema>;
