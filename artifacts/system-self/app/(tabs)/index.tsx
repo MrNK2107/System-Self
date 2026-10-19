@@ -30,7 +30,7 @@ import { ShadowConfrontationModal } from "@/components/ShadowConfrontationModal"
 import { RefuseSheet } from "@/components/RefuseSheet";
 import { FloorQuestCard } from "@/components/FloorQuestCard";
 import { shadowTallyLine } from "@/lib/game/adherence";
-import { missedSlotLine, missedSlotQuest } from "@/lib/game/slots";
+import { missedSlotLine, missedSlotQuest, slotStateStale } from "@/lib/game/slots";
 import type { Quest, RefuseOutcome } from "@/context/AppContext";
 
 function localDateString(now: Date = new Date()): string {
@@ -159,7 +159,7 @@ export default function Dashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const userId = useGameUserId();
-  const { user, domainScores, quests, shadowSelf, trajectory, loading, loadError, refresh, refuseQuest } = useApp();
+  const { user, domainScores, quests, shadowSelf, trajectory, loading, loadError, refresh, refuseQuest, questsUpdatedAt } = useApp();
   const { pendingDebrief, acknowledgeDebrief, debriefText } = useNightlyDebrief();
 
   const [logVisible, setLogVisible] = useState(false);
@@ -169,16 +169,22 @@ export default function Dashboard() {
   const [refuseBusy, setRefuseBusy] = useState(false);
   const [floorOffer, setFloorOffer] = useState<RefuseOutcome | null>(null);
   // The banner re-checks the device clock once a minute so a slot that lapses while the app is open shows up.
+  // When the local date changes, the cached slot states are stale: refetch instead of trusting them.
   const [clock, setClock] = useState(() => new Date());
+  const computedAt = new Date(questsUpdatedAt || clock.getTime());
+  const dateChanged = slotStateStale(clock, computedAt);
   React.useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 60_000);
     return () => clearInterval(t);
   }, []);
+  React.useEffect(() => {
+    if (dateChanged) void refresh();
+  }, [dateChanged, refresh]);
 
   const rank = user?.rank ?? "E";
   const activeQuests = quests.filter(q => q.status === "active");
   const completedToday = quests.filter(q => q.status === "complete").length;
-  const missed = missedSlotQuest(quests, clock);
+  const missed = missedSlotQuest(quests, clock, computedAt);
 
   const confirmRefuse = async (reason: string) => {
     if (!refusing || refuseBusy) return;

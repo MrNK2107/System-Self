@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildSlot, durationsFor, missedSlotLine, missedSlotQuest, nowHHMM, slotLabel, slotStartOptions } from "./slots";
+import { buildSlot, durationsFor, missedSlotLine, missedSlotQuest, nowHHMM, slotLabel, slotStartOptions, slotStateStale } from "./slots";
 import type { Quest } from "./types";
 
 const q = (over: Partial<Quest> = {}): Quest => ({
@@ -37,13 +37,29 @@ test("slotLabel and the banner line", () => {
   assert.equal(missedSlotLine("17:30", at(17, 42)), "You chose 17:30. It is 17:42.");
 });
 
-test("missedSlotQuest: active BODY with a passed slot only", () => {
-  const slot = { slotStart: "17:30", slotEnd: "18:00" };
-  assert.equal(missedSlotQuest([q(slot)], at(18, 1))?.id, "q1");
-  assert.equal(missedSlotQuest([q(slot)], at(17, 45)), null);
-  assert.equal(missedSlotQuest([q({ ...slot, slotState: "missed" })], at(17, 45))?.id, "q1");
-  assert.equal(missedSlotQuest([q({ ...slot, status: "complete" })], at(19, 0)), null);
-  assert.equal(missedSlotQuest([q({ ...slot, status: "refused" })], at(19, 0)), null);
-  assert.equal(missedSlotQuest([q({ ...slot, domain: "MIND" })], at(19, 0)), null);
-  assert.equal(missedSlotQuest([q()], at(19, 0)), null);
+test("missedSlotQuest: active daily BODY with a passed slot only", () => {
+  const slot = { slotStart: "17:30", slotEnd: "18:00", slotState: "open" as const };
+  const computed = at(17, 40);
+  assert.equal(missedSlotQuest([q(slot)], at(18, 1), computed)?.id, "q1");
+  assert.equal(missedSlotQuest([q({ ...slot, slotState: "upcoming" })], at(18, 1), computed)?.id, "q1");
+  assert.equal(missedSlotQuest([q(slot)], at(17, 45), computed), null);
+  assert.equal(missedSlotQuest([q({ ...slot, slotState: "missed" })], at(17, 45), computed)?.id, "q1");
+  // The server says "none": the device clock never invents a slot state.
+  assert.equal(missedSlotQuest([q({ ...slot, slotState: "none" })], at(19, 0), computed), null);
+  for (const status of ["complete", "refused", "failed"] as const) {
+    assert.equal(missedSlotQuest([q({ ...slot, status })], at(19, 0), computed), null);
+  }
+  assert.equal(missedSlotQuest([q({ ...slot, domain: "MIND" })], at(19, 0), computed), null);
+  assert.equal(missedSlotQuest([q({ ...slot, type: "weekly" })], at(19, 0), computed), null);
+  assert.equal(missedSlotQuest([q()], at(19, 0), computed), null);
+});
+
+test("a cached missed state never survives a local date change", () => {
+  const missed = q({ slotStart: "17:30", slotEnd: "18:00", slotState: "missed" });
+  const computed = at(18, 30);
+  const nextDay = new Date(2026, 9, 20, 0, 5);
+  assert.equal(missedSlotQuest([missed], at(19, 0), computed)?.id, "q1");
+  assert.equal(missedSlotQuest([missed], nextDay, computed), null);
+  assert.equal(slotStateStale(nextDay, computed), true);
+  assert.equal(slotStateStale(at(23, 59), computed), false);
 });

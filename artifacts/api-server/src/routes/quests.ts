@@ -281,6 +281,9 @@ export function questsRoutes(db: Db, ai: AiDeps = {}): IRouter {
       if (quest.status !== "active" || quest.expiresAt.getTime() <= now.getTime()) {
         return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
       }
+      if (quest.type !== "daily") {
+        return { status: 409, body: { error: "Only daily quests take a slot", code: "slot_daily_only" } };
+      }
       const slot = body.slotStart === null ? { slotStart: null, slotEnd: null } : { slotStart: body.slotStart, slotEnd: body.slotEnd };
       const [updated] = await tx
         .update(quests)

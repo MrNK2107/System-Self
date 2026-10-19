@@ -25,6 +25,7 @@ export default function FloorScreen() {
   const startedAt = useRef<number | null>(null);
   const baseMs = useRef(0);
   const [logged, setLogged] = useState(false);
+  const [logError, setLogError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!running) return;
@@ -56,11 +57,14 @@ export default function FloorScreen() {
     if (logged || !gate.unlocked) return;
     setLogged(true);
     setRunning(false);
+    setLogError(null);
     let ok = false;
     try {
       await addLog(floorLogInput(routine));
       ok = true;
       router.replace("/(tabs)/quests");
+    } catch {
+      setLogError("The log did not reach the System. Try again.");
     } finally {
       // A failed enqueue lets the user try again; after success the screen is leaving.
       if (!ok) setLogged(false);
@@ -105,6 +109,7 @@ export default function FloorScreen() {
             <Text style={[styles.btnText, { color: colors.primary }]}>LOG IT</Text>
           </Pressable>
         </View>
+        {logError && <Text style={[styles.note, { color: colors.destructive }]}>{logError}</Text>}
         {!gate.unlocked && (
           <Text style={[styles.note, { color: colors.mutedForeground }]}>LOG IT unlocks in {mmss(gate.remainingSec)}.</Text>
         )}

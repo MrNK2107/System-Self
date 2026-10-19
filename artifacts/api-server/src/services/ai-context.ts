@@ -52,7 +52,7 @@ export interface PromptContext {
   recentRefusals: string[];
   /** Quests refused in the last 7 local days (the deferral ledger count). */
   deferralsThisWeek: number;
-  /** HH:MM–HH:MM windows the user locked for active BODY quests. */
+  /** HH:MMâ€“HH:MM windows the user locked for active BODY quests. */
   lockedSlots: string[];
   weeklyRecap?: WeeklyRecap;
 }
@@ -146,7 +146,7 @@ export async function buildUserContext(
     deferralsThisWeek: Number(deferred?.n ?? 0),
     lockedSlots: active
       .filter((q) => q.domain === "BODY" && q.slotStart && q.slotEnd)
-      .map((q) => `${q.slotStart}–${q.slotEnd}`),
+      .map((q) => `${q.slotStart}â€“${q.slotEnd}`),
   };
 }
 

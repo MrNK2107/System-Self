@@ -79,7 +79,7 @@ export function QuestCard({ quest, onComplete, onRefuse, onSlot, refuseDisabled 
         {quest.description}
       </Text>
 
-      {isActive && quest.domain === "BODY" && onSlot && (
+      {isActive && quest.domain === "BODY" && quest.type === "daily" && onSlot && (
         <TouchableOpacity
           onPress={() => onSlot(quest)}
           disabled={busy}

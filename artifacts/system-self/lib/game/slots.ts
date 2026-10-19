@@ -35,22 +35,31 @@ export const slotLabel = (q: Pick<Quest, "slotStart" | "slotEnd">): string | nul
 
 export const nowHHMM = (now: Date): string => toHHMM(now.getHours() * 60 + now.getMinutes());
 
+const localDay = (d: Date): string => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+
 /**
- * The first active BODY quest whose chosen slot has passed. Trusts the server's slotState and also the device
- * clock, since the list can be minutes old. A resolved quest never counts.
+ * The first active daily BODY quest whose chosen slot has passed. The server's slotState (computed when the list
+ * was fetched, at `computedAt`) is the source of truth. The device clock may only move upcoming/open to missed,
+ * and only on the same device-local date the state was computed for; after midnight nothing is trusted until a
+ * refetch. A resolved quest never counts.
  */
-export function missedSlotQuest(quests: readonly Quest[], now: Date): Quest | null {
+export function missedSlotQuest(quests: readonly Quest[], now: Date, computedAt: Date): Quest | null {
+  if (localDay(now) !== localDay(computedAt)) return null;
   const t = nowHHMM(now);
   return (
     quests.find(
       (q) =>
         q.status === "active" &&
         q.domain === "BODY" &&
+        q.type === "daily" &&
         q.slotStart !== undefined &&
         q.slotEnd !== undefined &&
-        (q.slotState === "missed" || t > q.slotEnd),
+        (q.slotState === "missed" || ((q.slotState === "upcoming" || q.slotState === "open") && t > q.slotEnd)),
     ) ?? null
   );
 }
+
+/** True when the device-local date has moved on since the quest list was computed (time to refetch). */
+export const slotStateStale = (now: Date, computedAt: Date): boolean => localDay(now) !== localDay(computedAt);
 
 export const missedSlotLine = (slotStart: string, now: Date): string => `You chose ${slotStart}. It is ${nowHHMM(now)}.`;

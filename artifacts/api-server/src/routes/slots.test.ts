@@ -2,10 +2,10 @@ import test, { after, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { quests } from "@workspace/db";
+import { domainScores, quests, scoreEvents } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { QuestListResponseSchema, QuestSlotResponseSchema } from "@workspace/contracts";
-import { createQuests } from "../services/quests";
+import { createQuests, slotStateOf } from "../services/quests";
 import { buildMessagePrompt, buildUserContext } from "../services/ai-context";
 import { addDays, localDate } from "@workspace/engine";
 import { TZ, app, assertContract, assertStoredNoticesMatchContract, auth, db, setup, skip } from "./game-test-helpers";
@@ -20,25 +20,15 @@ beforeEach(async () => {
   if (db) await resetDb(db);
 });
 
-async function mkQuest(userId: string, domain = "BODY") {
+async function mkQuest(userId: string, domain = "BODY", type: "daily" | "weekly" | "arc" = "daily") {
   const [q] = await createQuests(db!, userId, [
-    { type: "daily", title: "Lift", description: "desc", domain, expiresAt: new Date(Date.now() + 3600_000) },
+    { type, title: "Lift", description: "desc", domain, expiresAt: new Date(Date.now() + 3600_000) },
   ]);
   return q!;
 }
 
 const patchSlot = (a: ReturnType<typeof app>, token: string, id: string, body: unknown) =>
   request(a).patch(`/api/quests/${id}/slot`).set(auth(token)).send(body as object);
-
-/** Local minutes since midnight in the test timezone. */
-function localMinutes(): number {
-  const [h, m] = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false })
-    .format(new Date())
-    .split(":")
-    .map(Number);
-  return h! * 60 + m!;
-}
-const hhmm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 
 test("slot set and cleared", { skip }, async () => {
   const a = app();
@@ -98,28 +88,50 @@ test("another user's or unknown quest is 404", { skip }, async () => {
   assert.equal((await patchSlot(a, bob.token, "nope", { slotStart: "17:30", slotEnd: "18:00" })).status, 404);
 });
 
-test("slotState follows the user's local now: missed, open, upcoming, none", { skip }, async () => {
+test("GET /quests reports slotState from the server (wiring; boundaries are unit-tested)", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
   const q = await mkQuest(id);
-  const state = async () => {
+  const read = async () => {
     const res = await request(a).get("/api/quests").set(auth(token));
     assert.equal(res.status, 200);
     assertContract(QuestListResponseSchema, res.body);
     return res.body.active.find((x: { id: string }) => x.id === q.id).slotState as string;
   };
-  assert.equal(await state(), "none");
-  const now = localMinutes();
-  if (now >= 30 && now <= 23 * 60 + 15) {
-    await patchSlot(a, token, q.id, { slotStart: hhmm(now - 30), slotEnd: hhmm(now - 10) });
-    assert.equal(await state(), "missed");
-    await patchSlot(a, token, q.id, { slotStart: hhmm(now - 10), slotEnd: hhmm(now + 10) });
-    assert.equal(await state(), "open");
-    await patchSlot(a, token, q.id, { slotStart: hhmm(now + 10), slotEnd: hhmm(now + 30) });
-    assert.equal(await state(), "upcoming");
-  }
+  assert.equal(await read(), "none");
+  await patchSlot(a, token, q.id, { slotStart: "00:00", slotEnd: "04:00" });
+  assert.equal(await read(), slotStateOf({ slotStart: "00:00", slotEnd: "04:00" }, new Date(), TZ));
   await patchSlot(a, token, q.id, { slotStart: null });
-  assert.equal(await state(), "none");
+  assert.equal(await read(), "none");
+});
+
+test("weekly and arc quests take no slot -> 409 slot_daily_only", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  for (const type of ["weekly", "arc"] as const) {
+    const q = await mkQuest(id, "BODY", type);
+    const r = await patchSlot(a, token, q.id, { slotStart: "17:30", slotEnd: "18:30" });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.code, "slot_daily_only");
+  }
+});
+
+test("setting and clearing a slot leaves expiresAt and every score unchanged", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const q = await mkQuest(id);
+  const snapshot = async () => ({
+    expiresAt: (await db!.select().from(quests).where(eq(quests.id, q.id)))[0]!.expiresAt.getTime(),
+    scores: (await db!.select().from(domainScores).where(eq(domainScores.userId, id)))
+      .map((s) => [s.domain, s.score, s.streak])
+      .sort(),
+    events: (await db!.select().from(scoreEvents).where(eq(scoreEvents.userId, id))).length,
+  });
+  const before = await snapshot();
+  assert.equal((await patchSlot(a, token, q.id, { slotStart: "17:30", slotEnd: "18:30" })).status, 200);
+  assert.deepEqual(await snapshot(), before);
+  assert.equal((await patchSlot(a, token, q.id, { slotStart: null })).status, 200);
+  assert.deepEqual(await snapshot(), before);
 });
 
 test("AI context: locked slot only for active BODY quests", { skip }, async () => {
@@ -130,8 +142,8 @@ test("AI context: locked slot only for active BODY quests", { skip }, async () =
   await patchSlot(a, token, body.id, { slotStart: "17:30", slotEnd: "18:30" });
   await patchSlot(a, token, mind.id, { slotStart: "09:00", slotEnd: "10:00" });
   const ctx = (await buildUserContext(db!, id, new Date()))!;
-  assert.deepEqual(ctx.lockedSlots, ["17:30–18:30"]);
-  assert.ok(buildMessagePrompt("morning_briefing", ctx).prompt.includes("Locked slot: 17:30–18:30"));
+  assert.deepEqual(ctx.lockedSlots, ["17:30â€“18:30"]);
+  assert.ok(buildMessagePrompt("morning_briefing", ctx).prompt.includes("Locked slot: 17:30â€“18:30"));
   await request(a).post(`/api/quests/${body.id}/complete`).set(auth(token)).send({});
   assert.deepEqual((await buildUserContext(db!, id, new Date()))!.lockedSlots, []);
 });

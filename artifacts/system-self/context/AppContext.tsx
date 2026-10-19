@@ -99,6 +99,8 @@ interface AppContextType {
   domainScores: DomainScore[];
   logs: LogEntry[];
   quests: Quest[];
+  /** When the quest list was last fetched (ms since epoch); slot states are as of then. */
+  questsUpdatedAt: number;
   questChains: QuestChain[];
   /** Every chain the server offers (GET /api/chains/templates), started or not. */
   chainTemplates: ChainTemplate[];
@@ -325,6 +327,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       milestones,
       loading: !state && !stateQ.isError,
       loadError: state ? null : stateQ.error,
+      questsUpdatedAt: questsQ.dataUpdatedAt,
       questsLoadError: questsQ.data ? null : questsQ.error,
       refresh,
       getDomainScore,
@@ -348,7 +351,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
-      state, stateQ.isError, stateQ.error, questsQ.data, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
+      state, stateQ.isError, stateQ.error, questsQ.data, questsQ.dataUpdatedAt, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
       getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, startQuestChain, generateQuests, syncBlocked, online,
       pendingCount, outboxSnap.failed.length, retryFailed, discardFailed, rivalsState,
     ],
