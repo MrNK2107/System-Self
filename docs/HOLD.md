@@ -36,7 +36,7 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 
 ## H-06 🟨 Legal text
 **Need:** reviewed Privacy Policy and Terms of Service, and a decision on the age floor (the PRD targets 16–32; India's DPDP Act and COPPA/GDPR treat minors specially).
-**Doing instead:** draft templates in `docs/legal/`, shown in-app, clearly marked DRAFT. Sign-up requires age ≥ 16 (my call) and acceptance of the terms.
+**Doing instead:** draft templates in `docs/legal/`, shown in-app, clearly marked DRAFT. Sign-up requires age ≥ 16 (my call) and acceptance of the terms. Open-source notices: the API image ships a full `THIRD_PARTY_NOTICES.txt`; the app shows a compact name/version/licence list ("Open-source licences") pointing at `docs/legal/THIRD_PARTY_NOTICES-app.txt` — counsel should confirm whether store builds must carry the full licence texts in-app.
 **Resolution:**
 
 ## H-07 🟩 Social sign-in (Apple / Google)

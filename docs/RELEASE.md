@@ -87,3 +87,4 @@ Also state: data is encrypted in transit, users can delete their account (below)
 - [ ] `EXPO_PUBLIC_API_URL` is the real HTTPS API in the `production` profile.
 - [ ] `pnpm --filter @workspace/system-self typecheck` and `test` pass.
 - [ ] A preview build on a real device: sign-up, push received, sandbox purchase, account deletion.
+- [ ] Regenerate the app's open-source notices on Linux (`pnpm --filter @workspace/system-self gen:notices`) so they list the shipped platform binaries, and review the packages marked `UNKNOWN` or with non-SPDX licences.
