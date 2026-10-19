@@ -115,7 +115,7 @@ async function main() {
 
   const third = await makePlayer(prefix, "d", "public");
   await rejectedWith(() => inviteToDuo(third.api, synced, a.username, newClientId("d")), 409, "unavailable");
-  step("a second duo is refused -> 409 already_in_duo");
+  step("inviting a player who already has a partner -> 409 unavailable");
 
   assert.ok((await leaveDuo(b.api, synced, newClientId("l"))).ok);
   for (const p of [a, b]) {

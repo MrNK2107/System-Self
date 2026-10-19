@@ -2,6 +2,7 @@
 // PublicProfile from the server's duo projection (username, rank, trajectory; never scores) and the check-ins are
 // kinds plus timestamps. Nothing here touches score. Mutations run after the outbox (queued logs land first).
 import {
+  DUO_CHECKINS_PER_DAY,
   DUO_NUDGES_PER_DAY,
   DuoCheckinResponseSchema,
   DuoInviteResponseSchema,
@@ -15,7 +16,7 @@ import { ApiError, type ApiClient } from "../api/client";
 import type { Outbox } from "../api/outbox";
 import { afterOutbox, type MutationResult } from "../game/actions";
 
-export { DUO_NUDGES_PER_DAY };
+export { DUO_CHECKINS_PER_DAY, DUO_NUDGES_PER_DAY };
 
 /** The check-in buttons, in order. */
 export const DUO_BUTTONS: readonly { kind: DuoCheckinKind; label: string }[] = [
@@ -64,7 +65,7 @@ export function describeDuoError(err: unknown): string {
     case "unavailable":
       return "That operator can't take a partner right now.";
     case "checkin_limit":
-      return "10 check-ins a day is the limit. Logged.";
+      return `${DUO_CHECKINS_PER_DAY} check-ins a day is the limit. Logged.`;
     case "invite_open":
       return "An invite between you is already open.";
     case "invite_limit":

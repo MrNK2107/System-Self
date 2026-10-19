@@ -2,7 +2,7 @@
 // register + onboard four users (viewer semi-public, one public, one semi-public, one anonymous) ->
 // search finds the public user by username and semi-public users only by codename word, never the anonymous one ->
 // follow both -> following list is the projection (no scores, no usernames of non-public users) ->
-// block one -> following it again is 403 -> report the anonymous user by codename -> 201.
+// block one -> following it again is 404 (no block oracle) -> report the anonymous user by codename -> 201.
 // Usage: SMOKE_API_URL=http://localhost:3001 pnpm exec tsx scripts/smoke/social.ts
 // (the register limiter allows 10 per 15 min per IP: restart the API between runs if you see 429; the codename scan
 // makes ~60 searches, so start the API with RATE_LIMIT_MAX=1000)
@@ -142,8 +142,8 @@ async function main() {
 
   assert.ok((await blockPlayer(viewer.api, synced, semiResult.handle, newClientId("b"))).ok);
   assert.equal((await fetchFollowing(viewer.api)).length, 1);
-  await rejectedWith(() => followPlayer(viewer.api, synced, semiResult.handle, newClientId("f")), 403, "blocked");
-  step("block -> follows removed, follow blocked user -> 403 blocked");
+  await rejectedWith(() => followPlayer(viewer.api, synced, semiResult.handle, newClientId("f")), 404, "not_found");
+  step("block -> follows removed, follow blocked user -> 404 not_found (no block oracle)");
 
   // Anonymous users are only ever known by codename (which a viewer gets from a projection), so the report
   // goes to the blocked semi-public user by the codename the search showed.
