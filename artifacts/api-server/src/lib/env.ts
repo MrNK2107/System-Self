@@ -40,10 +40,17 @@ const envSchema = z.object({
   WORKER_TICK_MS: z.coerce.number().int().min(1000).default(60_000),
   /** Bearer secret of POST /api/billing/revenuecat. Unset: the webhook answers 503 and accepts nothing. */
   REVENUECAT_WEBHOOK_SECRET: z.string().min(1).optional(),
+  /**
+   * RevenueCat secret REST API key (v1). Needed for TRANSFER events: both accounts are re-fetched from
+   * GET /v1/subscribers/{id}. Unset: a TRANSFER is recorded, logged as a warning and changes no entitlement.
+   */
+  REVENUECAT_API_KEY: z.string().min(1).optional(),
   /** Optional Expo access token (Bearer) for the push API when enhanced push security is on. */
   EXPO_ACCESS_TOKEN: z.string().min(1).optional(),
   /** Wall-clock budget of one social job pass; the rest of its backlog waits for the next tick. */
   SOCIAL_JOB_BUDGET_MS: z.coerce.number().int().min(0).default(2000),
+  /** Wall-clock budget of one push dispatch pass (deciding, then sending); undecided users wait for the next tick. */
+  PUSH_JOB_BUDGET_MS: z.coerce.number().int().min(0).default(15_000),
 });
 
 export type Env = Omit<z.infer<typeof envSchema>, "JWT_SECRET"> & { JWT_SECRET: string };

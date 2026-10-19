@@ -31,8 +31,9 @@ const questHistoryQuerySchema = z.object({
   to: z.string().datetime().optional(),
 });
 
+// Clamped to the caller's history window (free 14 days, PRO 365) by historyWindow.
 const completionSummaryQuerySchema = z.object({
-  days: z.coerce.number().int().min(1).max(90).default(14),
+  days: z.coerce.number().int().min(1).max(PRO_HISTORY_DAYS).default(FREE_HISTORY_DAYS),
 });
 
 // Whole-number text only: "1.5", "-3", "" and "abc" are 400s. Absent means the free window.
@@ -171,11 +172,10 @@ router.get("/system/completions/summary", async (req, res) => {
   if (!db) return res.status(503).json(DB_UNAVAILABLE);
   const query = completionSummaryQuerySchema.parse(req.query);
   const userId = req.user!.id;
-  const [user] = await db.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
-  if (!user) return res.status(404).json({ error: "User not found" });
-  // The last `days` local days, today included, by the quest's resolution date.
-  const to = localDate(new Date(), user.tz);
-  const from = addDays(to, -(query.days - 1));
+  // The last `days` local days, today included, by the quest's resolution date (free users see at most 14).
+  const win = await historyWindow(db, userId, query.days);
+  if (!win) return res.status(404).json({ error: "User not found" });
+  const { from, to } = win;
   const rows = await db
     .select({
       domain: quests.domain,
@@ -209,7 +209,7 @@ router.get("/system/completions/summary", async (req, res) => {
   const attempts = rows.reduce((n, r) => n + r.count, 0);
   const completed = rows.filter((r) => r.status === "complete").reduce((n, r) => n + r.count, 0);
   return res.json({
-    windowDays: query.days,
+    windowDays: win.days,
     from,
     to,
     attempts,

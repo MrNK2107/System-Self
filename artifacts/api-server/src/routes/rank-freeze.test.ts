@@ -269,3 +269,20 @@ test("quest trend excludes bonus quests and is clamped for free users", { skip }
   assert.equal(res.body.days, 14);
   assert.deepEqual(res.body.items, [{ date: "2026-03-10", completed: 1, resolved: 2 }]);
 });
+
+test("completions summary is clamped by the history window: free asks 90 and gets 14, PRO gets 90; the clock is injected", { skip }, async () => {
+  setClock("2026-03-10T08:00:00Z");
+  const free = await mk(false);
+  const pro = await mk(true);
+  const summary = (u: U, q: string) => request(a()).get(`/api/system/completions/summary${q}`).set(auth(u.token));
+  const f = await summary(free, "?days=90");
+  assert.equal(f.status, 200);
+  assert.equal(f.body.windowDays, 14);
+  assert.equal(f.body.from, "2026-02-25");
+  assert.equal(f.body.to, "2026-03-10");
+  const p = await summary(pro, "?days=90");
+  assert.equal(p.body.windowDays, 90);
+  assert.equal(p.body.from, addDays("2026-03-10", -89));
+  const d = await summary(free, "");
+  assert.equal(d.body.windowDays, 14);
+});

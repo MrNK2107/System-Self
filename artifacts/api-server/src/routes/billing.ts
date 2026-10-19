@@ -2,7 +2,13 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { Router, type IRouter, type RequestHandler } from "express";
 import type { Db } from "@workspace/db";
 import { env } from "../lib/env";
-import { applyRevenueCatEvent, billingStatus, RevenueCatWebhookSchema } from "../services/entitlements";
+import {
+  applyRevenueCatEvent,
+  applyRevenueCatTransfer,
+  billingStatus,
+  RevenueCatWebhookSchema,
+  type RevenueCatClient,
+} from "../services/entitlements";
 
 /** Constant-time string compare (both sides hashed first so lengths never leak). */
 export function secretsMatch(a: string, b: string): boolean {
@@ -18,6 +24,7 @@ export function billingRoutes(
   requireAuth: RequestHandler,
   clock: () => Date = () => new Date(),
   secretOverride?: string | null,
+  revenuecat: RevenueCatClient | null = null,
 ): IRouter {
   const router = Router();
 
@@ -42,6 +49,18 @@ export function billingRoutes(
     const parsed = RevenueCatWebhookSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid payload", code: "invalid_payload" });
+      return;
+    }
+    if (parsed.data.event.type === "TRANSFER") {
+      try {
+        await applyRevenueCatTransfer(db, parsed.data.event, req.body, clock(), revenuecat);
+      } catch (err) {
+        // Nothing was recorded, so RevenueCat's retry applies the transfer later.
+        req.log.error({ err, event: "revenuecat_transfer_fetch_failed", eventId: parsed.data.event.id }, "billing_transfer_failed");
+        res.status(503).json({ error: "RevenueCat unavailable", code: "billing_upstream_unavailable" });
+        return;
+      }
+      res.status(200).json({ ok: true });
       return;
     }
     const outcome = await applyRevenueCatEvent(db, parsed.data.event, req.body, clock());

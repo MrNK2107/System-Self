@@ -13,6 +13,7 @@ import {
   pushRegistrationDecision,
   type PermissionAction,
   type PlanInput,
+  unregisterTokenRequest,
 } from "./notifications-core";
 
 type Native = typeof import("expo-notifications");
@@ -201,7 +202,8 @@ export async function unregisterDevice(api: ApiClient): Promise<void> {
   const work = (async () => {
     const token = await AsyncStorage.getItem(PUSH_TOKEN_KEY).catch(() => null);
     if (token) {
-      await api.request("DELETE", `/api/push/tokens/${encodeURIComponent(token)}`);
+      const r = unregisterTokenRequest(token);
+      await api.request(r.method, r.path, r.opts);
       await AsyncStorage.removeItem(PUSH_TOKEN_KEY).catch(() => undefined);
     }
   })();

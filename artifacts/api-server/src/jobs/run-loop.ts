@@ -7,6 +7,7 @@ import { runSocialJobs } from "./social";
 import { prunePushLogs, runNotificationJobs } from "./notifications";
 import { createExpoTransport, type PushTransport } from "../services/push";
 import { env } from "../lib/env";
+import { pruneBillingEvents } from "../services/entitlements";
 
 export const WORKER_BATCH_SIZE = 200;
 const defaultPushTransport = () => createExpoTransport({ accessToken: env.EXPO_ACCESS_TOKEN });
@@ -14,7 +15,7 @@ export const IDEMPOTENCY_KEY_TTL_MS = 7 * 86_400_000;
 
 /**
  * One worker pass: claims up to `batchSize` due users and rolls each over, runs the social jobs (rival
- * re-matching), the notification jobs (quest-deadline notice, push dispatch), then prunes idempotency keys older than 7 days. If `signal` aborts mid-batch, the current user finishes and the remaining claimed
+ * re-matching), the notification jobs (quest-deadline notice, push dispatch), then prunes push logs (30 days), billing events (180 days) and idempotency keys (7 days). If `signal` aborts mid-batch, the current user finishes and the remaining claimed
  * users are released (made due again) for the next worker.
  */
 export async function runWorkerTick(
@@ -61,6 +62,11 @@ export async function runWorkerTick(
     await prune(db, now);
   } catch (err) {
     logger.error({ err }, "Push log prune failed");
+  }
+  try {
+    await pruneBillingEvents(db, now);
+  } catch (err) {
+    logger.error({ err }, "Billing event prune failed");
   }
   await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(now.getTime() - IDEMPOTENCY_KEY_TTL_MS)));
   return { processed, claimed: ids.length };

@@ -26,6 +26,7 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 ## H-04 🟨 Payments (RevenueCat + store products)
 **Need:** a RevenueCat project, API keys, and store products for PRO (₹499/month, ₹3,999/year per the PRD).
 **Doing instead:** server-side entitlements (`entitlements` table), a RevenueCat webhook endpoint that verifies a shared secret, and a paywall screen. Without keys the purchase button shows "unavailable", and an admin endpoint can grant PRO for testing.
+**Transfers:** `TRANSFER` webhook events (a restore moving a purchase to another account) are only applied when `REVENUECAT_API_KEY` (the secret v1 REST key) is set; without it they are logged and change nothing.
 **Resolution:**
 
 ## H-05 🟨 Email provider (verification and password reset)

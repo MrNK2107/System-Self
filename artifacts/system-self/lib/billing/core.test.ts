@@ -66,3 +66,31 @@ test("pollUntilPro makes no further fetches once stop returns true", async () =>
   assert.equal(r, "stopped");
   assert.equal(fetches, 2);
 });
+
+test("isProStatus: pro only while unexpired; an expiresAt in the past is free", async () => {
+  const { isProStatus } = await import("./core");
+  const now = Date.parse("2026-10-19T08:00:00Z");
+  assert.equal(isProStatus(undefined, now), false);
+  assert.equal(isProStatus({ tier: "free", expiresAt: null, source: null }, now), false);
+  assert.equal(isProStatus({ tier: "pro", expiresAt: null, source: "admin" }, now), true);
+  assert.equal(isProStatus({ tier: "pro", expiresAt: "2026-10-20T00:00:00.000Z", source: "revenuecat" }, now), true);
+  assert.equal(isProStatus({ tier: "pro", expiresAt: "2026-10-19T08:00:00.000Z", source: "revenuecat" }, now), false);
+  assert.equal(isProStatus({ tier: "pro", expiresAt: "2026-10-01T00:00:00.000Z", source: "revenuecat" }, now), false);
+});
+
+test("store disclosures: auto-renew in plain language and the platform's manage-subscription link", async () => {
+  const { autoRenewDisclosure, manageSubscriptionUrl, DELETE_KEEPS_SUBSCRIPTION_LINE } = await import("./core");
+  for (const p of ["ios", "android", "web"]) {
+    const line = autoRenewDisclosure(p);
+    assert.match(line, /renews automatically unless (it is )?cancelled at least 24 hours before the (current )?period ends/i);
+    assert.match(line, /manage or cancel/i);
+  }
+  assert.match(autoRenewDisclosure("ios"), /App Store account settings/);
+  assert.match(autoRenewDisclosure("android"), /Google Play account settings/);
+  assert.match(autoRenewDisclosure("web"), /App Store or Google Play account settings/);
+  assert.equal(manageSubscriptionUrl("ios"), "https://apps.apple.com/account/subscriptions");
+  assert.equal(manageSubscriptionUrl("android"), "https://play.google.com/store/account/subscriptions");
+  assert.equal(manageSubscriptionUrl("web"), null);
+  assert.match(DELETE_KEEPS_SUBSCRIPTION_LINE, /does not cancel/i);
+  assert.match(DELETE_KEEPS_SUBSCRIPTION_LINE, /subscription/i);
+});

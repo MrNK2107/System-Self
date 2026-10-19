@@ -215,3 +215,167 @@ test("deleting an account blanks its billing_events payloads but keeps id and ty
   assert.equal(e!.type, "INITIAL_PURCHASE");
   assert.equal(e!.userId, null);
 });
+
+// ---- Phase 7 final review ---------------------------------------------------------------------------------------
+
+test("I1: the webhook is exempt from the global per-IP limiter (61 rapid authorised calls, none 429)", { skip }, async () => {
+  const a = app();
+  const { id } = await setup(a);
+  for (let i = 0; i < 61; i++) {
+    const res = await post(a, ev(`burst-${i}`, "RENEWAL", id, "2026-03-10T07:00:00Z", "2026-04-10T07:00:00Z"));
+    assert.equal(res.status, 200, `call ${i + 1}`);
+  }
+});
+
+test("a billing event of an unknown user stores only id, type and timestamp (payload {})", { skip }, async () => {
+  const a = app();
+  const unknown = "3f1c2b6e-0000-4000-8000-000000000000";
+  await post(a, ev("anon", "INITIAL_PURCHASE", unknown, "2026-03-10T07:00:00Z", "2026-04-10T07:00:00Z"));
+  const [e] = await db!.select().from(billingEvents).where(eq(billingEvents.id, "anon"));
+  assert.deepEqual(e!.payload, {});
+  assert.equal(e!.type, "INITIAL_PURCHASE");
+  assert.equal(e!.userId, null);
+  assert.equal(e!.receivedAt.toISOString(), NOW.toISOString());
+});
+
+function transferEv(id: string, from: string[], to: string[], atIso = "2026-03-10T07:30:00Z") {
+  return { api_version: "1.0", event: { id, type: "TRANSFER", event_timestamp_ms: T(atIso), transferred_from: from, transferred_to: to } };
+}
+
+function fakeRevenueCat() {
+  /** app user id -> pro expires_date (null = lifetime); absent = no pro entitlement. */
+  const subs = new Map<string, string | null>();
+  const calls: string[] = [];
+  const client = {
+    async fetchPro(appUserId: string) {
+      calls.push(appUserId);
+      if (!subs.has(appUserId)) return { expiresAt: undefined };
+      const v = subs.get(appUserId)!;
+      return { expiresAt: v === null ? null : new Date(v) };
+    },
+  };
+  return { subs, calls, client };
+}
+
+test("I2: TRANSFER re-fetches both accounts: PRO moves to the new account, the old one turns free", { skip }, async () => {
+  const rc = fakeRevenueCat();
+  const a = createApp({ db, mailer, now: () => NOW, revenuecatSecret: SECRET, revenuecat: rc.client });
+  const old = await setup(a);
+  const fresh = await setup(a, { email: "b@example.com", username: "bob_1" });
+  await post(a, ev("buy", "INITIAL_PURCHASE", old.id, "2026-03-01T07:00:00Z", "2026-04-01T07:00:00Z"));
+  assert.equal((await row(old.id))!.tier, "pro");
+  // RevenueCat now holds the subscription on the new account only.
+  rc.subs.set(fresh.id, "2026-04-01T07:00:00Z");
+  const res = await post(a, transferEv("tr1", [old.id, "$RCAnonymousID:x", "3f1c2b6e-0000-4000-8000-000000000000"], [fresh.id]));
+  assert.equal(res.status, 200);
+  assert.deepEqual([...rc.calls].sort(), [old.id, fresh.id].sort(), "only existing uuid users are fetched");
+  const o = (await row(old.id))!;
+  assert.equal(o.tier, "free");
+  assert.equal(o.source, "revenuecat");
+  const n = (await row(fresh.id))!;
+  assert.equal(n.tier, "pro");
+  assert.equal(n.source, "revenuecat");
+  assert.equal(n.expiresAt!.toISOString(), "2026-04-01T07:00:00.000Z");
+  // A replay is a no-op and fetches nothing.
+  rc.calls.length = 0;
+  assert.equal((await post(a, transferEv("tr1", [old.id], [fresh.id]))).status, 200);
+  assert.equal(rc.calls.length, 0);
+});
+
+test("I2: TRANSFER with a lifetime entitlement (expires_date null) grants PRO with no expiry; admin grants win", { skip }, async () => {
+  const rc = fakeRevenueCat();
+  const a = createApp({ db, mailer, now: () => NOW, revenuecatSecret: SECRET, revenuecat: rc.client });
+  const u = await setup(a);
+  const admin = await setup(a, { email: "c@example.com", username: "cat_1" });
+  await grantEntitlement(db!, admin.id, "pro", null, NOW);
+  rc.subs.set(u.id, null);
+  await post(a, transferEv("tr2", [admin.id], [u.id]));
+  const r = (await row(u.id))!;
+  assert.equal(r.tier, "pro");
+  assert.equal(r.expiresAt, null);
+  const ad = (await row(admin.id))!;
+  assert.equal(ad.source, "admin");
+  assert.equal(ad.tier, "pro");
+});
+
+test("I2: a failed RevenueCat fetch answers 503 and records nothing, so RevenueCat retries", { skip }, async () => {
+  const rc = fakeRevenueCat();
+  rc.client.fetchPro = async () => {
+    throw new Error("timeout");
+  };
+  const a = createApp({ db, mailer, now: () => NOW, revenuecatSecret: SECRET, revenuecat: rc.client });
+  const u = await setup(a);
+  assert.equal((await post(a, transferEv("tr4", [], [u.id]))).status, 503);
+  assert.equal((await db!.select().from(billingEvents).where(eq(billingEvents.id, "tr4"))).length, 0);
+});
+
+test("the RevenueCat REST client reads subscriber.entitlements.pro.expires_date with a bearer key and a timeout", async () => {
+  const { createRevenueCatClient } = await import("../services/entitlements");
+  const seen: { url: string; init: RequestInit }[] = [];
+  const reply = (body: object, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  const bodies = [
+    reply({ subscriber: { entitlements: { pro: { expires_date: "2026-04-01T07:00:00Z" } } } }),
+    reply({ subscriber: { entitlements: { pro: { expires_date: null } } } }),
+    reply({ subscriber: { entitlements: {} } }),
+    reply({ code: 7225 }, 500),
+  ];
+  const client = createRevenueCatClient({
+    apiKey: "sk_test",
+    fetch: (async (url: string, init: RequestInit) => {
+      seen.push({ url, init });
+      return bodies.shift()!;
+    }) as never,
+  });
+  assert.equal((await client.fetchPro("u 1")).expiresAt!.toISOString(), "2026-04-01T07:00:00.000Z");
+  assert.equal((await client.fetchPro("u2")).expiresAt, null);
+  assert.equal((await client.fetchPro("u3")).expiresAt, undefined);
+  await assert.rejects(client.fetchPro("u4"));
+  assert.equal(seen[0]!.url, "https://api.revenuecat.com/v1/subscribers/u%201");
+  assert.equal((seen[0]!.init.headers as Record<string, string>).Authorization, "Bearer sk_test");
+  assert.ok(seen[0]!.init.signal instanceof AbortSignal);
+});
+
+test("I2: TRANSFER without REVENUECAT_API_KEY logs a warning and leaves the rows untouched", { skip }, async () => {
+  const { mock } = await import("node:test");
+  const { logger } = await import("../lib/logger");
+  const warn = mock.method(logger, "warn");
+  try {
+    const a = createApp({ db, mailer, now: () => NOW, revenuecatSecret: SECRET, revenuecat: null });
+    const old = await setup(a);
+    const fresh = await setup(a, { email: "b@example.com", username: "bob_1" });
+    await post(a, ev("buy", "INITIAL_PURCHASE", old.id, "2026-03-01T07:00:00Z", "2026-04-01T07:00:00Z"));
+    const before = await row(old.id);
+    assert.equal((await post(a, transferEv("tr3", [old.id], [fresh.id]))).status, 200);
+    assert.deepEqual(await row(old.id), before);
+    assert.equal(await row(fresh.id), undefined);
+    assert.ok(
+      warn.mock.calls.some((c) => JSON.stringify(c.arguments).includes("revenuecat_transfer_without_api_key")),
+      "a warning names the missing key",
+    );
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test("billing events older than 180 days are pruned in bounded batches", { skip }, async () => {
+  const { pruneBillingEvents } = await import("../services/entitlements");
+  const old = new Date(NOW.getTime() - 181 * 86_400_000);
+  const recent = new Date(NOW.getTime() - 179 * 86_400_000);
+  await db!.insert(billingEvents).values([
+    ...Array.from({ length: 5 }, (_, i) => ({ id: `old-${i}`, userId: null, type: "RENEWAL", payload: {}, receivedAt: old })),
+    { id: "recent", userId: null, type: "RENEWAL", payload: {}, receivedAt: recent },
+  ]);
+  assert.equal(await pruneBillingEvents(db!, NOW, { batch: 2, maxBatches: 2 }), 4);
+  assert.equal(await pruneBillingEvents(db!, NOW), 1);
+  assert.deepEqual((await db!.select().from(billingEvents)).map((e) => e.id), ["recent"]);
+});
+
+test("the worker tick prunes billing events older than 180 days", { skip }, async () => {
+  const { runWorkerTick } = await import("../jobs/run-loop");
+  await db!.insert(billingEvents).values([
+    { id: "ancient", userId: null, type: "RENEWAL", payload: {}, receivedAt: new Date(NOW.getTime() - 200 * 86_400_000) },
+    { id: "fresh", userId: null, type: "RENEWAL", payload: {}, receivedAt: NOW },
+  ]);
+  await runWorkerTick(db!, NOW, undefined, 200, async () => []);
+  assert.deepEqual((await db!.select().from(billingEvents)).map((e) => e.id), ["fresh"]);
+});

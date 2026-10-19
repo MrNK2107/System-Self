@@ -22,6 +22,7 @@ import { QuestCard } from "@/components/QuestCard";
 import { ProLock } from "@/components/ProLock";
 import { useMyClanQuery } from "@/hooks/useClan";
 import { useBillingStatusQuery } from "@/hooks/usePro";
+import { isProStatus } from "@/lib/billing/core";
 import { isProRequired } from "@/lib/api/pro";
 import { describeChallengeError } from "@/lib/challenges/challenges";
 import { SlotPicker } from "@/components/SlotPicker";
@@ -163,8 +164,14 @@ export default function QuestsScreen() {
   const inClan = !!useMyClanQuery().data?.clan;
   const [shamePro, setShamePro] = useState(false);
   // PRO bonus quests: a free account (known from billing status, or after the server's 402) sees the PRO lock.
-  const knownFree = useBillingStatusQuery().data?.tier === "free";
+  const billing = useBillingStatusQuery().data;
+  const knownPro = isProStatus(billing);
+  const knownFree = billing !== undefined && !knownPro; // an expired `pro` counts as free
   const [bonusPro, setBonusPro] = useState(false);
+  // A 402 seen before an upgrade must not keep the lock up once PRO is known.
+  useEffect(() => {
+    if (knownPro) setBonusPro(false);
+  }, [knownPro]);
   const [bonusBusy, setBonusBusy] = useState(false);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 

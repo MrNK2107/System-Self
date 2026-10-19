@@ -123,3 +123,12 @@ test("push token registration: never on Expo Go Android, needs an EAS project id
   assert.deepEqual(pushRegistrationDecision({ ...ok, isDevice: false }), { register: false, reason: "not_a_device" });
   assert.deepEqual(pushRegistrationDecision({ ...ok, platform: "web" }), { register: false, reason: "unsupported_platform" });
 });
+
+test("unregistering sends the token in the JSON body, never in the path", async () => {
+  const { unregisterTokenRequest } = await import("./notifications-core");
+  const r = unregisterTokenRequest("ExponentPushToken[abc]");
+  assert.equal(r.method, "DELETE");
+  assert.equal(r.path, "/api/push/tokens");
+  assert.deepEqual(r.opts.body, { token: "ExponentPushToken[abc]" });
+  assert.ok(!r.path.includes("Exponent"));
+});

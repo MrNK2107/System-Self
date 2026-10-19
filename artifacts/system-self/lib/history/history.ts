@@ -18,8 +18,8 @@ export { isProRequired } from "../api/pro";
 export { RANK_FREEZE_ACTIVE_LINE };
 
 export const REASON_MAX = 120;
-/** The PRO chart window; free users are served 14 days whatever they ask. */
-export const PRO_CHART_DAYS = 90;
+/** The PRO chart window ("Full history. 365 days."); free users are served 14 days whatever they ask. */
+export const PRO_CHART_DAYS = 365;
 export const FREE_CHART_DAYS = 14;
 
 export const scoreHistoryKey = (userId: string | null, days: number) => ["history-scores", userId, days] as const;
@@ -106,6 +106,19 @@ export type FreezeView =
   | { kind: "active"; line: string; until: string }
   | { kind: "wait"; availableFrom: string }
   | { kind: "available" };
+
+/** Rank Freeze pitch: the same words for free and PRO users (a freeze pauses promotion too). */
+export const FREEZE_PITCH = "Pause decay, demotion and promotion for 7 days, once a month.";
+export const FREEZE_PITCH_PRO = `${FREEZE_PITCH} The rank holds still. You do not.`;
+
+export type FreezeCardMode = "active" | "locked" | "wait" | "available";
+
+/** What the Rank Freeze card shows: an active freeze always (even once PRO has lapsed), else the lock for free users. */
+export function freezeCardMode(pro: boolean, view: FreezeView): FreezeCardMode {
+  if (view.kind === "active") return "active";
+  if (!pro) return "locked";
+  return view.kind;
+}
 
 export function freezeView(status: RankFreezeStatus | undefined): FreezeView {
   if (status?.active && status.until) return { kind: "active", line: RANK_FREEZE_ACTIVE_LINE, until: status.until };

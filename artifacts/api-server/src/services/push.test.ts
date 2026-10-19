@@ -13,7 +13,7 @@ beforeEach(async () => {
   if (db) await resetDb(db);
 });
 
-const msg = (to: string): PushMessage => ({ to, title: "SYSTEM // SELF", body: "x", badge: 0 });
+const msg = (to: string): PushMessage => ({ to, title: "SYSTEM // SELF", body: "x", badge: 0, channelId: "system-self" });
 
 function fakeFetch() {
   const calls: { url: string; init: RequestInit; batch: PushMessage[] }[] = [];
@@ -77,7 +77,7 @@ test("DeviceNotRegistered tickets delete exactly that token", { skip }, async ()
         : { status: "ok" as const, id: "r1" },
     );
   const out = await sendPushMessages(db!, transport, [msg("ExponentPushToken[dead]"), msg("ExponentPushToken[live]")]);
-  assert.deepEqual(out, { sent: 1, removed: 1 });
+  assert.deepEqual(out, { sent: 1, removed: 1, errors: 1, errorCodes: { DeviceNotRegistered: 1 } });
   const left = await db!.select().from(pushTokens).where(eq(pushTokens.userId, id));
   assert.deepEqual(
     left.map((t) => t.token),
@@ -89,6 +89,24 @@ test("other ticket errors keep the token", { skip }, async () => {
   const { id } = await setup(app());
   await db!.insert(pushTokens).values({ userId: id, token: "ExponentPushToken[a]", platform: "ios" });
   const transport = async (ms: PushMessage[]) => ms.map(() => ({ status: "error" as const, details: { error: "MessageRateExceeded" } }));
-  assert.deepEqual(await sendPushMessages(db!, transport, [msg("ExponentPushToken[a]")]), { sent: 0, removed: 0 });
+  assert.deepEqual(await sendPushMessages(db!, transport, [msg("ExponentPushToken[a]")]), {
+    sent: 0,
+    removed: 0,
+    errors: 1,
+    errorCodes: { MessageRateExceeded: 1 },
+  });
   assert.equal((await db!.select().from(pushTokens)).length, 1);
+});
+
+test("expo transport gives every request a timeout signal and turns a timeout into error tickets", async () => {
+  const signals: (AbortSignal | null | undefined)[] = [];
+  const fn = (async (_u: unknown, init?: RequestInit) => {
+    signals.push(init!.signal);
+    return new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason)));
+  }) as typeof fetch;
+  const started = Date.now();
+  const tickets = await createExpoTransport({ fetch: fn, timeoutMs: 50 })([msg("ExponentPushToken[a]")]);
+  assert.ok(Date.now() - started < 5000);
+  assert.ok(signals[0] instanceof AbortSignal);
+  assert.deepEqual(tickets.map((t) => t.status), ["error"]);
 });

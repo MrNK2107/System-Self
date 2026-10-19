@@ -9,15 +9,21 @@ import { logger } from "./lib/logger";
 import { env, resolveCorsOrigins } from "./lib/env";
 import type { AiDeps } from "./lib/ai";
 import { createMailer, type Mailer } from "./lib/mailer";
+import { createRevenueCatClient, type RevenueCatClient } from "./services/entitlements";
 import { errorHandler, notFoundHandler } from "./middlewares/errors";
 
 const HEALTH_PATHS = new Set(["/api/healthz", "/api/readyz"]);
+/** The RevenueCat webhook is authenticated by its secret and arrives from RevenueCat's few IPs in bursts. */
+export const BILLING_WEBHOOK_PATH = "/api/billing/revenuecat";
+export const BILLING_WEBHOOK_RATE_LIMIT_MAX = 600;
 
 export function createApp(
-  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number } = {},
+  deps: { db?: Db | null; mailer?: Mailer; ai?: AiDeps; now?: () => Date; revenuecatSecret?: string | null; trustProxy?: boolean | number; revenuecat?: RevenueCatClient | null } = {},
 ): Express {
   const db = deps.db === undefined ? defaultDb : deps.db;
   const mailer = deps.mailer ?? createMailer();
+  const revenuecat =
+    deps.revenuecat !== undefined ? deps.revenuecat : env.REVENUECAT_API_KEY ? createRevenueCatClient({ apiKey: env.REVENUECAT_API_KEY }) : null;
   const app: Express = express();
   // Client IPs (and so rate-limit buckets) come from X-Forwarded-For only for trusted proxy hops.
   app.set("trust proxy", deps.trustProxy ?? env.TRUST_PROXY);
@@ -54,7 +60,17 @@ export function createApp(
       max: env.RATE_LIMIT_MAX,
       standardHeaders: true,
       legacyHeaders: false,
-      skip: (req) => HEALTH_PATHS.has(req.path),
+      skip: (req) => HEALTH_PATHS.has(req.path) || req.path === BILLING_WEBHOOK_PATH,
+    }),
+  );
+  // Its own generous bucket: RevenueCat retries and bursts (e.g. renewals at the top of the hour) from shared IPs.
+  app.use(
+    BILLING_WEBHOOK_PATH,
+    rateLimit({
+      windowMs: 60_000,
+      max: BILLING_WEBHOOK_RATE_LIMIT_MAX,
+      standardHeaders: true,
+      legacyHeaders: false,
     }),
   );
   // One limiter per auth surface so abuse of one (e.g. failed logins) does not lock out the others.
@@ -73,7 +89,7 @@ export function createApp(
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  app.use("/api", createRouter({ db, mailer, ai: deps.ai, now: deps.now, revenuecatSecret: deps.revenuecatSecret }));
+  app.use("/api", createRouter({ db, mailer, ai: deps.ai, now: deps.now, revenuecatSecret: deps.revenuecatSecret, revenuecat }));
   app.use(notFoundHandler);
   app.use(errorHandler);
 

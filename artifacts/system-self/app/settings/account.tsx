@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Linking, Platform, StyleSheet, Text, View } from "react-native";
 
 import { AuthField } from "@/components/AuthField";
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { describeSettingsError, validatePasswordChange } from "@/lib/settings/actions";
 import { settingsActions } from "@/lib/settings/instance";
+import { DELETE_KEEPS_SUBSCRIPTION_LINE, MANAGE_SUBSCRIPTION_LABEL, manageSubscriptionUrl } from "@/lib/billing/core";
 
 const DELETE_WARNING = "This erases every log, score and rank. It cannot be undone.";
 
@@ -111,6 +112,7 @@ export default function AccountScreen() {
     }
   };
 
+  const manageUrl = manageSubscriptionUrl(Platform.OS);
   const toggle = (p: Exclude<Panel, null>) => setPanel((cur) => (cur === p ? null : p));
 
   return (
@@ -188,6 +190,8 @@ export default function AccountScreen() {
         {panel === "delete" ? (
           <>
             <Text style={[s.warning, { color: colors.foreground }]}>{DELETE_WARNING}</Text>
+            <Text style={[s.warning, { color: colors.foreground }]}>{DELETE_KEEPS_SUBSCRIPTION_LINE}</Text>
+            {manageUrl ? <AuthLink label={MANAGE_SUBSCRIPTION_LABEL} onPress={() => void Linking.openURL(manageUrl).catch(() => undefined)} /> : null}
             <AuthField
               label="PASSWORD"
               value={deletePw}

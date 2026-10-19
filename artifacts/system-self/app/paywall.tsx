@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { useColors } from "@/hooks/useColors";
 import { api } from "@/lib/api/client";
@@ -12,10 +12,14 @@ import { useBillingStatusQuery } from "@/hooks/usePro";
 import { PRO_LOCK_LABEL } from "@/lib/api/pro";
 import {
   FALLBACK_PLANS,
+  MANAGE_SUBSCRIPTION_LABEL,
   PRO_FEATURES,
   STORE_ONLY_LINE,
+  autoRenewDisclosure,
   billingStatusKey,
   fetchBillingStatus,
+  isProStatus,
+  manageSubscriptionUrl,
   pollUntilPro,
   type Plan,
   type PlanId,
@@ -81,7 +85,8 @@ export default function PaywallScreen() {
   }, [qc, userId]);
 
   const plans: readonly Plan[] = store.state === "ready" ? store.plans : FALLBACK_PLANS;
-  const isPro = billing?.tier === "pro";
+  const isPro = isProStatus(billing);
+  const manageUrl = manageSubscriptionUrl(Platform.OS);
 
   const buy = async () => {
     if (store.state !== "ready" || !userId) return;
@@ -158,6 +163,9 @@ export default function PaywallScreen() {
       />
       <AuthLink label={busy === "restore" ? "RESTORING..." : "RESTORE PURCHASES"} onPress={() => void (busy === null && restore())} />
 
+      <Text style={[s.disclosure, { color: colors.mutedForeground }]}>{autoRenewDisclosure(Platform.OS)}</Text>
+      {manageUrl ? <AuthLink label={MANAGE_SUBSCRIPTION_LABEL} onPress={() => void Linking.openURL(manageUrl).catch(() => undefined)} /> : null}
+
       <View style={s.legal}>
         <Text accessibilityRole="link" style={[s.legalText, { color: colors.mutedForeground }]} onPress={() => router.push("/legal/terms")}>
           TERMS
@@ -180,5 +188,6 @@ const s = StyleSheet.create({
   planLabel: { fontSize: 10, fontWeight: "800", letterSpacing: 2 },
   planPrice: { fontSize: 14, fontWeight: "700" },
   legal: { flexDirection: "row", justifyContent: "center", gap: 24 },
+  disclosure: { fontSize: 11, lineHeight: 17, textAlign: "center" },
   legalText: { fontSize: 10, fontWeight: "700", letterSpacing: 2 },
 });

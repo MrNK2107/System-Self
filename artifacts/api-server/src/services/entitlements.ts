@@ -3,7 +3,7 @@
  * source with RevenueCat webhooks writing the same `entitlements` row; `isPro` and `requirePro` stay as they are.
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
-import { eq, sql, type SQL } from "drizzle-orm";
+import { eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { billingEvents, entitlements, users, type Db } from "@workspace/db";
 import { logger } from "../lib/logger";
@@ -83,6 +83,8 @@ export const RevenueCatWebhookSchema = z.object({
       expiration_at_ms: z.number().finite().nullish(),
       product_id: z.string().nullish(),
       period_type: z.string().nullish(),
+      transferred_from: z.array(z.string()).nullish(),
+      transferred_to: z.array(z.string()).nullish(),
     })
     .passthrough(),
   api_version: z.string().optional(),
@@ -100,14 +102,9 @@ export type RevenueCatOutcome = "replay" | "unknown_user" | "ignored_type" | "st
  */
 export async function applyRevenueCatEvent(db: Db, event: RevenueCatEvent, payload: unknown, now: Date): Promise<RevenueCatOutcome> {
   return db.transaction(async (tx) => {
-    const userId = event.app_user_id && z.string().uuid().safeParse(event.app_user_id).success ? event.app_user_id : null;
+    const userId = event.app_user_id && isUuid(event.app_user_id) ? event.app_user_id : null;
     const known = userId ? (await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1))[0] : undefined;
-    const inserted = await tx
-      .insert(billingEvents)
-      .values({ id: event.id, userId: known ? userId : null, type: event.type, payload: payload as object, receivedAt: now })
-      .onConflictDoNothing()
-      .returning({ id: billingEvents.id });
-    if (inserted.length === 0) return "replay";
+    if (!(await recordEvent(tx, event, known ? userId : null, payload, now))) return "replay";
     if (!known || !userId) return "unknown_user";
     const granting = GRANTING.has(event.type);
     const keeping = KEEPING.has(event.type);
@@ -159,6 +156,148 @@ export async function applyRevenueCatEvent(db: Db, event: RevenueCatEvent, paylo
       });
     return "applied";
   });
+}
+
+const isUuid = (v: string) => z.string().uuid().safeParse(v).success;
+
+/**
+ * Inserts the billing_events row; false when the id is already there (a replay). A row with no known user keeps only
+ * id, type and timestamp: its payload would be personal data with no account to answer for it.
+ */
+async function recordEvent(tx: Pick<Db, "insert">, event: RevenueCatEvent, userId: string | null, payload: unknown, now: Date): Promise<boolean> {
+  const inserted = await tx
+    .insert(billingEvents)
+    .values({ id: event.id, userId, type: event.type, payload: userId ? (payload as object) : {}, receivedAt: now })
+    .onConflictDoNothing()
+    .returning({ id: billingEvents.id });
+  return inserted.length > 0;
+}
+
+// ---- RevenueCat REST (TRANSFER) --------------------------------------------------------------------------------
+
+export const REVENUECAT_API_URL = "https://api.revenuecat.com/v1/subscribers";
+export const REVENUECAT_TIMEOUT_MS = 10_000;
+
+/** The `pro` entitlement as RevenueCat holds it now: `expiresAt` null is lifetime, undefined means no entitlement. */
+export interface RevenueCatPro {
+  expiresAt: Date | null | undefined;
+  productId?: string | null;
+}
+/** Throws when RevenueCat cannot answer (network, timeout, non-2xx, malformed body). */
+export interface RevenueCatClient {
+  fetchPro(appUserId: string): Promise<RevenueCatPro>;
+}
+
+const SubscriberSchema = z.object({
+  subscriber: z
+    .object({
+      entitlements: z.record(
+        z.string(),
+        z
+          .object({ expires_date: z.string().datetime({ offset: true }).nullish(), product_identifier: z.string().nullish() })
+          .passthrough(),
+      ),
+    })
+    .passthrough(),
+});
+
+/** GET /v1/subscribers/{app_user_id} with the secret API key. The HTTP client is injected so tests never hit the network. */
+export function createRevenueCatClient(opts: { apiKey: string; fetch?: typeof fetch; timeoutMs?: number }): RevenueCatClient {
+  const doFetch = opts.fetch ?? fetch;
+  const timeoutMs = opts.timeoutMs ?? REVENUECAT_TIMEOUT_MS;
+  return {
+    async fetchPro(appUserId) {
+      const res = await doFetch(`${REVENUECAT_API_URL}/${encodeURIComponent(appUserId)}`, {
+        method: "GET",
+        headers: { Accept: "application/json", Authorization: `Bearer ${opts.apiKey}` },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) throw new Error(`RevenueCat subscribers API answered ${res.status}`);
+      const pro = SubscriberSchema.parse(await res.json()).subscriber.entitlements.pro;
+      if (!pro) return { expiresAt: undefined };
+      return { expiresAt: pro.expires_date == null ? null : new Date(pro.expires_date), productId: pro.product_identifier ?? null };
+    },
+  };
+}
+
+export type RevenueCatTransferOutcome = "replay" | "no_api_key" | "applied";
+
+/**
+ * TRANSFER (a restore moved the purchase between app user ids): the event carries no entitlement, so every affected
+ * account (`transferred_from` and `transferred_to`, existing users only) is re-fetched from RevenueCat and its row set
+ * to what RevenueCat says now. An unexpired admin grant still wins. Fetches happen before anything is recorded, so a
+ * RevenueCat failure throws, records nothing and the webhook answers 503 (RevenueCat retries). Without an API key the
+ * event is recorded, a warning logged and no entitlement changes.
+ */
+export async function applyRevenueCatTransfer(
+  db: Db,
+  event: RevenueCatEvent,
+  payload: unknown,
+  now: Date,
+  client: RevenueCatClient | null,
+): Promise<RevenueCatTransferOutcome> {
+  const [seen] = await db.select({ id: billingEvents.id }).from(billingEvents).where(eq(billingEvents.id, event.id)).limit(1);
+  if (seen) return "replay";
+  const candidates = [...new Set([...(event.transferred_from ?? []), ...(event.transferred_to ?? [])])].filter(isUuid);
+  const existing = candidates.length
+    ? (await db.select({ id: users.id }).from(users).where(inArray(users.id, candidates))).map((u) => u.id)
+    : [];
+  const ownerId = event.app_user_id && existing.includes(event.app_user_id) ? event.app_user_id : null;
+  if (!client) {
+    logger.warn(
+      { event: "revenuecat_transfer_without_api_key", eventId: event.id, accounts: existing.length },
+      "billing_transfer_ignored: set REVENUECAT_API_KEY to apply transfers",
+    );
+    return (await recordEvent(db, event, ownerId, payload, now)) ? "no_api_key" : "replay";
+  }
+  const fetched: [string, RevenueCatPro][] = [];
+  for (const id of existing) fetched.push([id, await client.fetchPro(id)]);
+  const eventAt = new Date(event.event_timestamp_ms ?? now.getTime());
+  return db.transaction(async (tx) => {
+    if (!(await recordEvent(tx, event, ownerId, payload, now))) return "replay";
+    for (const [userId, pro] of fetched) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}))`);
+      const [row] = await tx.select().from(entitlements).where(eq(entitlements.userId, userId)).limit(1);
+      const latestEventAt = row?.latestEventAt && row.latestEventAt.getTime() > eventAt.getTime() ? row.latestEventAt : eventAt;
+      if (row && row.source === "admin" && row.tier === "pro" && (row.expiresAt === null || row.expiresAt.getTime() > now.getTime())) {
+        await tx.update(entitlements).set({ latestEventAt }).where(eq(entitlements.userId, userId));
+        continue;
+      }
+      const active = pro.expiresAt === null || (pro.expiresAt !== undefined && pro.expiresAt.getTime() > now.getTime());
+      const values = {
+        tier: active ? ("pro" as const) : ("free" as const),
+        source: "revenuecat" as const,
+        expiresAt: active ? (pro.expiresAt ?? null) : (pro.expiresAt ?? now),
+        productId: (active ? pro.productId : null) ?? row?.productId ?? null,
+        periodType: row?.periodType ?? null,
+        latestEventAt,
+        updatedAt: now,
+      };
+      await tx.insert(entitlements).values({ userId, ...values }).onConflictDoUpdate({ target: entitlements.userId, set: values });
+    }
+    return "applied";
+  });
+}
+
+// ---- Retention -------------------------------------------------------------------------------------------------
+
+/** Billing events only guard idempotency (RevenueCat retries for days) and support; kept 180 days. */
+export const BILLING_EVENT_TTL_MS = 180 * 86_400_000;
+
+/** Deletes billing_events older than 180 days in bounded batches (at most `maxBatches` per call). Returns the rows deleted. */
+export async function pruneBillingEvents(db: Db, now: Date, opts: { batch?: number; maxBatches?: number } = {}): Promise<number> {
+  const batch = opts.batch ?? 1000;
+  const maxBatches = opts.maxBatches ?? 5;
+  const cutoff = new Date(now.getTime() - BILLING_EVENT_TTL_MS);
+  let total = 0;
+  for (let i = 0; i < maxBatches; i++) {
+    const res = await db.execute(
+      sql`delete from billing_events where id in (select id from billing_events where received_at < ${cutoff} limit ${batch})`,
+    );
+    total += res.rowCount ?? 0;
+    if ((res.rowCount ?? 0) < batch) break;
+  }
+  return total;
 }
 
 /** The caller's effective entitlement (an expired pro row is free). */

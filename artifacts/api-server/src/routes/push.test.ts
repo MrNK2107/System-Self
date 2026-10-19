@@ -22,7 +22,7 @@ const enc = encodeURIComponent(TOKEN);
 test("push and prefs routes need a session", { skip }, async () => {
   const a = app();
   assert.equal((await request(a).post("/api/push/tokens").send({ token: TOKEN, platform: "ios" })).status, 401);
-  assert.equal((await request(a).delete(`/api/push/tokens/${enc}`)).status, 401);
+  assert.equal((await request(a).delete("/api/push/tokens").send({ token: TOKEN })).status, 401);
   assert.equal((await request(a).get("/api/notifications/prefs")).status, 401);
   assert.equal((await request(a).put("/api/notifications/prefs").send({ events: false })).status, 401);
 });
@@ -57,16 +57,36 @@ test("registering validates the token shape and platform", { skip }, async () =>
   assert.equal((await db!.select().from(pushTokens)).length, 0);
 });
 
-test("deleting a token removes only the caller's own, and a repeat is a 204", { skip }, async () => {
+test("deleting a token (in the JSON body) removes only the caller's own, and a repeat is a 204", { skip }, async () => {
   const a = app();
   const alice = await setup(a);
   const bob = await setup(a, { email: "bob@example.com", username: "bob_1" });
   await db!.insert(pushTokens).values({ userId: alice.id, token: TOKEN, platform: "android" });
-  assert.equal((await request(a).delete(`/api/push/tokens/${enc}`).set(auth(bob.token))).status, 204);
+  const del = (t: string, body: object = { token: TOKEN }) => request(a).delete("/api/push/tokens").set(auth(t)).send(body);
+  assert.equal((await del(bob.token)).status, 204);
   assert.equal((await db!.select().from(pushTokens)).length, 1);
-  assert.equal((await request(a).delete(`/api/push/tokens/${enc}`).set(auth(alice.token))).status, 204);
+  assert.equal((await del(alice.token)).status, 204);
   assert.equal((await db!.select().from(pushTokens)).length, 0);
-  assert.equal((await request(a).delete(`/api/push/tokens/${enc}`).set(auth(alice.token))).status, 204);
+  assert.equal((await del(alice.token)).status, 204);
+  assert.equal((await del(alice.token, { token: "nope" })).status, 204);
+});
+
+test("the old token-in-path DELETE route is gone (404), so tokens never land in URLs or access logs", { skip }, async () => {
+  const a = app();
+  const alice = await setup(a);
+  await db!.insert(pushTokens).values({ userId: alice.id, token: TOKEN, platform: "android" });
+  assert.equal((await request(a).delete(`/api/push/tokens/${enc}`).set(auth(alice.token))).status, 404);
+  assert.equal((await db!.select().from(pushTokens)).length, 1);
+});
+
+test("token registration stamps the injected clock", { skip }, async () => {
+  const at = new Date("2026-10-19T08:00:00Z");
+  const a = app({ now: () => at });
+  const { token } = await setup(a);
+  assert.equal((await request(a).post("/api/push/tokens").set(auth(token)).send({ token: TOKEN, platform: "ios" })).status, 204);
+  const [row] = await db!.select().from(pushTokens);
+  assert.equal(row!.lastSeenAt.toISOString(), at.toISOString());
+  assert.equal(row!.createdAt.toISOString(), at.toISOString());
 });
 
 test("prefs default to all on, update partially and persist", { skip }, async () => {

@@ -109,3 +109,8 @@ export function pushRegistrationDecision(s: {
   if (!s.projectId) return { register: false, reason: "no_project_id" };
   return { register: true, projectId: s.projectId };
 }
+
+/** Sign-out removes this device's token on the server: DELETE with the token in the JSON body, never in the URL. */
+export function unregisterTokenRequest(token: string) {
+  return { method: "DELETE" as const, path: "/api/push/tokens", opts: { body: { token } } };
+}

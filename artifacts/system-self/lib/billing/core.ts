@@ -101,3 +101,36 @@ export async function pollUntilPro(
   }
   return shouldStop() ? "stopped" : "pending";
 }
+
+/**
+ * PRO as the client should treat a status: tier `pro` and not past `expiresAt` (a cached status can outlive the
+ * period it describes). Anything unknown is free.
+ */
+export function isProStatus(status: BillingStatus | null | undefined, nowMs: number = Date.now()): boolean {
+  if (status?.tier !== "pro") return false;
+  return status.expiresAt === null || Date.parse(status.expiresAt) > nowMs;
+}
+
+/** Where the store lets the user manage or cancel a subscription; null where there is no store (web). */
+export const MANAGE_SUBSCRIPTION_URLS = {
+  ios: "https://apps.apple.com/account/subscriptions",
+  android: "https://play.google.com/store/account/subscriptions",
+} as const;
+
+export function manageSubscriptionUrl(platform: string): string | null {
+  return platform === "ios" ? MANAGE_SUBSCRIPTION_URLS.ios : platform === "android" ? MANAGE_SUBSCRIPTION_URLS.android : null;
+}
+
+const storeSettings = (platform: string) =>
+  platform === "ios" ? "App Store account settings" : platform === "android" ? "Google Play account settings" : "App Store or Google Play account settings";
+
+/** The store's required auto-renewal disclosure, in plain language. */
+export function autoRenewDisclosure(platform: string): string {
+  return `The subscription renews automatically unless it is cancelled at least 24 hours before the current period ends. Manage or cancel it in your ${storeSettings(platform)}.`;
+}
+
+export const MANAGE_SUBSCRIPTION_LABEL = "MANAGE SUBSCRIPTION";
+
+/** Shown before account deletion: the store bills independently of this account. */
+export const DELETE_KEEPS_SUBSCRIPTION_LINE =
+  "Deleting your account does not cancel a store subscription. Cancel it in your App Store or Google Play account settings, or it keeps renewing.";

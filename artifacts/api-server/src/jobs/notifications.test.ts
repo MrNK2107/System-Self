@@ -1,14 +1,18 @@
-import test, { after, afterEach, beforeEach } from "node:test";
+import test, { after, afterEach, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { notices, noticePushes, notificationLog, notificationPrefs, pushTokens, quests } from "@workspace/db";
+import { notices, noticePushes, notificationLog, notificationPrefs, profiles, pushTokens, quests, userDayState, users } from "@workspace/db";
 import request from "supertest";
 import { app, assertStoredNoticesMatchContract, auth, db, setup, skip } from "../routes/game-test-helpers";
 import { runWorkerTick } from "./run-loop";
 import { createQuestDeadlineNotices, dispatchPushes, runNotificationJobs } from "./notifications";
 import { PUSH_PRIORITY, pushCopy } from "../services/push-policy";
-import type { PushMessage, PushTicket } from "../services/push";
+import { createExpoTransport, type PushMessage, type PushTicket } from "../services/push";
+import { logger } from "../lib/logger";
+import { withJobLock } from "./social";
+import { DISPATCH_JOB_LOCK } from "./notifications";
+import { withUserLock } from "../services/user-lock";
 
 after(async () => {
   await closeTestDb();
@@ -161,8 +165,9 @@ test("a new local day resets the cap, and the log is keyed by the user's local d
   assert.deepEqual(log.map((l) => l.localDate).sort(), ["2026-10-19", "2026-10-20"]);
 });
 
-test("local date follows the user's timezone: 20:00Z is already tomorrow in Asia/Kolkata", { skip }, async () => {
+test("local date follows the user's timezone: 20:00Z is already tomorrow (09:00) in Pacific/Auckland", { skip }, async () => {
   const u = await user();
+  await db!.update(users).set({ timezone: "Pacific/Auckland" }).where(eq(users.id, u.id));
   const lateUtc = new Date("2026-10-19T20:00:00Z");
   await notice(u.id, "rank_change", new Date(lateUtc.getTime() - 1000));
   await dispatchPushes(db!, lateUtc, fakeTransport().transport);
@@ -199,6 +204,8 @@ test("every device of the user gets the one push, which is one log row; badge is
   await dispatchPushes(db!, NOW, f.transport);
   assert.equal(f.sent.length, 2);
   assert.ok(f.sent.every((m) => m.badge === 0 && m.title === "SYSTEM // SELF"));
+  // Silent, on the app's Android channel.
+  assert.ok(f.sent.every((m) => m.channelId === "system-self" && !("sound" in m)));
   assert.equal((await db!.select().from(notificationLog)).length, 1);
 });
 
@@ -386,4 +393,167 @@ test("the worker prunes push decisions and log rows older than 30 days", { skip 
   await runWorkerTick(db!, NOW, undefined, 200, fakeTransport().transport);
   assert.deepEqual((await db!.select().from(noticePushes)).map((r) => r.noticeId), [freshN.id]);
   assert.deepEqual((await db!.select().from(notificationLog)).map((r) => r.localDate), ["2026-09-20"]);
+});
+
+// --- Phase 7 final review: delivery window, dispatcher, token freshness -----------------------------------------
+
+const decisionOf = async (noticeId: string) => (await db!.select().from(noticePushes).where(eq(noticePushes.noticeId, noticeId)))[0]?.decision;
+
+test("I3: a rank_change created at 00:30 local waits for the 08:00 window and is pushed then, not at 00:30", { skip }, async () => {
+  const u = await user();
+  const at0030 = new Date("2026-10-19T19:00:00Z"); // 00:30 IST on 10-20
+  const n = await notice(u.id, "rank_change", at0030);
+  const f = fakeTransport();
+  await dispatchPushes(db!, at0030, f.transport);
+  await dispatchPushes(db!, new Date("2026-10-20T02:29:00Z"), f.transport); // 07:59 IST
+  assert.equal(f.sent.length, 0);
+  assert.equal(await decisionOf(n.id), undefined, "left undecided for a later tick, not skipped");
+  await dispatchPushes(db!, new Date("2026-10-20T02:30:00Z"), f.transport); // 08:00 IST
+  assert.deepEqual(kindsSent(f.sent), ["rank_change"]);
+  assert.equal(await decisionOf(n.id), "sent");
+});
+
+test("I3: the window opens at the morning briefing time when it is later than 08:00, and closes at 22:00", { skip }, async () => {
+  const u = await user({ morning: false, nightly: false, events: true });
+  await db!.update(profiles).set({ morningTime: "09:30" }).where(eq(profiles.userId, u.id));
+  await notice(u.id, "raid_result", new Date("2026-10-19T19:00:00Z"));
+  const f = fakeTransport();
+  await dispatchPushes(db!, new Date("2026-10-20T03:30:00Z"), f.transport); // 09:00 IST
+  assert.equal(f.sent.length, 0);
+  await dispatchPushes(db!, new Date("2026-10-20T04:00:00Z"), f.transport); // 09:30 IST
+  assert.deepEqual(kindsSent(f.sent), ["raid_result"]);
+  // 22:15 IST: a new notice waits for the next morning.
+  const late = await notice(u.id, "rival_passed", new Date("2026-10-20T16:45:00Z"));
+  await dispatchPushes(db!, new Date("2026-10-20T16:45:00Z"), f.transport);
+  assert.equal(await decisionOf(late.id), undefined);
+  assert.equal(f.sent.length, 1);
+});
+
+test("I3: PUSH_MAX_AGE_MS counts from the window opening: a 22:30 notice is pushed the next morning, not dropped", { skip }, async () => {
+  const u = await user({ morning: false, nightly: false, events: true });
+  const n = await notice(u.id, "rank_change", new Date("2026-10-19T17:00:00Z")); // 22:30 IST on 10-19
+  const f = fakeTransport();
+  await dispatchPushes(db!, new Date("2026-10-19T17:00:00Z"), f.transport);
+  assert.equal(f.sent.length, 0);
+  await dispatchPushes(db!, new Date("2026-10-20T16:29:00Z"), f.transport); // 21:59 IST 10-20, 23.5 h later
+  assert.deepEqual(kindsSent(f.sent), ["rank_change"]);
+  assert.equal(await decisionOf(n.id), "sent");
+});
+
+test("I3: a notice more than 24 h past its window opening is skipped, never pushed", { skip }, async () => {
+  const u = await user({ morning: false, nightly: false, events: true });
+  const n = await notice(u.id, "rank_change", new Date("2026-10-19T17:00:00Z")); // 22:30 IST 10-19, window opens 08:00 10-20
+  const f = fakeTransport();
+  await dispatchPushes(db!, new Date("2026-10-21T03:00:00Z"), f.transport); // 08:30 IST 10-21: 24.5 h after the opening
+  assert.equal(f.sent.length, 0);
+  assert.equal(await decisionOf(n.id), "skipped");
+});
+
+test("I3: a quest deadline notice written after 22:00 stays in-app and is skipped on the next day", { skip }, async () => {
+  const u = await user();
+  const n = await notice(u.id, "quest_deadline_24h", new Date("2026-10-19T16:45:00Z")); // 22:15 IST
+  const f = fakeTransport();
+  await dispatchPushes(db!, new Date("2026-10-19T16:46:00Z"), f.transport);
+  assert.equal(await decisionOf(n.id), undefined);
+  await dispatchPushes(db!, new Date("2026-10-19T18:31:00Z"), f.transport); // 00:01 IST 10-20
+  assert.equal(f.sent.length, 0);
+  assert.equal(await decisionOf(n.id), "skipped");
+});
+
+test("I3: users waiting for their window do not starve users whose window is open", { skip }, async () => {
+  const night = await user(undefined, { email: "n@example.com", username: "night_1" });
+  const day = await user(undefined, { email: "d@example.com", username: "day_1" });
+  await db!.update(users).set({ timezone: "America/New_York" }).where(eq(users.id, day.id));
+  const at = new Date("2026-10-19T19:00:00Z"); // 00:30 IST, 15:00 New York
+  await notice(night.id, "rank_change", at);
+  await notice(day.id, "rank_change", at);
+  const f = fakeTransport();
+  await dispatchPushes(db!, at, f.transport, { limit: 1 });
+  assert.deepEqual(f.sent.map((m) => m.to), ["ExponentPushToken[day_1]"]);
+});
+
+test("I4: a hung transport times out, the job lock is free during the send, and rollover still runs in the same tick", { skip, timeout: 20_000 }, async () => {
+  const u = await user({ morning: false, nightly: false, events: true });
+  await notice(u.id, "rank_change");
+  await db!.update(userDayState).set({ nextRolloverAt: new Date(NOW.getTime() - 1000) }).where(eq(userDayState.userId, u.id));
+  let lockFreeDuringSend: boolean | "unknown" = "unknown";
+  let userLockFreeDuringSend = false;
+  const hanging = (async (_url: string, init: RequestInit) => {
+    // While the request hangs, another instance can take the dispatch job lock and the user lock.
+    lockFreeDuringSend = (await withJobLock(db!, DISPATCH_JOB_LOCK, async () => true)) === true;
+    userLockFreeDuringSend = await withUserLock(db!, u.id, async () => true);
+    return new Promise<Response>((_, reject) => {
+      init.signal!.addEventListener("abort", () => reject(init.signal!.reason));
+    });
+  }) as never;
+  const transport = createExpoTransport({ fetch: hanging, timeoutMs: 100 });
+  const started = Date.now();
+  const out = await runWorkerTick(db!, NOW, undefined, 200, transport);
+  assert.ok(Date.now() - started < 10_000, "the tick finishes once the send times out");
+  assert.equal(out.processed, 1, "rollover ran in the same tick");
+  assert.equal(lockFreeDuringSend, true, "no job-lock transaction is held across HTTP");
+  assert.equal(userLockFreeDuringSend, true);
+  // At most once: the decision stays, the notice stays in-app, nothing is retried.
+  const [d] = await db!.select().from(noticePushes);
+  assert.equal(d!.decision, "sent");
+  const g = fakeTransport();
+  await dispatchPushes(db!, NOW, g.transport);
+  assert.equal(g.sent.length, 0);
+});
+
+test("I4: error-ticket counts are logged (never tokens) and messages go out in batches of 100", { skip }, async () => {
+  const u = await user({ morning: false, nightly: false, events: true });
+  await db!.insert(pushTokens).values(Array.from({ length: 149 }, (_, i) => ({ userId: u.id, token: `ExponentPushToken[extra${i}]`, platform: "android" })));
+  await notice(u.id, "rank_change");
+  const sizes: number[] = [];
+  const transport = async (ms: PushMessage[]): Promise<PushTicket[]> => {
+    sizes.push(ms.length);
+    return ms.map((_, i) => (i % 10 === 0 ? { status: "error" as const, message: "boom", details: { error: "MessageRateExceeded" } } : { status: "ok" as const, id: "r" }));
+  };
+  const warn = mock.method(logger, "warn");
+  try {
+    const out = await dispatchPushes(db!, NOW, transport);
+    assert.deepEqual(sizes, [100, 50]);
+    assert.equal(out.sent, 135);
+    assert.equal(out.errors, 15);
+    const call = warn.mock.calls.find((c) => JSON.stringify(c.arguments).includes("push_error_tickets"));
+    assert.ok(call, "error tickets are logged");
+    const text = JSON.stringify(call!.arguments);
+    assert.ok(text.includes("15"));
+    assert.ok(text.includes("MessageRateExceeded"));
+    assert.ok(!text.includes("ExponentPushToken"), "tokens are never logged");
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test("I4: the dispatcher stops deciding at its wall-clock budget; the rest waits for the next tick", { skip }, async () => {
+  const a = await user({ morning: false, nightly: false, events: true });
+  const b = await user({ morning: false, nightly: false, events: true }, { email: "bob@example.com", username: "bob_1" });
+  await notice(a.id, "rank_change");
+  await notice(b.id, "rank_change");
+  let t = 0;
+  const f = fakeTransport();
+  const first = await dispatchPushes(db!, NOW, f.transport, { budgetMs: 10, nowMs: () => (t += 20) });
+  assert.equal(first.users, 1);
+  assert.equal(f.sent.length, 1);
+  await dispatchPushes(db!, NOW, f.transport);
+  assert.equal(f.sent.length, 2);
+});
+
+test("reminder slots are reserved only while a device was seen within the 14-day local schedule", { skip }, async () => {
+  const u = await user();
+  for (const k of ["rank_change", "shadow_activated", "rival_passed"]) await notice(u.id, k);
+  await db!.update(pushTokens).set({ lastSeenAt: new Date(NOW.getTime() - 15 * 86_400_000) }).where(eq(pushTokens.userId, u.id));
+  const f = fakeTransport();
+  await dispatchPushes(db!, NOW, f.transport);
+  assert.deepEqual(kindsSent(f.sent), ["rank_change", "shadow_activated", "rival_passed"], "no local reminders left: all 3 slots are events");
+
+  await resetDb(db!);
+  const v = await user();
+  for (const k of ["rank_change", "shadow_activated", "rival_passed"]) await notice(v.id, k);
+  await db!.update(pushTokens).set({ lastSeenAt: new Date(NOW.getTime() - 13 * 86_400_000) }).where(eq(pushTokens.userId, v.id));
+  const g = fakeTransport();
+  await dispatchPushes(db!, NOW, g.transport);
+  assert.deepEqual(kindsSent(g.sent), ["rank_change"]);
 });

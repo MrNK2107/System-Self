@@ -89,3 +89,26 @@ test("barRects: one bar per day by offset, height is the completion rate", () =>
   assert.equal(bars[0]!.height, 20);
   assert.equal(bars[0]!.y, 20);
 });
+
+test("the PRO chart shows the advertised 365 days", async () => {
+  const { PRO_CHART_DAYS, FREE_CHART_DAYS } = await import("./history");
+  assert.equal(PRO_CHART_DAYS, 365);
+  assert.equal(FREE_CHART_DAYS, 14);
+});
+
+test("freeze copy is the same for free and PRO users, and says promotion pauses too", async () => {
+  const { FREEZE_PITCH, FREEZE_PITCH_PRO } = await import("./history");
+  assert.match(FREEZE_PITCH, /decay, demotion and promotion/);
+  assert.ok(FREEZE_PITCH_PRO.startsWith(FREEZE_PITCH));
+});
+
+test("freezeCardMode: an active freeze shows its line even after PRO lapses; otherwise free sees the lock", async () => {
+  const { freezeCardMode } = await import("./history");
+  const active = freezeView({ active: true, until: "2026-10-25", usedThisMonth: true, availableFrom: "2026-11-01" });
+  const idle = freezeView({ active: false, until: null, usedThisMonth: false, availableFrom: null });
+  assert.equal(freezeCardMode(false, active), "active");
+  assert.equal(freezeCardMode(true, active), "active");
+  assert.equal(freezeCardMode(false, idle), "locked");
+  assert.equal(freezeCardMode(true, idle), "available");
+  assert.equal(freezeCardMode(false, freezeView(undefined)), "locked");
+});

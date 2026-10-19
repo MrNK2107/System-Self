@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { localDate, localTimeToInstant } from "@workspace/engine";
 import { notificationLog, notificationPrefs, profiles, pushTokens, users, type Db } from "@workspace/db";
@@ -6,27 +7,39 @@ import { withUserLock, type Tx } from "../services/user-lock";
 import { RESERVED_LOG_KIND } from "../jobs/notifications";
 import { NotificationPrefsUpdateSchema, PushTokenRegisterRequestSchema, PushTokenSchema } from "@workspace/contracts";
 
+const PushTokenUnregisterSchema = z.object({ token: PushTokenSchema });
+
 const DEFAULT_PREFS = { morning: true, nightly: true, events: true };
 
 /** Push tokens and notification prefs (authenticated; mounted behind requireAuth). */
 export function pushRoutes(db: Db, clock: () => Date = () => new Date()): IRouter {
   const router = Router();
 
-  // Idempotent: a token already on file moves to the signed-in user and its lastSeenAt is refreshed.
+  // Idempotent: a token already on file moves to the signed-in user and its lastSeenAt is refreshed. Under the user
+  // lock so a registration never interleaves with that user's push decisions.
   router.post("/push/tokens", async (req, res) => {
     const { token, platform } = PushTokenRegisterRequestSchema.parse(req.body);
-    const now = new Date();
-    await db
-      .insert(pushTokens)
-      .values({ userId: req.user!.id, token, platform, createdAt: now, lastSeenAt: now })
-      .onConflictDoUpdate({ target: pushTokens.token, set: { userId: req.user!.id, platform, lastSeenAt: now } });
+    const userId = req.user!.id;
+    const now = clock();
+    await withUserLock(db, userId, async (tx) => {
+      await tx
+        .insert(pushTokens)
+        .values({ userId, token, platform, createdAt: now, lastSeenAt: now })
+        .onConflictDoUpdate({ target: pushTokens.token, set: { userId, platform, lastSeenAt: now } });
+    });
     res.status(204).end();
   });
 
-  // Only the caller's own token is removed; anything else (or a repeat) is a quiet 204.
-  router.delete("/push/tokens/:token", async (req, res) => {
-    const parsed = PushTokenSchema.safeParse(req.params.token);
-    if (parsed.success) await db.delete(pushTokens).where(and(eq(pushTokens.userId, req.user!.id), eq(pushTokens.token, parsed.data)));
+  // The token travels in the JSON body, never the path, so it stays out of URLs and access logs. Only the caller's own
+  // token is removed; anything else (or a repeat) is a quiet 204.
+  router.delete("/push/tokens", async (req, res) => {
+    const parsed = PushTokenUnregisterSchema.safeParse(req.body);
+    const userId = req.user!.id;
+    if (parsed.success) {
+      await withUserLock(db, userId, async (tx) => {
+        await tx.delete(pushTokens).where(and(eq(pushTokens.userId, userId), eq(pushTokens.token, parsed.data.token)));
+      });
+    }
     res.status(204).end();
   });
 

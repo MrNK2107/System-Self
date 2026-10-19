@@ -15,8 +15,11 @@ import {
   FREE_CHART_DAYS,
   PRO_CHART_DAYS,
   REASON_MAX,
+  FREEZE_PITCH,
+  FREEZE_PITCH_PRO,
   checkFreezeReason,
   domainSeries,
+  freezeCardMode,
   fetchRankFreeze,
   fetchScoreHistory,
   freezeView,
@@ -116,8 +119,10 @@ export function RankFreezeCard() {
   const [message, setMessage] = useState<string | null>(null);
   const attemptKey = useRef<string | null>(null);
 
-  const statusQ = useQuery({ queryKey: rankFreezeKey(userId), queryFn: () => fetchRankFreeze(api), enabled: !!userId && pro });
+  // Fetched for everyone: a freeze started while PRO stays active (and shown) after PRO lapses.
+  const statusQ = useQuery({ queryKey: rankFreezeKey(userId), queryFn: () => fetchRankFreeze(api), enabled: !!userId });
   const view = freezeView(statusQ.data);
+  const mode = freezeCardMode(pro, view);
 
   const start = useMutation({
     mutationFn: () => startRankFreeze(api, reason, (attemptKey.current ??= newClientId("freeze"))),
@@ -149,9 +154,14 @@ export function RankFreezeCard() {
   return (
     <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <Text style={[s.title, { color: colors.mutedForeground }]}>RANK FREEZE</Text>
-      {!pro ? (
+      {mode === "active" && view.kind === "active" ? (
         <>
-          <Text style={[s.note, { color: colors.mutedForeground }]}>Pause decay and demotion for 7 days, once a month.</Text>
+          <Text style={[s.line, { color: colors.primary }]}>{view.line}</Text>
+          <Text style={[s.note, { color: colors.mutedForeground }]}>Through {view.until}.</Text>
+        </>
+      ) : mode === "locked" ? (
+        <>
+          <Text style={[s.note, { color: colors.mutedForeground }]}>{FREEZE_PITCH}</Text>
           <ProLock label="RANK FREEZE" />
         </>
       ) : view.kind === "active" ? (
@@ -163,7 +173,7 @@ export function RankFreezeCard() {
         <Text style={[s.note, { color: colors.mutedForeground }]}>Available from {view.availableFrom}.</Text>
       ) : !open ? (
         <>
-          <Text style={[s.note, { color: colors.mutedForeground }]}>Pause decay, demotion and promotion for 7 days, once a month. The rank holds still. You do not.</Text>
+          <Text style={[s.note, { color: colors.mutedForeground }]}>{FREEZE_PITCH_PRO}</Text>
           <TouchableOpacity onPress={() => setOpen(true)} accessibilityRole="button" style={[s.outline, { borderColor: colors.primary }]}>
             <Text style={[s.outlineText, { color: colors.primary }]}>FREEZE RANK</Text>
           </TouchableOpacity>

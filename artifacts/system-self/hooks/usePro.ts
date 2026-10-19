@@ -2,13 +2,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useGameUserId } from "@/hooks/useGameState";
 import { api } from "@/lib/api/client";
-import { billingStatusKey, fetchBillingStatus } from "@/lib/billing/core";
+import { billingStatusKey, fetchBillingStatus, isProStatus } from "@/lib/billing/core";
 
 export function useBillingStatusQuery() {
   const userId = useGameUserId();
   return useQuery({ queryKey: billingStatusKey(userId), queryFn: () => fetchBillingStatus(api), enabled: !!userId });
 }
 
+/** True only for an unexpired PRO status: a cached `pro` whose `expiresAt` has passed counts as free. */
 export function usePro(): boolean {
-  return useBillingStatusQuery().data?.tier === "pro";
+  return isProStatus(useBillingStatusQuery().data);
 }
