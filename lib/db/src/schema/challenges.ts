@@ -29,6 +29,8 @@ export const namedChallenges = pgTable(
     challengerEnd: real("challenger_end"),
     opponentEnd: real("opponent_end"),
     winnerId: uuid("winner_id").references(() => users.id, { onDelete: "set null" }),
+    /** Set when the challenge closes as resolved or void; survives a deleted winner (winnerId goes null). */
+    outcome: text("outcome"),
     resolvedAt: ts("resolved_at"),
     /** Last time the social job tried to settle it (rotation, so a challenge that keeps deferring cannot starve the rest). */
     lastAttemptAt: ts("last_attempt_at"),
@@ -39,6 +41,7 @@ export const namedChallenges = pgTable(
     index("named_challenges_open_idx").on(t.status, t.respondBy),
     check("named_challenges_days_valid", sql`${t.days} in (3, 7, 14, 30)`),
     check("named_challenges_status_valid", sql`${t.status} in ('pending', 'active', 'ignored', 'resolved', 'void')`),
+    check("named_challenges_outcome_valid", sql`${t.outcome} is null or ${t.outcome} in ('challenger_won', 'opponent_won', 'draw', 'void')`),
     check("named_challenges_distinct", sql`${t.challengerId} is null or ${t.opponentId} is null or ${t.challengerId} <> ${t.opponentId}`),
   ],
 );

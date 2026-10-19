@@ -26,6 +26,9 @@ export type PublicProfile = z.infer<typeof PublicProfileSchema>;
 
 export const PublicProfileListSchema = z.array(PublicProfileSchema);
 
+/** How a deleted account is named wherever another player's handle was shown (clan dispatches, notices). */
+export const FORMER_OPERATOR_HANDLE = "FORMER OPERATOR";
+
 export const SOCIAL_SEARCH_MIN_CHARS = 3;
 export const SocialSearchQuerySchema = z.object({
   q: z.string().trim().min(SOCIAL_SEARCH_MIN_CHARS).max(32),

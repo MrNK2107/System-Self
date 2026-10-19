@@ -64,7 +64,12 @@ export const clanMembers = pgTable(
   ],
 );
 
-/** SYSTEM dispatches shown inside a clan (membership changes; raid results from Task 5). No emoji. */
+/**
+ * SYSTEM dispatches shown inside a clan (membership changes, raid results, challenges). No emoji. A line that names
+ * players has a `templateKey`: its `text` then holds `{actor}` / `{subject}` placeholders that are rendered for each
+ * viewer at read time (a current clanmate by username, a former member by public projection, a deleted account as
+ * FORMER OPERATOR), so a username never outlives the membership. Rows without a template key render as stored.
+ */
 export const clanDispatches = pgTable(
   "clan_dispatches",
   {
@@ -74,6 +79,9 @@ export const clanDispatches = pgTable(
       .references(() => clans.id, { onDelete: "cascade" }),
     kind: text("kind").notNull(),
     text: text("text").notNull(),
+    templateKey: text("template_key"),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    subjectId: uuid("subject_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
   (t) => [index("clan_dispatches_clan_created_idx").on(t.clanId, t.createdAt.desc())],
@@ -95,6 +103,8 @@ export const clanRaids = pgTable(
       .notNull()
       .references(() => clans.id, { onDelete: "cascade" }),
     metricValue: real("metric_value").notNull().default(0),
+    /** A score raid value with fewer than CLAN_SCORE_MIN_ACTIVE contributors: kept for ordering, never shown. */
+    valueHidden: boolean("value_hidden").notNull().default(false),
     position: integer("position"),
     winner: boolean("winner").notNull().default(false),
     createdAt: ts("created_at").defaultNow().notNull(),

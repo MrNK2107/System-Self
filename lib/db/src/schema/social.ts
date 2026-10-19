@@ -38,13 +38,17 @@ export const blocks = pgTable(
   ],
 );
 
-/** Reports stored for admin review. */
+/**
+ * Reports stored for admin review. A report about a deleted account is kept: `subjectId` goes null and
+ * `subjectHandle` keeps the subject's username as it was when the report was filed.
+ */
 export const userReports = pgTable(
   "user_reports",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     reporterId: userRef("reporter_id"),
-    subjectId: userRef("subject_id"),
+    subjectId: uuid("subject_id").references(() => users.id, { onDelete: "set null" }),
+    subjectHandle: text("subject_handle"),
     reason: text("reason").notNull(),
     createdAt: ts("created_at").defaultNow().notNull(),
     resolvedAt: ts("resolved_at"),

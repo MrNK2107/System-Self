@@ -183,6 +183,13 @@
       "when": 1792388445753,
       "tag": "0025_gray_princess_powerful",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792390592078,
+      "tag": "0026_demonic_king_cobra",
+      "breakpoints": true
     }
   ]
 }

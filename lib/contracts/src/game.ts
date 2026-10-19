@@ -143,7 +143,10 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
     rivalStart: z.number(),
     rivalEnd: z.number(),
   }),
-  /** A weekly clan raid resolved. Clan-level numbers only; `line` is the dispatch text (AI-rewritten or the template). */
+  /**
+   * A weekly clan raid resolved. Clan-level numbers only; `line` is the dispatch text (AI-rewritten or the template).
+   * `value` / `rivalValue` are null when that clan's score-raid total had fewer than 3 contributors (withheld).
+   */
   raid_result: z.object({
     weekKey: z.string(),
     week: z.number().int(),
@@ -151,8 +154,8 @@ export const NOTICE_PAYLOAD_SCHEMAS = {
     position: z.number().int().min(1),
     count: z.number().int().min(2),
     won: z.boolean(),
-    value: z.number(),
-    rivalValue: z.number(),
+    value: z.number().nullable(),
+    rivalValue: z.number().nullable(),
     bonus: z.number(),
     line: z.string(),
   }),

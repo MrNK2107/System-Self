@@ -95,3 +95,14 @@ test("formatRaidValue and the dispatch text follow the PRD format, no emoji", ()
   assert.equal(text, "RAID RESULT — WEEK 43. Your clan ranked 2 of 3. Body sessions: 14. Rival clan: 20. Gap: 6.");
   assert.doesNotMatch(text, /\p{Extended_Pictographic}/u);
 });
+
+test("a withheld score-raid value reads 'withheld' and so does the gap", () => {
+  assert.equal(
+    raidDispatchText({ week: 47, position: 2, count: 2, type: "score", value: null, rivalValue: 6 }),
+    "RAID RESULT — WEEK 47. Your clan ranked 2 of 2. Score movement: withheld. Rival clan: +6. Gap: withheld.",
+  );
+  assert.equal(
+    raidDispatchText({ week: 47, position: 1, count: 2, type: "score", value: 6, rivalValue: null }),
+    "RAID RESULT — WEEK 47. Your clan ranked 1 of 2. Score movement: +6. Rival clan: withheld. Gap: withheld.",
+  );
+});

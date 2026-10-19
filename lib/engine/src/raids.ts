@@ -131,9 +131,11 @@ export function raidDispatchText(a: {
   position: number;
   count: number;
   type: RaidType;
-  value: number;
-  rivalValue: number;
+  /** Null: withheld (a score-raid total with too few contributors). */
+  value: number | null;
+  rivalValue: number | null;
 }): string {
-  const gap = formatRaidValue(a.type, Math.abs(a.rivalValue - a.value), { signed: false });
-  return `RAID RESULT — WEEK ${a.week}. Your clan ranked ${a.position} of ${a.count}. ${RAID_METRIC_LABEL[a.type]}: ${formatRaidValue(a.type, a.value)}. Rival clan: ${formatRaidValue(a.type, a.rivalValue)}. Gap: ${gap}.`;
+  const shown = (v: number | null) => (v === null ? "withheld" : formatRaidValue(a.type, v));
+  const gap = a.value === null || a.rivalValue === null ? "withheld" : formatRaidValue(a.type, Math.abs(a.rivalValue - a.value), { signed: false });
+  return `RAID RESULT — WEEK ${a.week}. Your clan ranked ${a.position} of ${a.count}. ${RAID_METRIC_LABEL[a.type]}: ${shown(a.value)}. Rival clan: ${shown(a.rivalValue)}. Gap: ${gap}.`;
 }
