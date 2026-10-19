@@ -75,6 +75,8 @@ export function tauntTemplate(codename: string, trajectory: string, dayNumber: n
   return lines[Math.abs(dayNumber) % lines.length]!;
 }
 
+/** The em dash a real rival signs with (`— NAME`); a ghost never signs. */
+const SIGNATURE_DASH = "—";
 const FIRST_PERSON = /\b(I|me|my|mine|myself|I'm|I've|I'll)\b/i;
 
 type TauntPhase =
@@ -204,8 +206,11 @@ export function rivalsRoutes(db: Db, ai: AiDeps, clock: () => Date = () => new D
     if (step1.kind === "done") return void res.status(step1.result.status).json(step1.result.body);
 
     const generated = await generateMessage("rival_taunt", step1.ctx, ai, { extraContext: step1.extraContext }, step1.template);
-    // A ghost never speaks as a person: model text in the first person falls back to the third-person template.
-    if (step1.isGhost && FIRST_PERSON.test(generated.message)) generated.message = step1.template;
+    // A ghost never speaks as a person: model text in the first person, or signed off with a dash, falls back to the
+    // third-person template.
+    if (step1.isGhost && (FIRST_PERSON.test(generated.message) || generated.message.includes(SIGNATURE_DASH))) {
+      generated.message = step1.template;
+    }
 
     await withIdempotency(db, req, res, TAUNT_ROUTE, async (tx) => {
       const now = clock();

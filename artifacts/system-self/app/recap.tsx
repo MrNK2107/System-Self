@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { useColors } from "@/hooks/useColors";
 import { useQuery } from "@tanstack/react-query";
 import { useApp, ACHIEVEMENT_DEFS, type Domain } from "@/context/AppContext";
@@ -119,7 +120,15 @@ export default function RecapScreen() {
       >
         {/* Header */}
         <View style={styles.headerRow}>
-          <View>
+          <TouchableOpacity
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/stats"))}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
             <Text style={[styles.title, { color: colors.foreground }]}>WEEKLY RECAP</Text>
             <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
               WEEK OF {weekDate.toUpperCase()}
@@ -363,7 +372,7 @@ const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 20, gap: 12 },
 
   headerRow: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
+    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 10,
   },
   title: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 3 },
   subtitle: { fontSize: 9, letterSpacing: 1.5, marginTop: 3, fontWeight: "500" as const },

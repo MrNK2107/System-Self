@@ -70,10 +70,18 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="recap"
+          name="rivals"
           options={{
             tabBarIcon: ({ color, size }) => (
-              <Feather name="calendar" size={size} color={color} />
+              <Feather name="users" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="clan"
+          options={{
+            tabBarIcon: ({ color, size }) => (
+              <Feather name="shield" size={size} color={color} />
             ),
           }}
         />
@@ -82,14 +90,6 @@ export default function TabLayout() {
           options={{
             tabBarIcon: ({ color, size }) => (
               <Feather name="bar-chart-2" size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="rivals"
-          options={{
-            tabBarIcon: ({ color, size }) => (
-              <Feather name="users" size={size} color={color} />
             ),
           }}
         />

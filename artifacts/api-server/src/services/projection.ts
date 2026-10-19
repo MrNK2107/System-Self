@@ -1,5 +1,5 @@
 import { eq, inArray } from "drizzle-orm";
-import { domainScores, profiles, shadowSelves, users, type Db } from "@workspace/db";
+import { clanMembers, clans, domainScores, profiles, shadowSelves, users, type Db } from "@workspace/db";
 import { RANKED_DOMAINS, localDate, type Rank, type RankedDomain } from "@workspace/engine";
 import type { PublicProfile } from "@workspace/contracts";
 import { toShadowState } from "./scoring";
@@ -84,7 +84,7 @@ export function projectGhost(ghost: {
 }
 
 /**
- * Loads projection subjects in a constant number of queries (rank from the profile, scores from domain_scores, trajectory from the same
+ * Loads projection subjects in a constant number of queries (rank from the profile, clan tag from the membership, scores from domain_scores, trajectory from the same
  * snapshots as the game state) for onboarded users, keyed by user id. Unknown or un-onboarded ids are absent.
  */
 export async function loadProjectionSubjects(
@@ -103,9 +103,12 @@ export async function loadProjectionSubjects(
       identitySetting: profiles.identitySetting,
       publicCodename: profiles.publicCodename,
       rank: profiles.rank,
+      clanTag: clans.tag,
     })
     .from(users)
     .innerJoin(profiles, eq(profiles.userId, users.id))
+    .leftJoin(clanMembers, eq(clanMembers.userId, users.id))
+    .leftJoin(clans, eq(clans.id, clanMembers.clanId))
     .where(inArray(users.id, ids));
   const scoreRows = await db.select().from(domainScores).where(inArray(domainScores.userId, ids));
   const shadowRows = await db.select().from(shadowSelves).where(inArray(shadowSelves.userId, ids));
@@ -130,6 +133,7 @@ export async function loadProjectionSubjects(
       scores: scoresOf.get(r.userId)!,
       trajectory: trends.get(r.userId)!.trajectory,
       shadowActive: shadowActive.has(r.userId),
+      ...(r.clanTag ? { clanTag: r.clanTag } : {}),
     });
   }
   return out;

@@ -1,7 +1,7 @@
 import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { closeTestDb, getTestDb, resetDb } from "@workspace/db/testing";
-import { dailySnapshots, domainScores, profiles, shadowSelves, users } from "@workspace/db";
+import { clanMembers, clans, dailySnapshots, domainScores, profiles, shadowSelves, users } from "@workspace/db";
 import { RANKED_DOMAINS, hiddenScore, type RankedDomain } from "@workspace/engine";
 import { loadProjectionSubjects } from "./projection";
 
@@ -79,4 +79,13 @@ test("loadProjectionSubjects: the number of queries does not depend on the numbe
   const many = await count(ids);
   assert.equal(many, few);
   assert.ok(many <= 6, `expected a handful of queries, got ${many}`);
+});
+
+test("loadProjectionSubjects: carries the clan tag of clan members only", { skip }, async () => {
+  const ids = await seed(3);
+  const [clan] = await db!.insert(clans).values({ name: "Iron Wolves", nameLower: "iron wolves", tag: "IRON", inviteCode: "CODE1234" }).returning();
+  await db!.insert(clanMembers).values({ userId: ids[0]!, clanId: clan!.id, role: "leader" });
+  const got = await loadProjectionSubjects(db!, ids, NOW);
+  assert.equal(got.get(ids[0]!)!.clanTag, "IRON");
+  assert.equal(got.get(ids[1]!)!.clanTag, undefined);
 });

@@ -1,0 +1,13 @@
+/** The user's clan, members and dispatches (GET /api/clans/mine). */
+export const myClanKey = (userId: string | null) => ["clan-mine", userId] as const;
+/** Clans matching a search (GET /api/clans/search). */
+export const clanSearchKey = (userId: string | null, q: string) => ["clan-search", userId, q] as const;
+/** The global clan board (GET /api/clans/leaderboard). */
+export const clanLeaderboardKey = (userId: string | null) => ["clan-leaderboard", userId] as const;
+/** Prefix of every clan query, for invalidating them together after a membership change. */
+export const clanRootKeys = (userId: string | null) =>
+  [
+    ["clan-mine", userId],
+    ["clan-search", userId],
+    ["clan-leaderboard", userId],
+  ] as const;

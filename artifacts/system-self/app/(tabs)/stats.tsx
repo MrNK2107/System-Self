@@ -317,6 +317,18 @@ export default function StatsScreen() {
           )}
         </View>
 
+        {/* Weekly recap (its own screen; it left the tab bar when the Clan tab arrived) */}
+        <TouchableOpacity
+          style={[styles.card, styles.expandHeader, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => router.push("/recap")}
+          activeOpacity={0.7}
+          accessibilityRole="link"
+          accessibilityLabel="Open the weekly recap"
+        >
+          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>WEEKLY RECAP</Text>
+          <Feather name="chevron-right" size={13} color={colors.mutedForeground} />
+        </TouchableOpacity>
+
         {/* Streak Calendar */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <TouchableOpacity

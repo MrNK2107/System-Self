@@ -489,6 +489,25 @@ test("a first-person model transmission from a ghost falls back to the third-per
   }
 });
 
+test("a ghost model transmission carrying a signature dash falls back to the template", { skip }, async () => {
+  clock = new Date();
+  const signed = "RIVAL // ASH-1 does not stall. — ASH-1";
+  const withAi = app({ now: () => clock, ai: { call: async () => signed } });
+  const u = await mk("eve_1");
+  const body = await getRivals(u.token);
+  const saved = env.GEMINI_API_KEY;
+  env.GEMINI_API_KEY = "test-key";
+  try {
+    const res = await request(withAi).post(`/api/rivals/${body.rivals[0]!.assignmentId}/taunt`).set(auth(u.token)).send({});
+    assert.equal(res.status, 201);
+    assert.notEqual(res.body.message, signed);
+    assert.ok(!res.body.message.includes("—"), res.body.message);
+    assert.ok(res.body.message.includes(body.rivals[0]!.codename.split(" // ")[1]!), res.body.message);
+  } finally {
+    env.GEMINI_API_KEY = saved;
+  }
+});
+
 // --- job --------------------------------------------------------------------------------------------
 
 test("the social job refreshes expired assignments, and skips while another instance holds its lock", { skip }, async () => {

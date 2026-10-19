@@ -141,6 +141,13 @@
       "when": 1792380128649,
       "tag": "0019_easy_red_wolf",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792381411675,
+      "tag": "0020_uneven_sersi",
+      "breakpoints": true
     }
   ]
 }

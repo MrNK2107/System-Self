@@ -44,6 +44,8 @@ function RootLayoutNav() {
       <Stack.Screen name="settings" />
       <Stack.Screen name="social" />
       <Stack.Screen name="paywall" />
+      <Stack.Screen name="clan" />
+      <Stack.Screen name="recap" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="floor/[routineId]" />
       <Stack.Screen name="dungeon/briefing" />
