@@ -119,7 +119,8 @@ export const RaidStandingSchema = z.object({
   tag: z.string(),
   clanRank: z.number().int().min(1).nullable(),
   isMine: z.boolean(),
-  metricValue: z.number(),
+  /** Null while a score raid is live: its values could reveal a member's own movement (positions only until it resolves). */
+  metricValue: z.number().nullable(),
   position: z.number().int().min(1),
 });
 export type RaidStanding = z.infer<typeof RaidStandingSchema>;
@@ -135,7 +136,7 @@ export const RaidSummarySchema = z.object({
   /** Best first; clans tied on a metric share a position. */
   standings: z.array(RaidStandingSchema),
   myPosition: z.number().int().min(1),
-  myValue: z.number(),
+  myValue: z.number().nullable(),
 });
 export type RaidSummary = z.infer<typeof RaidSummarySchema>;
 
@@ -143,7 +144,7 @@ export type RaidSummary = z.infer<typeof RaidSummarySchema>;
 export const RaidResponseSchema = z.object({ raid: RaidSummarySchema.nullable() });
 export type RaidResponse = z.infer<typeof RaidResponseSchema>;
 
-/** GET /api/clans/mine. `clan` is null (and the lists empty) when the viewer has no clan. */
+/** GET /api/clans/mine. `clan` is null (and the lists empty) when the viewer has no clan. `raid` is always null here: read GET /api/clans/raid. */
 export const MyClanResponseSchema = z.object({
   clan: ClanSchema.nullable(),
   members: z.array(ClanMemberSchema),

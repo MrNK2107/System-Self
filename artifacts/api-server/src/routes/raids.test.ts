@@ -22,7 +22,7 @@ beforeEach(async () => {
 
 // ISO weeks used (UTC Monday): W44 domain 2026-10-26, W45 discipline 11-02, W46 body 11-09, W47 score 11-16.
 const W44_MON = new Date("2026-10-26T00:00:00Z");
-const W44_END = new Date("2026-11-01T23:59:00Z");
+const W44_CLOSE = new Date("2026-11-02T00:00:00Z"); // the span is [Mon 00:00, next Mon 00:00); raids resolve at the close
 const OLD_JOIN = new Date("2026-09-01T00:00:00Z");
 
 let n = 0;
@@ -121,7 +121,7 @@ test("domain raid: MIND logs in the week count; forbidden, out-of-week and late 
   const [m0, m1] = a.members as [string, string];
   await addLog(m0, "2026-10-27T10:00:00Z");
   await addLog(m0, "2026-10-28T10:00:00Z");
-  await addLog(m1, "2026-11-01T22:00:00Z");
+  await addLog(m1, "2026-11-01T23:59:30Z"); // Sunday's last minute still counts
   await addLog(m1, "2026-10-28T10:00:00Z", "MIND", true); // forbidden
   await addLog(m1, "2026-10-25T23:00:00Z"); // the week before
   const late = await nextUser(a.id, new Date("2026-10-28T00:00:00Z")); // joined mid-week
@@ -129,10 +129,10 @@ test("domain raid: MIND logs in the week count; forbidden, out-of-week and late 
   await addLog(b.members[0]!, "2026-10-27T10:00:00Z");
   await addLog(b.members[0]!, "2026-10-28T10:00:00Z", "BODY"); // wrong domain
 
-  assert.equal(await resolveWeeklyRaids(db!, new Date("2026-11-01T23:58:00Z")), 0); // before Sunday 23:59 nothing is due
+  assert.equal(await resolveWeeklyRaids(db!, new Date("2026-11-01T23:59:30Z")), 0); // the span is still open: nothing is due
   assert.equal((await raidRows()).every((r) => !r.resolvedAt), true);
 
-  assert.equal(await resolveWeeklyRaids(db!, W44_END), 1);
+  assert.equal(await resolveWeeklyRaids(db!, W44_CLOSE), 1);
   const rows = await raidRows();
   const ra = rows.find((r) => r.clanId === a.id)!;
   const rb = rows.find((r) => r.clanId === b.id)!;
@@ -168,7 +168,7 @@ test("domain raid: MIND logs in the week count; forbidden, out-of-week and late 
 test("a second win in the same month adds to the raid bonus", { skip }, async () => {
   const { a } = await twoClans();
   await addLog(a.members[0]!, "2026-10-27T10:00:00Z");
-  await resolveWeeklyRaids(db!, W44_END);
+  await resolveWeeklyRaids(db!, W44_CLOSE);
   assert.equal((await clanRow(a.id)).raidBonus, 6);
   const g = (await raidRows())[0]!.groupId;
   await db!.update(clanRaids).set({ resolvedAt: null }).where(eq(clanRaids.groupId, g));
@@ -181,7 +181,7 @@ test("a tie for the lead has no winner and no bonus", { skip }, async () => {
   const { a, b } = await twoClans();
   await addLog(a.members[0]!, "2026-10-27T10:00:00Z");
   await addLog(b.members[0]!, "2026-10-27T10:00:00Z");
-  await resolveWeeklyRaids(db!, W44_END);
+  await resolveWeeklyRaids(db!, W44_CLOSE);
   const rows = await raidRows();
   assert.ok(rows.every((r) => r.position === 1 && !r.winner && r.resolvedAt));
   assert.equal((await clanRow(a.id)).raidBonus, 0);
@@ -194,7 +194,7 @@ test("a tie for the lead has no winner and no bonus", { skip }, async () => {
 test("resolution is idempotent: a repeat settles nothing and writes no second notice or bonus", { skip }, async () => {
   const { a } = await twoClans();
   await addLog(a.members[0]!, "2026-10-27T10:00:00Z");
-  assert.equal(await resolveWeeklyRaids(db!, W44_END), 1);
+  assert.equal(await resolveWeeklyRaids(db!, W44_CLOSE), 1);
   assert.equal(await resolveWeeklyRaids(db!, new Date("2026-11-02T00:05:00Z")), "not_due");
   const g = (await raidRows())[0]!.groupId;
   assert.equal(await resolveRaidGroup(db!, g, new Date("2026-11-02T00:06:00Z")), false);
@@ -207,7 +207,7 @@ test("two concurrent resolutions of one group settle it once", { skip }, async (
   const { a } = await twoClans();
   await addLog(a.members[0]!, "2026-10-27T10:00:00Z");
   const g = (await raidRows())[0]!.groupId;
-  const res = await Promise.all([resolveRaidGroup(db!, g, W44_END), resolveRaidGroup(db!, g, W44_END)]);
+  const res = await Promise.all([resolveRaidGroup(db!, g, W44_CLOSE), resolveRaidGroup(db!, g, W44_CLOSE)]);
   assert.deepEqual(res.slice().sort(), [false, true]);
   assert.equal((await clanRow(a.id)).raidWins, 1);
   assert.equal((await raidNotices(a.members[0]!)).length, 1);
@@ -217,25 +217,27 @@ test("resolution stops at its time budget after one group and the next tick resu
   for (let i = 1; i <= 6; i++) await keepActive(await mkClan(`C${i}`, i, 3)); // groups of 4 and 2
   await startWeeklyRaids(db!, W44_MON);
   const frozen = () => 0;
-  assert.equal(await resolveWeeklyRaids(db!, W44_END, { budgetMs: 0, nowMs: frozen }), 1);
+  assert.equal(await resolveWeeklyRaids(db!, W44_CLOSE, { budgetMs: 0, nowMs: frozen }), 1);
   assert.equal((await db!.select().from(jobRuns).where(eq(jobRuns.job, "raid-resolve"))).length, 0);
-  assert.equal(await resolveWeeklyRaids(db!, W44_END, { budgetMs: 0, nowMs: frozen }), 1);
+  assert.equal(await resolveWeeklyRaids(db!, W44_CLOSE, { budgetMs: 0, nowMs: frozen }), 1);
   assert.equal((await db!.select().from(jobRuns).where(eq(jobRuns.job, "raid-resolve")))[0]!.lastRunDate, "2026-10-26");
   assert.ok((await raidRows()).every((r) => r.resolvedAt));
-  assert.equal(await resolveWeeklyRaids(db!, W44_END, { budgetMs: 0, nowMs: frozen }), "not_due");
+  assert.equal(await resolveWeeklyRaids(db!, W44_CLOSE, { budgetMs: 0, nowMs: frozen }), "not_due");
 });
 
-test("body raid counts BODY logs plus completed gym sessions", { skip }, async () => {
+test("body raid counts BODY logs once: a gym session is its gym_session BODY log, not a second count", { skip }, async () => {
   const a = await mkClan("Alpha", 1);
   const b = await mkClan("Bravo", 2);
   await startWeeklyRaids(db!, new Date("2026-11-09T00:00:00Z")); // W46: body
   assert.equal((await raidRows("2026-W46"))[0]!.type, "body");
   const m0 = a.members[0]!;
   await addLog(m0, "2026-11-10T10:00:00Z", "BODY");
+  // a completed gym session as the gym route writes it: a session row plus a BODY gym_session log
   await db!.insert(workoutSessions).values({ userId: m0, clientId: "s1", startedAt: new Date("2026-11-11T10:00:00Z"), completedAt: new Date("2026-11-11T11:00:00Z"), localDate: "2026-11-11" });
-  await db!.insert(workoutSessions).values({ userId: m0, clientId: "s2", startedAt: new Date("2026-11-12T10:00:00Z"), localDate: "2026-11-12" }); // never completed
+  await db!.insert(logs).values({ userId: m0, clientId: "gym:s1", domain: "BODY", logType: "gym_session", occurredAt: new Date("2026-11-11T11:00:00Z"), localDate: "2026-11-11" });
+  await addLog(m0, "2026-11-12T10:00:00Z", "BODY", true); // forbidden
   await addLog(b.members[0]!, "2026-11-10T10:00:00Z", "MIND");
-  await resolveWeeklyRaids(db!, new Date("2026-11-15T23:59:00Z"));
+  await resolveWeeklyRaids(db!, new Date("2026-11-16T00:00:00Z"));
   const rows = await raidRows("2026-W46");
   assert.equal(rows.find((r) => r.clanId === a.id)!.metricValue, 2);
   assert.equal(rows.find((r) => r.clanId === b.id)!.metricValue, 0);
@@ -256,7 +258,7 @@ test("discipline raid is the clan-wide quest completion rate", { skip }, async (
   await q(b.members[0]!, "complete", "2026-11-03T11:00:00Z");
   await q(b.members[1]!, "failed", "2026-11-03T12:00:00Z");
   await q(b.members[1]!, "refused", "2026-11-03T12:30:00Z");
-  await resolveWeeklyRaids(db!, new Date("2026-11-08T23:59:00Z"));
+  await resolveWeeklyRaids(db!, new Date("2026-11-09T00:00:00Z"));
   const rows = await raidRows("2026-W45");
   assert.equal(rows.find((r) => r.clanId === a.id)!.metricValue, 66.67);
   assert.equal(rows.find((r) => r.clanId === b.id)!.metricValue, 25);
@@ -275,7 +277,7 @@ test("score raid sums members' hidden-score movement; only the clan sum is store
   await snap(a.members[1]!, "2026-11-21", 28);
   await snap(b.members[0]!, "2026-11-15", 50);
   await snap(b.members[0]!, "2026-11-20", 51);
-  await resolveWeeklyRaids(db!, new Date("2026-11-22T23:59:00Z"));
+  await resolveWeeklyRaids(db!, new Date("2026-11-23T00:00:00Z"));
   const rows = await raidRows("2026-W47");
   assert.equal(rows.find((r) => r.clanId === a.id)!.metricValue, 2); // +4 and -2
   assert.equal(rows.find((r) => r.clanId === b.id)!.metricValue, 1);
@@ -291,7 +293,7 @@ test("AI rewrite is used when sound; emoji falls back to the template", { skip }
     const g = (await raidRows())[0]!.groupId;
     const sound = "RAID RESULT, WEEK 44. Your clan ranked 1 of 2. Mind logs: 1. Rival clan: 0. Gap: 1. Logged.";
     let calls = 0;
-    await resolveRaidGroup(db!, g, W44_END, {
+    await resolveRaidGroup(db!, g, W44_CLOSE, {
       call: async () => {
         calls++;
         return calls === 1 ? sound : "RAID RESULT 44. Strong week \u{1F525}. 2 of 2.";
@@ -309,7 +311,7 @@ test("AI rewrite is used when sound; emoji falls back to the template", { skip }
 test("a deleted clan leaves a raid group of one: closed without a result", { skip }, async () => {
   const { a, b } = await twoClans();
   await db!.delete(clans).where(eq(clans.id, b.id));
-  assert.equal(await resolveWeeklyRaids(db!, W44_END), 1);
+  assert.equal(await resolveWeeklyRaids(db!, W44_CLOSE), 1);
   const rows = await raidRows();
   assert.equal(rows.length, 1);
   assert.ok(rows[0]!.resolvedAt && !rows[0]!.winner);
@@ -324,7 +326,7 @@ test("runSocialJobs starts and resolves raids through the lock-guarded jobs", { 
   assert.equal(out.raidStart, 2);
   assert.equal(out.raidResolve, 0);
   assert.equal((await raidRows()).length, 2);
-  assert.equal((await runSocialJobs(db!, W44_END)).raidResolve, 1);
+  assert.equal((await runSocialJobs(db!, W44_CLOSE)).raidResolve, 1);
 });
 
 // --- routes ------------------------------------------------------------------------------------
@@ -353,7 +355,7 @@ test("GET /api/clans/raid and /mine: live clan-level standings, no member data",
   assert.doesNotMatch(JSON.stringify(res.body), /hidden|username|raider_|userId/i);
 
   const mine = assertContract(MyClanResponseSchema, (await request(a()).get("/api/clans/mine").set(auth(viewer.token))).body);
-  assert.deepEqual(mine.raid, raid);
+  assert.equal(mine.raid, null); // /mine carries no raid: the app reads GET /api/clans/raid
 
   const outsider = await setup(a(), { email: "out@example.com", username: "outsider_1" });
   assert.deepEqual((await request(a()).get("/api/clans/raid").set(auth(outsider.token))).body, { raid: null });
@@ -367,10 +369,74 @@ test("after resolution the summary shows the settled result; a clan without a ra
   const viewer = await setup(a(), { email: "viewer@example.com", username: "viewer_1" });
   await db!.insert(clanMembers).values({ userId: viewer.id, clanId: ca.id, role: "member", joinedAt: OLD_JOIN });
   await addLog(ca.members[0]!, "2026-10-27T10:00:00Z");
-  await resolveWeeklyRaids(db!, W44_END);
+  await resolveWeeklyRaids(db!, W44_CLOSE);
   const raid = assertContract(RaidResponseSchema, (await request(a()).get("/api/clans/raid").set(auth(viewer.token))).body).raid!;
   assert.equal(raid.resolved, true);
   assert.equal(raid.myPosition, 1);
   await db!.delete(clanRaids);
   assert.deepEqual((await request(a()).get("/api/clans/raid").set(auth(viewer.token))).body, { raid: null });
+});
+
+test("live score-raid standings hide the values (positions only) until the raid resolves", { skip }, async () => {
+  const clock = new Date("2026-11-18T12:00:00Z");
+  const a = () => app({ now: () => clock });
+  const ca = await mkClan("Alpha", 1);
+  const cb = await mkClan("Bravo", 2);
+  await startWeeklyRaids(db!, new Date("2026-11-16T00:00:00Z")); // W47: score
+  const viewer = await setup(a(), { email: "viewer@example.com", username: "viewer_1" });
+  await db!.insert(clanMembers).values({ userId: viewer.id, clanId: ca.id, role: "member", joinedAt: OLD_JOIN });
+  const snap = (userId: string, localDate: string, hidden: number) => db!.insert(dailySnapshots).values({ userId, localDate, scores: {}, hidden, rank: "E" });
+  await snap(ca.members[0]!, "2026-11-15", 40);
+  await snap(ca.members[0]!, "2026-11-17", 47);
+  await snap(cb.members[0]!, "2026-11-15", 50);
+  await snap(cb.members[0]!, "2026-11-17", 51);
+  const live = assertContract(RaidResponseSchema, (await request(a()).get("/api/clans/raid").set(auth(viewer.token))).body).raid!;
+  assert.equal(live.type, "score");
+  assert.equal(live.resolved, false);
+  assert.deepEqual(live.standings.map((s) => [s.name, s.position, s.metricValue]), [["Alpha", 1, null], ["Bravo", 2, null]]);
+  assert.equal(live.myPosition, 1);
+  assert.equal(live.myValue, null);
+  await resolveWeeklyRaids(db!, new Date("2026-11-23T00:00:00Z"));
+  const done = assertContract(RaidResponseSchema, (await request(app({ now: () => new Date("2026-11-23T00:10:00Z") })).get("/api/clans/raid").set(auth(viewer.token))).body).raid!;
+  assert.equal(done.resolved, true);
+  assert.deepEqual(done.standings.map((s) => s.metricValue), [7, 1]);
+});
+
+test("a failing group is skipped and retried next tick; later groups still settle", { skip }, async () => {
+  for (let i = 1; i <= 6; i++) await keepActive(await mkClan(`C${i}`, i, 3)); // groups of 4 and 2
+  await startWeeklyRaids(db!, W44_MON);
+  const groups = await db!.selectDistinct({ g: clanRaids.groupId }).from(clanRaids);
+  const bad = groups[0]!.g;
+  const flaky = async (d: typeof db, groupId: string, now: Date, ai?: unknown) => {
+    if (groupId === bad) throw new Error("boom");
+    return resolveRaidGroup(d!, groupId, now, ai as never);
+  };
+  assert.equal(await resolveWeeklyRaids(db!, W44_CLOSE, { resolve: flaky as never }), 1);
+  assert.equal((await raidRows()).filter((r) => r.resolvedAt).length > 0, true);
+  assert.equal((await raidRows()).filter((r) => r.groupId === bad && r.resolvedAt).length, 0);
+  assert.equal((await db!.select().from(jobRuns).where(eq(jobRuns.job, "raid-resolve"))).length, 0); // not recorded: a group is left
+  assert.equal(await resolveWeeklyRaids(db!, W44_CLOSE), 1); // next tick settles it
+  assert.equal((await db!.select().from(jobRuns).where(eq(jobRuns.job, "raid-resolve")))[0]!.lastRunDate, "2026-10-26");
+});
+
+test("the bonus month is the raid week's, not the month of a late resolution", { skip }, async () => {
+  const { a } = await twoClans();
+  await addLog(a.members[0]!, "2026-10-27T10:00:00Z");
+  await resolveWeeklyRaids(db!, new Date("2026-12-05T10:00:00Z")); // resolved late
+  assert.equal((await clanRow(a.id)).raidBonusMonth, "2026-11");
+});
+
+test("a clan that dropped to forming mid-week still resolves with a position but cannot win the bonus", { skip }, async () => {
+  const { a, b } = await twoClans();
+  await addLog(a.members[0]!, "2026-10-27T10:00:00Z");
+  await addLog(a.members[0]!, "2026-10-28T10:00:00Z");
+  await db!.update(clans).set({ status: "forming", clanRank: null }).where(eq(clans.id, a.id));
+  await resolveWeeklyRaids(db!, W44_CLOSE);
+  const rows = await raidRows();
+  const ra = rows.find((r) => r.clanId === a.id)!;
+  assert.deepEqual([ra.position, ra.winner, !!ra.resolvedAt], [1, false, true]);
+  assert.equal((await clanRow(a.id)).raidBonus, 0);
+  assert.equal((await clanRow(a.id)).raidWins, 0);
+  assert.equal((await clanRow(b.id)).raidBonus, 0);
+  assert.equal((await raidNotices(a.members[0]!)).length, 1);
 });

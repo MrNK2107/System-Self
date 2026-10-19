@@ -167,7 +167,7 @@ export function clansRoutes(db: Db, clock: () => Date = () => new Date()): IRout
       clan: await toClanDto(db, clan, m.role as "leader" | "member"),
       members: await clanMembersView(db, clan.id, me, now),
       dispatches: await recentDispatches(db, clan.id),
-      raid: await raidSummaryFor(db, clan.id, now),
+      raid: null, // the app reads GET /api/clans/raid (no duplicate live computation here)
     };
     res.json(body);
   });

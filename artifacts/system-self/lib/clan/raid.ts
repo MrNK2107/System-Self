@@ -23,8 +23,8 @@ export const raidTitle = (r: Pick<RaidSummary, "week" | "type">): string => `WEE
 
 export const raidMetricLabel = (type: RaidType): string => RAID_METRIC_LABEL[type];
 
-/** A clan's total as shown: counts whole, completion in percent, score movement signed. */
-export const raidValueLabel = (type: RaidType, value: number): string => formatRaidValue(type, value);
+/** A clan's total as shown: counts whole, completion in percent, score movement signed; `—` while hidden (a live score raid). */
+export const raidValueLabel = (type: RaidType, value: number | null): string => (value === null ? "—" : formatRaidValue(type, value));
 
 /** Time to the raid's close: `2d 5h left`, `5h 10m left`, `12m left`, or `closing` once it has passed. */
 export function raidTimeLeft(endsAt: string, now: Date): string {

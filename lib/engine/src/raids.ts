@@ -9,7 +9,10 @@ const MINUTE_MS = 60_000;
 /** Largest raid group; smaller groups form when the clan count does not divide by it. */
 export const RAID_GROUP_MAX = 4;
 
-/** The raid type of an ISO week: ISO week number mod 4 over domain, discipline, body, score. */
+/**
+ * The raid type of an ISO week: ISO week number mod 4 over domain, discipline, body, score. (Accepted: the
+ * 52/53-week year boundary repeats a type, e.g. W53 and W01 are both discipline.)
+ */
 export function raidTypeForWeek(isoWeek: number): RaidType {
   return RAID_TYPES[((isoWeek % 4) + 4) % 4]!;
 }
@@ -37,8 +40,10 @@ export interface RaidWeek {
   week: number;
   /** Monday 00:00 UTC. */
   start: Date;
-  /** Sunday 23:59 UTC: the raid closes and resolves. */
+  /** Sunday 23:59 UTC: the close as announced and displayed. */
   end: Date;
+  /** The next Monday 00:00 UTC: the exclusive end of the metrics span, when the raid resolves (no activity in Sunday's last minute is lost). */
+  close: Date;
 }
 
 const pad = (n: number, w = 2) => String(n).padStart(w, "0");
@@ -52,6 +57,7 @@ function weekFromMonday(mondayMs: number): RaidWeek {
     week,
     start: new Date(mondayMs),
     end: new Date(mondayMs + 7 * DAY_MS - MINUTE_MS),
+    close: new Date(mondayMs + 7 * DAY_MS),
   };
 }
 

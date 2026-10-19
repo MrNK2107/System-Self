@@ -17,7 +17,7 @@ import { app, assertContract, assertStoredNoticesMatchContract, auth, db, setup,
 import { grantEntitlement } from "../services/entitlements";
 import { hiddenAndTrajectory } from "../services/state";
 import { flagDeadWeight, recomputeClanScores, runSocialJobs } from "../jobs/social";
-import { computeClanScores } from "../services/clans";
+import { computeClanScores, toLeaderboardItems } from "../services/clans";
 import { loadProjectionSubjects, projectUser } from "../services/projection";
 
 after(async () => {
@@ -421,6 +421,18 @@ test("a forbidden log is not clan activity: dead weight flags and the active cou
   await db!.insert(logs).values({ userId: u.id, clientId: "forbidden-window", domain: "BODY", logType: "x", forbidden: true, occurredAt: new Date("2026-10-18T06:00:00Z"), localDate: "2026-10-18" });
   assert.equal((await computeClanScores(db!, [await clanRow(c.id)], now)).get(c.id)!.activeMemberCount, 1);
   assert.deepEqual(await flagDeadWeight(db!, now), { flagged: 1, cleared: 0 });
+});
+
+test("toLeaderboardItems drops unscored rows instead of showing a zero score", { skip }, async () => {
+  clock = new Date();
+  const l = await mk("lead_1");
+  await makePro(l);
+  const c = await create(l);
+  const row = await clanRow(c.id);
+  assert.deepEqual(await toLeaderboardItems(db!, [{ ...row, clanScore: null }]), []);
+  const items = await toLeaderboardItems(db!, [{ ...row, clanScore: 12.5 }]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]!.clanScore, 12.5);
 });
 
 test("a transfer racing the heir's leave never leaves the clan without a leader", { skip }, async () => {

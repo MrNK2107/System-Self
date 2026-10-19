@@ -155,17 +155,17 @@ export async function startWeeklyRaids(db: Db, now: Date): Promise<number | "not
 }
 
 /**
- * Weekly raid resolution (from Sunday 23:59 UTC, once per week): settles every group of a closed week, one
+ * Weekly raid resolution (from the span's close, Monday 00:00 UTC, once per week): settles every group of a closed week, one
  * transaction per group, stopping once `budgetMs` is spent (after at least one group; the next tick resumes).
  * The week is recorded once nothing is left. Returns the groups settled, or "not_due".
  */
 export async function resolveWeeklyRaids(
   db: Db,
   now: Date,
-  opts: { budgetMs?: number; nowMs?: () => number; ai?: AiDeps } = {},
+  opts: { budgetMs?: number; nowMs?: () => number; ai?: AiDeps; resolve?: typeof resolveRaidGroup } = {},
 ): Promise<number | "not_due"> {
-  const current = raidWeekOf(now);
-  const closed = now.getTime() >= current.end.getTime() ? current : raidWeekOf(new Date(current.start.getTime() - 1));
+  // The span of a week closes at the next Monday 00:00 UTC, so the week before the current one is the latest closed.
+  const closed = raidWeekOf(new Date(raidWeekOf(now).start.getTime() - 1));
   if (!(await weeklyDue(db, "raid-resolve", closed.start))) return "not_due";
   const budgetMs = opts.budgetMs ?? env.SOCIAL_JOB_BUDGET_MS;
   const nowMs = opts.nowMs ?? Date.now;
@@ -174,10 +174,10 @@ export async function resolveWeeklyRaids(
   let settled = 0;
   for (const [i, groupId] of groups.entries()) {
     try {
-      if (await resolveRaidGroup(db, groupId, now, opts.ai ?? {})) settled++;
+      if (await (opts.resolve ?? resolveRaidGroup)(db, groupId, now, opts.ai ?? {})) settled++;
     } catch (err) {
+      // The group stays unsettled (the week is not recorded) and the next tick retries it; later groups go on.
       logger.error({ err, groupId }, "Raid resolution failed");
-      return settled; // the group stays unsettled; the next tick retries it
     }
     if (nowMs() - started >= budgetMs && i < groups.length - 1) {
       logger.info({ settled, pending: groups.length - i - 1 }, "Raid resolution stopped at its time budget");

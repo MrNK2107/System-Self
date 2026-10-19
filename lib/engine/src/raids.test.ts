@@ -52,7 +52,8 @@ test("raidWeekOf: Monday 00:00 UTC to Sunday 23:59 UTC", () => {
   assert.equal(w.weekKey, "2026-W43");
   assert.equal(w.week, 43);
   assert.equal(w.start.toISOString(), "2026-10-19T00:00:00.000Z");
-  assert.equal(w.end.toISOString(), "2026-10-25T23:59:00.000Z");
+  assert.equal(w.end.toISOString(), "2026-10-25T23:59:00.000Z"); // display close
+  assert.equal(w.close.toISOString(), "2026-10-26T00:00:00.000Z"); // metrics span and resolution time
   assert.equal(raidWeekOf(new Date("2026-10-19T00:00:00Z")).weekKey, "2026-W43");
   assert.equal(raidWeekOf(new Date("2026-10-18T23:59:59Z")).weekKey, "2026-W42");
   assert.equal(raidWeekOf(new Date("2026-10-25T23:59:30Z")).weekKey, "2026-W43");

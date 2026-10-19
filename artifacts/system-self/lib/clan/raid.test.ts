@@ -24,6 +24,7 @@ test("raid title, values and position line", () => {
   assert.equal(raidValueLabel("discipline", 62.5), "62.5%");
   assert.equal(raidValueLabel("domain", 12), "12");
   assert.equal(raidValueLabel("score", 2), "+2");
+  assert.equal(raidValueLabel("score", null), "—"); // a live score raid shows positions only
   assert.equal(raidPositionLine(raid), "Position 2 of 2.");
   assert.equal(raidPositionLine({ ...raid, resolved: true }), "Raid closed. Position 2 of 2.");
 });
