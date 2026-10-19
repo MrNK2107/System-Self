@@ -7,7 +7,7 @@ WORKDIR /repo
 
 FROM base AS build
 # Manifests first: the install layer is cached until a dependency changes.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY artifacts/api-server/package.json ./artifacts/api-server/package.json
 COPY lib/api-zod/package.json ./lib/api-zod/package.json
 COPY lib/contracts/package.json ./lib/contracts/package.json
@@ -17,7 +17,8 @@ COPY lib/api-spec/package.json ./lib/api-spec/package.json
 COPY lib/api-client-react/package.json ./lib/api-client-react/package.json
 COPY scripts/package.json ./scripts/package.json
 # artifacts/system-self is excluded from the context; install only what the API needs.
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store     pnpm install --frozen-lockfile --filter @workspace/api-server...
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile --filter @workspace/api-server...
 COPY tsconfig.base.json tsconfig.json ./
 COPY lib ./lib
 COPY artifacts/api-server ./artifacts/api-server

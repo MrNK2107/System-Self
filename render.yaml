@@ -8,10 +8,25 @@ databases:
     user: system_self
 
 envVarGroups:
+  # Groups accept only literal values (no sync: false / fromDatabase), so only NODE_ENV is shared.
   - name: system-self-shared
     envVars:
       - key: NODE_ENV
         value: production
+
+services:
+  - type: web
+    name: system-self-api
+    runtime: docker
+    dockerfilePath: ./artifacts/api-server/Dockerfile
+    dockerContext: .
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /api/readyz
+    # Runs the bundled migrator (advisory-locked) before each deploy goes live.
+    preDeployCommand: sh -c "ROLE=migrate docker-entrypoint.sh"
+    envVars:
+      - fromGroup: system-self-shared
       - key: DATABASE_URL
         fromDatabase:
           name: system-self-db
@@ -32,20 +47,6 @@ envVarGroups:
         sync: false
       - key: EXPO_ACCESS_TOKEN
         sync: false
-
-services:
-  - type: web
-    name: system-self-api
-    runtime: docker
-    dockerfilePath: ./artifacts/api-server/Dockerfile
-    dockerContext: .
-    plan: starter
-    numInstances: 1
-    healthCheckPath: /api/readyz
-    # Runs the bundled migrator (advisory-locked) before each deploy goes live.
-    preDeployCommand: sh -c "ROLE=migrate docker-entrypoint.sh"
-    envVars:
-      - fromGroup: system-self-shared
       - key: ROLE
         value: api
       - key: TRUST_PROXY
@@ -59,5 +60,25 @@ services:
     plan: starter
     envVars:
       - fromGroup: system-self-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: system-self-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: REVENUECAT_WEBHOOK_SECRET
+        sync: false
+      - key: REVENUECAT_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: EXPO_ACCESS_TOKEN
+        sync: false
       - key: ROLE
         value: worker
