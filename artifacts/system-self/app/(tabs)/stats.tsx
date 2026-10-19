@@ -23,6 +23,7 @@ import { fetchCompletionSummary, fetchDebriefToday } from "@/lib/game/messages";
 import { SystemMessage } from "@/components/SystemMessage";
 import { ScreenStatus } from "@/components/ScreenStatus";
 import { StreakCalendar } from "@/components/StreakCalendar";
+import { HistoryPanel, RankFreezeCard } from "@/components/HistoryPanel";
 import { ALL_DOMAINS as DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
 
 const MILESTONE_TIERS: MilestoneTier[] = [60, 70, 80, 90, 100];
@@ -551,6 +552,9 @@ export default function StatsScreen() {
             <Text style={[styles.settingValue, { color: colors.mutedForeground }]}>Reading the ledger.</Text>
           )}
         </View>
+
+        <HistoryPanel />
+        <RankFreezeCard />
 
         {/* Settings */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>

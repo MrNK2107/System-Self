@@ -260,6 +260,13 @@
       "when": 1792411629046,
       "tag": "0036_hot_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792413172246,
+      "tag": "0037_old_mysterio",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import {
   blocks,
   clanMembers,
   dailySnapshots,
+  rankFreezes,
   domainScores,
   logs,
   profiles,
@@ -69,8 +70,11 @@ async function loadContext(tx: Tx, userId: string) {
   return { user, profile, day };
 }
 
-const freezeActiveOn = (date: string, rankFreezeUntil: string | null) =>
-  rankFreezeUntil !== null && date <= rankFreezeUntil;
+type FreezeRange = { startedOn: string; untilOn: string };
+const loadFreezes = (tx: Tx, userId: string): Promise<FreezeRange[]> =>
+  tx.select({ startedOn: rankFreezes.startedOn, untilOn: rankFreezes.untilOn }).from(rankFreezes).where(eq(rankFreezes.userId, userId));
+/** True when `date` is inside a Rank Freeze (start and end inclusive). A freeze never reaches back before its start. */
+const frozenOn = (freezes: FreezeRange[], date: string) => freezes.some((f) => date >= f.startedOn && date <= f.untilOn);
 
 async function currentScores(tx: Tx, userId: string): Promise<Record<RankedDomain, number>> {
   const rows = await tx.select().from(domainScores).where(eq(domainScores.userId, userId));
@@ -137,7 +141,8 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   // uses it so a catch-up that activates the shadow on an older date starts it at that date's end.
   const dayEnd = endOfLocalDay(date, tz);
   const at = new Date(Math.min(now.getTime(), dayEnd.getTime()));
-  const freezeActive = freezeActiveOn(date, profile.rankFreezeUntil);
+  const freezes = await loadFreezes(tx, userId);
+  const freezeActive = frozenOn(freezes, date);
   const out: Notice[] = [];
 
   // 0. Recurring income due on this day of the month (system logs: no score, not activity).
@@ -244,10 +249,14 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   const snapshots = recent.reverse();
   // Windows restart after every rank change: only snapshots dated after the rankSince local date count.
   const rankSinceDate = localDate(profile.rankSince, tz);
+  const sinceRank = snapshots.filter((s) => s.date > rankSinceDate);
+  // Rank Freeze pauses the demotion window: frozen days neither count as below-threshold days nor reset the run.
+  // Promotion still sees every day.
   const transition = evaluateRankTransition(
     rank,
-    snapshots.filter((s) => s.date > rankSinceDate),
+    sinceRank,
     freezeActive,
+    sinceRank.filter((s) => !frozenOn(freezes, s.date)),
   );
   if (transition) {
     // The last instant of D (or now), so rankSince's local date is D and the next window starts on D+1.
@@ -378,7 +387,7 @@ export async function rollOverDue(tx: Tx, userId: string, now: Date, opts: { bef
 
   if (daysBetween(start, lastDue) + 1 > MAX_CATCH_UP_DAYS) {
     const lastCollapsed = addDays(lastDue, -MAX_CATCH_UP_DAYS);
-    if (!freezeActiveOn(lastCollapsed, profile.rankFreezeUntil)) {
+    if (!frozenOn(await loadFreezes(tx, userId), lastCollapsed)) {
       await applyChanges(tx, userId, decayChanges(decayPerDomain(MAX_CATCH_UP_DAYS)), {
         localDate: lastCollapsed,
         now,

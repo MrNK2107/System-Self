@@ -12,6 +12,7 @@ import {
   notices,
   profiles,
   questChains,
+  rankFreezes,
   quests,
   scoreEvents,
   shadowSelves,
@@ -229,6 +230,7 @@ test("14 snapshots in tier D → promotion E→D with rank_change notice and ran
 test("rank freeze blocks demotion (and decay); without it the rank drops", { skip }, async () => {
   const { id } = await onboardAtD0();
   await db!.update(profiles).set({ rank: "C", rankFreezeUntil: addDays(D0, 1) }).where(eq(profiles.userId, id));
+  await db!.insert(rankFreezes).values({ userId: id, startedOn: D0, untilOn: addDays(D0, 1), month: D0.slice(0, 7), reason: "t" });
   await setScores(id, 30); // hidden 30 < floor(C) = 41
   await seedSnapshots(id, range(addDays(D0, -6), 6), 30, "C");
 
@@ -247,6 +249,31 @@ test("rank freeze blocks demotion (and decay); without it the rank drops", { ski
   assert.equal((await eventsOf(id, "decay")).length, 5);
   const rc = await noticesOf(id, "rank_change");
   assert.deepEqual(rc[0]!.payload, { from: "C", to: "D", kind: "demotion", newCodename: p!.codename });
+});
+
+test("a user frozen through 7 below-threshold days is not demoted; the window pauses, it does not reset", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  const until = addDays(D0, 6);
+  await db!.update(profiles).set({ rank: "C", rankFreezeUntil: until }).where(eq(profiles.userId, id));
+  await db!.insert(rankFreezes).values({ userId: id, startedOn: D0, untilOn: until, month: D0.slice(0, 7), reason: "t" });
+  await setScores(id, 30);
+
+  // D0..D0+6 all roll frozen and below the floor; D0+7 is the first unfrozen day.
+  await ensureRolledOver(db!, id, at(addDays(D0, 7)));
+  let [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.rank, "C");
+  await ensureRolledOver(db!, id, at(addDays(D0, 8))); // rolls D0+7: one counted day only
+  [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.rank, "C");
+  assert.equal((await noticesOf(id, "rank_change")).length, 0);
+
+  // The counted days resume (paused, not reset): 7 counted unfrozen days below the floor demote.
+  await ensureRolledOver(db!, id, at(addDays(D0, 13)));
+  [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.rank, "C"); // D0+7..D0+12 = 6 counted days
+  await ensureRolledOver(db!, id, at(addDays(D0, 14)));
+  [p] = await db!.select().from(profiles).where(eq(profiles.userId, id));
+  assert.equal(p!.rank, "D");
 });
 
 test("shadow activates after 5 inactive days, at the end of that date during a catch-up", { skip }, async () => {

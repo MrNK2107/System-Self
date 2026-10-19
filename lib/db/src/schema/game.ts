@@ -234,6 +234,25 @@ export const dailySnapshots = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.localDate] })],
 );
 
+/**
+ * Rank Freeze history (PRO): one row per freeze. `month` is the user's local YYYY-MM of `startedOn`, so a freeze that
+ * runs into the next month still counts for the month it started; the unique index enforces once per month.
+ * `untilOn` is inclusive (startedOn + 6). profiles.rankFreezeUntil mirrors the newest row for the rollover.
+ */
+export const rankFreezes = pgTable(
+  "rank_freezes",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: userIdCol(),
+    startedOn: date("started_on", { mode: "string" }).notNull(),
+    untilOn: date("until_on", { mode: "string" }).notNull(),
+    month: text("month").notNull(),
+    reason: text("reason").notNull(),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("rank_freezes_user_month_uq").on(t.userId, t.month)],
+);
+
 export const userDayState = pgTable(
   "user_day_state",
   {

@@ -86,6 +86,12 @@ test("demotion after 7 below floor; freeze blocks it", () => {
   assert.equal(evaluateRankTransition("C", snaps(Array(6).fill(30)), false), null);
 });
 
+test("demotion uses the separate demotion snapshots when given (frozen days excluded)", () => {
+  const all = snaps(Array(7).fill(30));
+  assert.equal(evaluateRankTransition("C", all, false, all.slice(3)), null);
+  assert.deepEqual(evaluateRankTransition("C", all, false, all), { kind: "demotion", to: "D" });
+});
+
 test("E never demotes, S never promotes", () => {
   assert.equal(evaluateRankTransition("E", snaps(Array(7).fill(0)), false), null);
   assert.equal(evaluateRankTransition("S", snaps(Array(14).fill(100)), false), null);

@@ -1,8 +1,8 @@
 import { DB_UNAVAILABLE } from "../lib/db-unavailable";
 import { Router, type IRouter } from "express";
-import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { z, ZodError } from "zod";
-import { generatedQuestBatches, generatedQuests, quests, systemMessages, users, type Db } from "@workspace/db";
+import { dailySnapshots, generatedQuestBatches, generatedQuests, quests, systemMessages, users, type Db } from "@workspace/db";
 import { addDays, localDate } from "@workspace/engine";
 import type { AiDeps } from "../lib/ai";
 import { buildUserContext, generateMessage } from "../services/ai-context";
@@ -11,6 +11,8 @@ import { buildWeeklyRecap } from "../services/recap";
 import { ensureRolledOver } from "../services/rollover";
 import { withUserLock } from "../services/user-lock";
 import { countsForRank } from "../services/quests";
+import { isPro } from "../services/entitlements";
+import { FREE_HISTORY_DAYS, PRO_HISTORY_DAYS, type QuestTrend, type ScoreHistory } from "@workspace/contracts";
 
 const messageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -33,10 +35,20 @@ const completionSummaryQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(90).default(14),
 });
 
+// Whole-number text only: "1.5", "-3", "" and "abc" are 400s. Absent means the free window.
+const historyDaysQuerySchema = z.object({
+  days: z
+    .string()
+    .regex(/^[0-9]+$/)
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(PRO_HISTORY_DAYS))
+    .optional(),
+});
+
 const RESOLVED_STATUSES = ["complete", "failed", "refused"] as const;
 type ResolvedStatus = (typeof RESOLVED_STATUSES)[number];
 
-export function historyRoutes(db: Db | null, ai: AiDeps = {}): IRouter {
+export function historyRoutes(db: Db | null, ai: AiDeps = {}, clock: () => Date = () => new Date()): IRouter {
 const router = Router();
 
 router.get("/system/messages", async (req, res) => {
@@ -206,6 +218,70 @@ router.get("/system/completions/summary", async (req, res) => {
     byDomain: sum((r) => r.domain).map(({ key, status, count }) => ({ domain: key, status, count })),
     daily: sum((r) => r.day!).map(({ key, status, count }) => ({ day: key, status, count })),
   });
+});
+
+/** The window a history request is served: PRO up to 365 days, everyone else 14 (a larger ask is clamped, not refused). */
+async function historyWindow(db: Db, userId: string, requested: number | undefined) {
+  const now = clock();
+  const maxDays = (await isPro(db, userId, now)) ? PRO_HISTORY_DAYS : FREE_HISTORY_DAYS;
+  const days = Math.min(requested ?? FREE_HISTORY_DAYS, maxDays);
+  const [user] = await db.select({ tz: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) return null;
+  const to = localDate(now, user.tz);
+  return { days, maxDays, to, from: addDays(to, -(days - 1)) };
+}
+
+// Daily domain scores and rank for the charts. Deliberately selects no `hidden` column: the hidden score never leaves the server.
+router.get("/history/scores", async (req, res) => {
+  if (!db) return res.status(503).json(DB_UNAVAILABLE);
+  const query = historyDaysQuerySchema.parse(req.query);
+  const userId = req.user!.id;
+  const win = await historyWindow(db, userId, query.days);
+  if (!win) return res.status(404).json({ error: "User not found" });
+  const rows = await db
+    .select({ date: dailySnapshots.localDate, rank: dailySnapshots.rank, scores: dailySnapshots.scores })
+    .from(dailySnapshots)
+    .where(and(eq(dailySnapshots.userId, userId), gte(dailySnapshots.localDate, win.from), lte(dailySnapshots.localDate, win.to)))
+    .orderBy(asc(dailySnapshots.localDate));
+  const body: ScoreHistory = {
+    days: win.days,
+    maxDays: win.maxDays,
+    items: rows.map((r) => ({ date: r.date, rank: r.rank, scores: r.scores as Record<string, number> })),
+  };
+  return res.json(body);
+});
+
+// Completion trend over rank-counting quests only: bonus quests are excluded (countsForRank).
+router.get("/history/quests", async (req, res) => {
+  if (!db) return res.status(503).json(DB_UNAVAILABLE);
+  const query = historyDaysQuerySchema.parse(req.query);
+  const userId = req.user!.id;
+  const win = await historyWindow(db, userId, query.days);
+  if (!win) return res.status(404).json({ error: "User not found" });
+  const rows = await db
+    .select({
+      date: quests.resolvedLocalDate,
+      completed: sql<number>`count(*) filter (where ${quests.status} = 'complete')::int`,
+      resolved: sql<number>`count(*)::int`,
+    })
+    .from(quests)
+    .where(
+      and(
+        eq(quests.userId, userId),
+        countsForRank,
+        inArray(quests.status, RESOLVED_STATUSES),
+        gte(quests.resolvedLocalDate, win.from),
+        lte(quests.resolvedLocalDate, win.to),
+      ),
+    )
+    .groupBy(quests.resolvedLocalDate)
+    .orderBy(asc(quests.resolvedLocalDate));
+  const body: QuestTrend = {
+    days: win.days,
+    maxDays: win.maxDays,
+    items: rows.map((r) => ({ date: r.date!, completed: r.completed, resolved: r.resolved })),
+  };
+  return res.json(body);
 });
 
 return router;
