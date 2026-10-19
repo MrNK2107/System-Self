@@ -10,6 +10,9 @@ globalThis.require = createRequire(import.meta.url);
 
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 
+/** Not bundled. @node-rs/argon2 is native; the rest are optional native add-ons (absent at runtime is fine). */
+export const RUNTIME_EXTERNALS = ["*.node", "@node-rs/*", "pg-native", "bufferutil", "utf-8-validate"];
+
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
@@ -27,86 +30,10 @@ async function buildAll() {
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
     logLevel: "info",
-    // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
-    // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
-    // Examples of unbundleable packages:
-    // - uses native modules and loads them dynamically (e.g. sharp)
-    // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
-    external: [
-      "*.node",
-      "sharp",
-      "better-sqlite3",
-      "sqlite3",
-      "canvas",
-      "bcrypt",
-      "argon2",
-      "fsevents",
-      "re2",
-      "farmhash",
-      "xxhash-addon",
-      "bufferutil",
-      "utf-8-validate",
-      "ssh2",
-      "cpu-features",
-      "dtrace-provider",
-      "isolated-vm",
-      "lightningcss",
-      "pg-native",
-      "oracledb",
-      "mongodb-client-encryption",
-      "nodemailer",
-      "handlebars",
-      "knex",
-      "typeorm",
-      "protobufjs",
-      "onnxruntime-node",
-      "@tensorflow/*",
-      "@prisma/client",
-      "@mikro-orm/*",
-      "@grpc/*",
-      "@swc/*",
-      "@aws-sdk/*",
-      "@azure/*",
-      "@opentelemetry/*",
-      "@google-cloud/*",
-      "@google/*",
-      "googleapis",
-      "firebase-admin",
-      "@node-rs/*",
-      "@parcel/watcher",
-      "@sentry/profiling-node",
-      "@tree-sitter/*",
-      "aws-sdk",
-      "classic-level",
-      "dd-trace",
-      "ffi-napi",
-      "grpc",
-      "hiredis",
-      "kerberos",
-      "leveldown",
-      "miniflare",
-      "mysql2",
-      "newrelic",
-      "odbc",
-      "piscina",
-      "realm",
-      "ref-napi",
-      "rocksdb",
-      "sass-embedded",
-      "sequelize",
-      "serialport",
-      "snappy",
-      "tinypool",
-      "usb",
-      "workerd",
-      "wrangler",
-      "zeromq",
-      "zeromq-prebuilt",
-      "playwright",
-      "puppeteer",
-      "puppeteer-core",
-      "electron",
-    ],
+    // Every pure-JS runtime dependency is bundled, so the image ships almost no node_modules (see Dockerfile).
+    // RUNTIME_EXTERNALS lists the only packages that stay external: native addons (loaded per platform at runtime)
+    // and optional native accelerators that are require()d inside try/catch. The Dockerfile installs exactly these.
+    external: RUNTIME_EXTERNALS,
     sourcemap: "linked",
     plugins: [
       // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it

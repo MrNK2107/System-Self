@@ -90,6 +90,10 @@ production. The default figure is a worst-case burst test, and the API survives 
 burst margin would mean cutting per-request CPU (drizzle's query building and mapping is the largest part), or
 running more than one API instance.
 
+**Accepted figure.** The staggered figure is the representative mixed result: state p95 28.8 ms, logs p95 48.1 ms.
+The burst figure stays published as a worst case. **Horizontal API scaling is the remedy for synchronized bursts:**
+each instance's event loop then takes a share of the burst.
+
 Idle service time of one `GET /state` (curl, warm): **about 13 ms before, about 6 ms after.**
 
 ### How to read these numbers
@@ -166,6 +170,16 @@ large production table, build them with `CREATE INDEX CONCURRENTLY` by hand befo
   repo failed the same way. It is now a direct dependency of `@workspace/api-server`. The rebuilt image boots:
   `ROLE=migrate` applied the migrations, `ROLE=api` answered `/api/healthz` 200 and `/api/readyz` 200, and
   `ROLE=worker` started and ran a tick without `MODULE_NOT_FOUND`.
+- **Image size (fix round 2).** The image measured 294 MB with `docker images`, over the 250 MB budget.
+  - **Why it was big:** `pnpm deploy` shipped 67 MB of node_modules, including drizzle-orm, @google/genai and zod,
+    that the bundles mostly did not need.
+  - **What changed:** `build.mjs` now bundles every pure-JS dependency. The only externals are `RUNTIME_EXTERNALS`:
+    native `@node-rs/*` and optional native add-ons. The runtime stage carries only `@node-rs/argon2` and its
+    platform binary (788 KB) plus a minimal `package.json`. The base also drops `/usr/local/include` and Node's docs.
+  - **Result: 212 MB in `docker images`.** On Docker Desktop's containerd store that figure counts the unpacked and
+    the compressed content together. The root filesystem itself is 150 MB, of which `dist` is 14 MB.
+  - **Boot check:** `ROLE=migrate`, `ROLE=api` and `ROLE=worker` all boot. Register and login exercise argon2, and a
+    bundled @google/genai call reached the Gemini API: with a fake key it answered `API_KEY_INVALID`.
 
 ## The load-test switch (`RATE_LIMIT_DISABLED` / `LOAD_TEST`)
 

@@ -23,21 +23,28 @@ COPY tsconfig.base.json tsconfig.json ./
 COPY lib ./lib
 COPY artifacts/api-server ./artifacts/api-server
 RUN pnpm --filter @workspace/api-server run build
-# Production dependencies only (workspace libs are bundled into dist; externals like argon2 come from here).
+# build.mjs bundles every pure-JS dependency into dist; only RUNTIME_EXTERNALS stay outside, and of those only the
+# native @node-rs/argon2 is required (the others are optional add-ons). Install the lockfile-pinned production deps,
+# then keep just argon2 and its platform binary (dereferenced out of pnpm's symlinked layout) in /rt.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm --filter @workspace/api-server --prod deploy --legacy /out \
-    && rm -rf /out/src /out/dist /out/build.mjs /out/tsconfig.json
+    && mkdir -p /rt/node_modules/@node-rs \
+    && cp -rL /out/node_modules/@node-rs/argon2 /rt/node_modules/@node-rs/argon2 \
+    && for d in /out/node_modules/.pnpm/@node-rs+argon2-linux-*/node_modules/@node-rs/argon2-linux-*; do cp -rL "$d" /rt/node_modules/@node-rs/; done \
+    && ls /rt/node_modules/@node-rs/argon2-linux-* >/dev/null \
+    && node -e "const v=require('/rt/node_modules/@node-rs/argon2/package.json').version;require('fs').writeFileSync('/rt/package.json',JSON.stringify({name:'system-self-api',private:true,dependencies:{'@node-rs/argon2':v}},null,2))"
 
 # Slim the base: the runtime never needs npm, corepack or yarn (deleting in the final stage would
 # only add a whiteout layer, so the filesystem is flattened below).
 FROM node:22-alpine AS slim
-RUN apk add --no-cache tini && rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg /var/cache/apk /root/.npm
+RUN apk add --no-cache tini && rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg /var/cache/apk /root/.npm \
+    /usr/local/include /usr/local/share/doc /usr/local/share/man /usr/local/CHANGELOG.md /usr/local/README.md
 WORKDIR /app
-COPY --from=build --chown=node:node /out/node_modules ./node_modules
-COPY --from=build --chown=node:node /out/package.json ./package.json
+COPY --from=build --chown=node:node /rt/node_modules ./node_modules
+COPY --from=build --chown=node:node /rt/package.json ./package.json
 COPY --from=build --chown=node:node /repo/artifacts/api-server/dist ./dist
 # Source maps are dropped: the image carries only the bundles and migrations.
-RUN find dist -name '*.map' -delete     && find node_modules -type d \( -name '@types' -o -name test -o -name tests \) -prune -exec rm -rf {} + 2>/dev/null; true
+RUN find dist -name '*.map' -delete
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 FROM scratch AS runtime
