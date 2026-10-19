@@ -78,7 +78,7 @@ export async function createQuestDeadlineNotices(db: Db, now: Date): Promise<num
           );
         const n = row?.n ?? 0;
         if (n === 0) return 0;
-        await tx.insert(notices).values({ userId: c.userId, kind: "quest_deadline_24h", payload: { count: n, localDate: date } });
+        await tx.insert(notices).values({ userId: c.userId, kind: "quest_deadline_24h", payload: { count: n, localDate: date }, createdAt: now });
         return 1;
       });
     } catch (err) {
