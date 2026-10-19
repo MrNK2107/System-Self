@@ -128,7 +128,7 @@ export function SlotPicker({ visible, questTitle, current, suggestions, hint, bu
             <Pressable
               style={[
                 styles.btn,
-                { borderColor: colors.primary + "80", backgroundColor: colors.primary + "18", opacity: busy || !slot ? 0.5 : 1 },
+                { borderColor: colors.primary + "80", backgroundColor: colors.accentFill + "18", opacity: busy || !slot ? 0.5 : 1 },
               ]}
               onPress={() => slot && onConfirm(slot)}
               disabled={busy || !slot}

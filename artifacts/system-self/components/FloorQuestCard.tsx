@@ -34,7 +34,7 @@ export function FloorQuestCard({ routine, shadowLine, onStart, onDismiss }: Prop
           <Text style={[styles.btnText, { color: colors.mutedForeground }]}>NOT NOW</Text>
         </Pressable>
         <Pressable
-          style={[styles.btn, { borderColor: colors.primary + "80", backgroundColor: colors.primary + "18" }]}
+          style={[styles.btn, { borderColor: colors.primary + "80", backgroundColor: colors.accentFill + "18" }]}
           onPress={onStart}
           accessibilityRole="button"
           accessibilityLabel="Start floor session"

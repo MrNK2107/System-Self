@@ -53,7 +53,7 @@ export function HomePathOffer({ gapDays, line, onDone }: Props) {
               <Text style={[styles.btnText, { color: colors.mutedForeground }]}>NOT NOW</Text>
             </Pressable>
             <Pressable
-              style={[styles.btn, { borderColor: colors.primary + "80", backgroundColor: colors.primary + "18", opacity: busy ? 0.5 : 1 }]}
+              style={[styles.btn, { borderColor: colors.primary + "80", backgroundColor: colors.accentFill + "18", opacity: busy ? 0.5 : 1 }]}
               onPress={() => void accept()}
               disabled={busy}
               accessibilityRole="button"

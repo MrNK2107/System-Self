@@ -110,7 +110,7 @@ export default function LogScreen() {
       <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
         <Text style={[styles.title, { color: colors.foreground }]}>LOG HISTORY</Text>
         <TouchableOpacity
-          style={[styles.addBtn, { backgroundColor: colors.primary }]}
+          style={[styles.addBtn, { backgroundColor: colors.accentFill }]}
           onPress={() => setLogVisible(true)}
           activeOpacity={0.8}
         >

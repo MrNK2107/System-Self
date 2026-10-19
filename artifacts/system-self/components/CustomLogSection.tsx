@@ -115,7 +115,7 @@ export function CustomLogSection({ onLogged, onNavigate }: { onLogged: () => voi
             disabled={busy}
             activeOpacity={0.8}
             accessibilityRole="button"
-            style={[s.submit, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
+            style={[s.submit, { backgroundColor: colors.accentFill, opacity: busy ? 0.6 : 1 }]}
           >
             <Text style={[s.submitText, { color: colors.primaryForeground }]}>LOG {domain.name.toUpperCase()}</Text>
           </TouchableOpacity>

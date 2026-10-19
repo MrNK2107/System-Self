@@ -250,7 +250,7 @@ export default function ClanScreen() {
               Clans hold 8 to 30 operators. Members see each other by username. Dead weight is flagged and can be removed.
             </Text>
             <View style={s.ctaRow}>
-              <TouchableOpacity onPress={() => router.push("/clan/join")} accessibilityRole="button" style={[s.cta, { backgroundColor: colors.primary }]}>
+              <TouchableOpacity onPress={() => router.push("/clan/join")} accessibilityRole="button" style={[s.cta, { backgroundColor: colors.accentFill }]}>
                 <Text style={[s.ctaText, { color: colors.primaryForeground }]}>JOIN A CLAN</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => router.push("/clan/create")} accessibilityRole="button" style={[s.cta, { borderColor: colors.primary, borderWidth: 1 }]}>

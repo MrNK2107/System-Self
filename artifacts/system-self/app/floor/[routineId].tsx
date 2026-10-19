@@ -100,7 +100,7 @@ export default function FloorScreen() {
           <Pressable
             style={[
               styles.btn,
-              { borderColor: colors.primary + "80", backgroundColor: colors.primary + (p.done ? "30" : "10"), opacity: logged || !gate.unlocked ? 0.5 : 1 },
+              { borderColor: colors.primary + "80", backgroundColor: colors.accentFill + (p.done ? "30" : "10"), opacity: logged || !gate.unlocked ? 0.5 : 1 },
             ]}
             onPress={() => void logIt()}
             disabled={logged || !gate.unlocked}

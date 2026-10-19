@@ -331,7 +331,7 @@ export default function Dashboard() {
                 <Text style={[styles.slotBtnText, { color: colors.mutedForeground }]}>NOT TODAY</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.slotBtn, { borderColor: colors.primary + "80", backgroundColor: colors.primary + "18" }]}
+                style={[styles.slotBtn, { borderColor: colors.primary + "80", backgroundColor: colors.accentFill + "18" }]}
                 onPress={() => router.push("/dungeon/briefing")}
                 accessibilityRole="button"
                 accessibilityLabel="Go now"
@@ -460,7 +460,7 @@ export default function Dashboard() {
 
       {/* Log FAB */}
       <TouchableOpacity
-        style={[styles.fab, { backgroundColor: colors.primary, bottom: insets.bottom + 72 }]}
+        style={[styles.fab, { backgroundColor: colors.accentFill, bottom: insets.bottom + 72 }]}
         onPress={() => setLogVisible(true)}
         activeOpacity={0.85}
       >

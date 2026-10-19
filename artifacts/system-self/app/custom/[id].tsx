@@ -84,7 +84,7 @@ export default function CustomDomainScreen() {
       {error ? <AuthNotice message={error} /> : null}
       <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={[s.track, { backgroundColor: colors.muted }]}>
-          <View style={[s.fill, { backgroundColor: colors.primary, width: `${Math.round(p.fraction * 100)}%` }]} />
+          <View style={[s.fill, { backgroundColor: colors.accentFill, width: `${Math.round(p.fraction * 100)}%` }]} />
         </View>
         <Text style={[s.line, { color: colors.foreground }]}>{p.line}</Text>
         <Text style={[s.meta, { color: colors.mutedForeground }]}>

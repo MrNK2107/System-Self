@@ -435,7 +435,7 @@ function RivalDetailCard({
                   }]} />
                   <View style={[detailStyles.userMarker, {
                     left: `${Math.min(100, userScore)}%` as `${number}%`,
-                    backgroundColor: colors.primary,
+                    backgroundColor: colors.accentFill,
                   }]} />
                 </View>
               </View>
@@ -456,7 +456,7 @@ function RivalDetailCard({
         <Pressable
           style={({ pressed }) => [detailStyles.challengeBtn, {
             borderColor: colors.primary + "50",
-            backgroundColor: colors.primary + "08",
+            backgroundColor: colors.accentFill + "08",
             opacity: pressed ? 0.6 : 1,
           }]}
           onPress={() => onChallenge(rival)}

@@ -36,7 +36,6 @@ interface Props {
   onAcknowledge: () => void;
 }
 
-
 export function NightlyDebriefModal({ visible, debrief, username, dayNumber, onAcknowledge }: Props) {
   const verdictColor = VERDICT_COLORS[debrief.verdict];
 

@@ -252,7 +252,7 @@ export function FreeFormLog({
           activeOpacity={0.8}
           accessibilityRole="button"
           accessibilityLabel="Parse the text into log entries"
-          style={[s.parse, { backgroundColor: colors.primary, opacity: busy || recordingNow || text.trim() === "" ? 0.5 : 1 }]}
+          style={[s.parse, { backgroundColor: colors.accentFill, opacity: busy || recordingNow || text.trim() === "" ? 0.5 : 1 }]}
         >
           <Text style={[s.parseText, { color: colors.primaryForeground }]}>{phase === "parsing" ? "…" : "PARSE"}</Text>
         </TouchableOpacity>
@@ -273,7 +273,7 @@ export function FreeFormLog({
               activeOpacity={0.8}
               accessibilityRole="button"
               accessibilityLabel={`Confirm ${proposalSummary(p)}`}
-              style={[s.action, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+              style={[s.action, { backgroundColor: colors.accentFill, borderColor: colors.primary }]}
             >
               <Text style={[s.actionText, { color: colors.primaryForeground }]}>CONFIRM</Text>
             </TouchableOpacity>

@@ -66,7 +66,7 @@ function GeneratingState() {
     <View style={genStyles.container}>
       <View style={[genStyles.card, { borderColor: colors.border, backgroundColor: colors.card }]}>
         <View style={genStyles.top}>
-          <Animated.View style={[genStyles.statusDot, { opacity: pulseAnim, backgroundColor: colors.primary }]} />
+          <Animated.View style={[genStyles.statusDot, { opacity: pulseAnim, backgroundColor: colors.accentFill }]} />
           <Text style={[genStyles.label, { color: colors.primary }]}>GENERATING TRANSMISSION</Text>
         </View>
         <Text style={[genStyles.sub, { color: colors.mutedForeground }]}>
@@ -76,7 +76,7 @@ function GeneratingState() {
           {dotAnims.map((anim, i) => (
             <Animated.View
               key={i}
-              style={[genStyles.dot, { backgroundColor: colors.primary, opacity: anim }]}
+              style={[genStyles.dot, { backgroundColor: colors.accentFill, opacity: anim }]}
             />
           ))}
         </View>

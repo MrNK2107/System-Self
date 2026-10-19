@@ -21,6 +21,7 @@ export function NoticeHost() {
   useEffect(() => {
     if (kind === "rank") rankChangeHaptic();
     else if (kind === "shadow") shadowActivatedHaptic();
+    // `kind` is derived from `key` (the same notice group), so depending on `key` alone fires once per group.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 

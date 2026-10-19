@@ -72,7 +72,7 @@ export default function CustomIndexScreen() {
               <Feather name="chevron-right" size={13} color={colors.mutedForeground} />
             </View>
             <View style={[s.track, { backgroundColor: colors.muted }]}>
-              <View style={[s.fill, { backgroundColor: colors.primary, width: `${Math.round(p.fraction * 100)}%` }]} />
+              <View style={[s.fill, { backgroundColor: colors.accentFill, width: `${Math.round(p.fraction * 100)}%` }]} />
             </View>
             <Text style={[s.meta, { color: colors.mutedForeground }]}>
               {p.line}

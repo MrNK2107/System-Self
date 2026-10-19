@@ -20,10 +20,12 @@ export function useColors() {
   return {
     ...palette,
     background: theme.background,
-    tint: theme.accent,
-    primary: theme.accent,
+    // Text/icon accent (readable on the background). Use accentFill for button fills and bars.
+    tint: theme.accentText,
+    primary: theme.accentText,
+    accentFill: theme.accent,
     primaryForeground: theme.onAccent,
-    accent: theme.accent,
+    accent: theme.accentText,
     accentForeground: theme.onAccent,
     radius: colors.radius,
   };
