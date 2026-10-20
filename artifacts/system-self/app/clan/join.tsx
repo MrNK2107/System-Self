@@ -50,7 +50,7 @@ export default function JoinClanScreen() {
     try {
       const r = await send();
       if (!r.ok) setError(SYNC_PENDING_MESSAGE);
-      else router.replace("/(tabs)/clan");
+      else router.replace({ pathname: "/(tabs)/arena", params: { tab: "clan" } });
     } catch (e) {
       setError(describeClanError(e));
     } finally {

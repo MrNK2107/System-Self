@@ -44,7 +44,7 @@ export default function DungeonBriefingScreen() {
             })}
             <Pressable
               style={[styles.btn, { borderColor: colors.primary + "80", backgroundColor: colors.accentFill + "18" }]}
-              onPress={() => router.replace("/(tabs)/gym")}
+              onPress={() => router.replace("/gym")}
               accessibilityRole="button"
               accessibilityLabel="Enter the gym"
             >

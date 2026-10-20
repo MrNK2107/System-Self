@@ -14,7 +14,6 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
-    "@expo-google-fonts/inter": "^0.4.0",
     "@expo/cli": "54.0.23",
     "@expo/ngrok": "^4.1.0",
     "@expo/vector-icons": "^15.0.3",
@@ -58,6 +57,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "dependencies": {
+    "@expo-google-fonts/chakra-petch": "^0.4.1",
     "@react-native-community/netinfo": "11.4.1",
     "@tanstack/query-async-storage-persister": "^5.104.4",
     "@tanstack/react-query-persist-client": "^5.104.4",

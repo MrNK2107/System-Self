@@ -105,7 +105,7 @@ The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped 
 - @babel/types 7.29.0: MIT
 - @egjs/hammerjs 2.0.17: MIT
 - @esbuild/win32-x64 0.27.3: MIT
-- @expo-google-fonts/inter 0.4.2: MIT AND OFL-1.1
+- @expo-google-fonts/chakra-petch 0.4.1: MIT AND OFL-1.1
 - @expo/cli 54.0.23: MIT
 - @expo/cli 54.0.24: MIT
 - @expo/code-signing-certificates 0.0.6: MIT

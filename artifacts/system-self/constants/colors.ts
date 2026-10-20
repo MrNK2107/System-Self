@@ -1,50 +1,64 @@
+// Shadow Monarch palette (design direction of 2026-10-20, .impeccable/surfaces/app.md).
+// Every text colour here is >= 4.5:1 on `background` and on `card`; `border` is for lines only.
 const colors = {
   light: {
-    text: "#E8E8EC",
-    tint: "#3A7BD5",
+    text: "#F1ECF7",
+    tint: "#A879FF",
 
-    background: "#111318",
-    foreground: "#E8E8EC",
+    background: "#07060B",
+    foreground: "#F1ECF7",
 
-    card: "#1A1D24",
-    cardForeground: "#E8E8EC",
+    /** Solid surface for rows and sheets. */
+    card: "#120F1A",
+    cardForeground: "#F1ECF7",
 
-    primary: "#3A7BD5",
-    primaryForeground: "#FFFFFF",
+    /** Frosted System window fill and frame (see components/ui/SystemWindow). */
+    panel: "rgba(38,28,64,0.55)",
+    frame: "rgba(176,140,255,0.55)",
 
-    secondary: "#1F2330",
-    secondaryForeground: "#A0A4B0",
+    /** Navigation bar and app bar surface. */
+    surface: "#0E0C15",
 
-    muted: "#252830",
-    mutedForeground: "#6B7280",
+    primary: "#A879FF",
+    primaryForeground: "#0B0812",
 
-    accent: "#3A7BD5",
-    accentForeground: "#FFFFFF",
+    secondary: "#1A1524",
+    secondaryForeground: "#C9C1D6",
 
-    destructive: "#8B1A1A",
-    destructiveForeground: "#FFFFFF",
+    /** Fill for inactive chips, tracks and pressed rows. */
+    muted: "#1C1726",
+    mutedForeground: "#B5ACC4",
 
-    /** Text on a disabled control and other near-invisible chrome labels. */
-    subtle: "#3A3D48",
+    accent: "#A879FF",
+    accentForeground: "#0B0812",
 
-    border: "#2A2D38",
-    input: "#2A2D38",
+    destructive: "#F0606B",
+    destructiveForeground: "#140608",
+
+    warn: "#F2B544",
+    success: "#3DD68C",
+
+    /** Tertiary text (timestamps, hints). Still >= 4.5:1. */
+    subtle: "#8E85A0",
+
+    border: "#2A2340",
+    input: "#2A2340",
 
     rank: {
-      E: "#6B7280",
-      D: "#4B8B6F",
-      C: "#3A7BD5",
-      B: "#7C5CBF",
-      A: "#C4873A",
-      S: "#D4B483",
+      E: "#8A93A6",
+      D: "#4F8FE0",
+      C: "#2FA36B",
+      B: "#D4A62A",
+      A: "#E8604C",
+      S: "#E8D5A3",
     },
 
     domain: {
-      BODY: "#E05555",
-      MIND: "#3A7BD5",
-      WEALTH: "#4B8B6F",
-      SOCIAL: "#B05CD6",
-      DISCIPLINE: "#C4873A",
+      BODY: "#E8604C",
+      MIND: "#4F8FE0",
+      WEALTH: "#2FA36B",
+      SOCIAL: "#D4A62A",
+      DISCIPLINE: "#C77DDB",
     },
   },
 

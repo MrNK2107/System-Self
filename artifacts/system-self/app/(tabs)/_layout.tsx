@@ -1,121 +1,126 @@
 import { Feather } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import { BlurView } from "expo-blur";
 import React from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import { GridTexture } from "@/components/GridTexture";
 import { NoticeHost } from "@/components/NoticeHost";
 import { OfflineBar } from "@/components/OfflineBar";
+import { TAB_BAR_HEIGHT } from "@/components/ui/Screen";
+import { fonts } from "@/constants/type";
 import { useTheme } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
+import { LogSheetProvider, useLogSheet } from "@/hooks/useLogSheet";
 import { QuestSchedulerProvider } from "@/hooks/useQuestScheduler";
 
-export default function TabLayout() {
+type IconName = keyof typeof Feather.glyphMap;
+
+/** Material navigation bar item: icon in a pill when active, label always visible. */
+function TabIcon({ name, color, focused, label }: { name: IconName; color: string; focused: boolean; label: string }) {
+  const colors = useColors();
+  return (
+    <View style={s.item}>
+      <View style={[s.pill, focused && { backgroundColor: colors.muted }]}>
+        <Feather name={name} size={22} color={color} />
+      </View>
+      <Text style={[s.label, { color }]} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+/** The centre Log action: a filled accent button that opens the log sheet. */
+function LogIcon() {
+  const colors = useColors();
+  return (
+    <View style={s.item}>
+      <View style={[s.logButton, { backgroundColor: colors.accentFill }]}>
+        <Feather name="plus" size={26} color={colors.primaryForeground} />
+      </View>
+      <Text style={[s.label, { color: colors.primary }]}>Log</Text>
+    </View>
+  );
+}
+
+function TabsInner() {
   const colors = useColors();
   const theme = useTheme();
-  const isIOS = Platform.OS === "ios";
+  const insets = useSafeAreaInsets();
+  const { openLog } = useLogSheet();
+
+  const tab = (name: string, label: string, icon: IconName) => (
+    <Tabs.Screen
+      name={name}
+      options={{
+        title: label,
+        tabBarAccessibilityLabel: label,
+        tabBarIcon: ({ color, focused }) => <TabIcon name={icon} color={color} focused={focused} label={label} />,
+      }}
+    />
+  );
 
   return (
-    <QuestSchedulerProvider>
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Tabs
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: colors.primary,
+          tabBarActiveTintColor: colors.foreground,
           tabBarInactiveTintColor: colors.mutedForeground,
           tabBarShowLabel: false,
           tabBarStyle: {
             position: "absolute",
-            backgroundColor: isIOS ? "transparent" : colors.card,
+            backgroundColor: colors.surface,
             borderTopColor: colors.border,
-            borderTopWidth: 1,
-            height: Platform.OS === "web" ? 84 : 64,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            height: TAB_BAR_HEIGHT + insets.bottom,
+            paddingTop: 10,
             elevation: 0,
           },
-          tabBarBackground: () =>
-            isIOS ? (
-              <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-            ) : (
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.card }]} />
-            ),
+          tabBarItemStyle: { height: TAB_BAR_HEIGHT - 10 },
         }}
       >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: "Home",
-            tabBarAccessibilityLabel: "Home",
-            tabBarIcon: ({ color, size }) => (
-              <Feather name="grid" size={size} color={color} />
-            ),
-          }}
-        />
+        {tab("index", "Today", "sun")}
+        {tab("quests", "Quests", "target")}
         <Tabs.Screen
           name="log"
           options={{
             title: "Log",
-            tabBarAccessibilityLabel: "Log",
-            tabBarIcon: ({ color, size }) => (
-              <Feather name="plus-circle" size={size} color={color} />
-            ),
+            tabBarAccessibilityLabel: "Log something",
+            tabBarIcon: () => <LogIcon />,
+          }}
+          listeners={{
+            tabPress: (e) => {
+              e.preventDefault();
+              openLog();
+            },
           }}
         />
-        <Tabs.Screen
-          name="quests"
-          options={{
-            title: "Quests",
-            tabBarAccessibilityLabel: "Quests",
-            tabBarIcon: ({ color, size }) => (
-              <Feather name="target" size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="gym"
-          options={{
-            title: "Gym",
-            tabBarAccessibilityLabel: "Gym",
-            tabBarIcon: ({ color, size }) => (
-              <Feather name="activity" size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="rivals"
-          options={{
-            title: "Rivals",
-            tabBarAccessibilityLabel: "Rivals",
-            tabBarIcon: ({ color, size }) => (
-              <Feather name="users" size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="clan"
-          options={{
-            title: "Clan",
-            tabBarAccessibilityLabel: "Clan",
-            tabBarIcon: ({ color, size }) => (
-              <Feather name="shield" size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="stats"
-          options={{
-            title: "Stats",
-            tabBarAccessibilityLabel: "Stats",
-            tabBarIcon: ({ color, size }) => (
-              <Feather name="bar-chart-2" size={size} color={color} />
-            ),
-          }}
-        />
+        {tab("arena", "Arena", "shield")}
+        {tab("status", "Status", "user")}
       </Tabs>
       {theme.grid && <GridTexture color={theme.accent} />}
       <OfflineBar />
-      {/* Server notices (rank changes, achievements, milestones, ...) as modals, one at a time. */}
+      {/* Server notices (rank changes, achievements, milestones, ...) as System windows, one at a time. */}
       <NoticeHost />
     </View>
+  );
+}
+
+export default function TabLayout() {
+  return (
+    <QuestSchedulerProvider>
+      <LogSheetProvider>
+        <TabsInner />
+      </LogSheetProvider>
     </QuestSchedulerProvider>
   );
 }
+
+const s = StyleSheet.create({
+  item: { alignItems: "center", justifyContent: "center", gap: 4, width: 72 },
+  pill: { width: 64, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  label: { fontFamily: fonts.label, fontSize: 12, letterSpacing: 0.4 },
+  logButton: { width: 48, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+});

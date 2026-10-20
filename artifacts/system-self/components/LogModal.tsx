@@ -478,7 +478,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
               style={[styles.gymShortcut, { borderColor: colors.border, backgroundColor: colors.card }]}
               onPress={() => {
                 onClose();
-                router.push("/(tabs)/gym");
+                router.push("/gym");
               }}
               activeOpacity={0.7}
             >

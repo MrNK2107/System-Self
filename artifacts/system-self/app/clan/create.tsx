@@ -33,7 +33,7 @@ export default function CreateClanScreen() {
     try {
       const r = await actions.create(draft);
       if (!r.ok) setOutcome({ kind: "error", message: SYNC_PENDING_MESSAGE });
-      else router.replace("/(tabs)/clan");
+      else router.replace({ pathname: "/(tabs)/arena", params: { tab: "clan" } });
     } catch (e) {
       setOutcome(createErrorOutcome(e));
     } finally {

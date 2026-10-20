@@ -12,9 +12,6 @@ catalogs:
     '@types/node':
       specifier: ^25.3.5
       version: 25.3.5
-    drizzle-orm:
-      specifier: ^0.45.2
-      version: 0.45.2
     react:
       specifier: 19.1.0
       version: 19.1.0
@@ -154,6 +151,9 @@ importers:
 
   artifacts/system-self:
     dependencies:
+      '@expo-google-fonts/chakra-petch':
+        specifier: ^0.4.1
+        version: 0.4.1
       '@react-native-community/netinfo':
         specifier: 11.4.1
         version: 11.4.1(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))
@@ -197,9 +197,6 @@ importers:
       '@babel/core':
         specifier: ^7.25.2
         version: 7.29.0
-      '@expo-google-fonts/inter':
-        specifier: ^0.4.0
-        version: 0.4.2
       '@expo/cli':
         specifier: 54.0.23
         version: 54.0.23(expo-router@6.0.23)(expo@54.0.34)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(typescript@5.9.3)
@@ -1107,8 +1104,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@expo-google-fonts/inter@0.4.2':
-    resolution: {integrity: sha512-syfiImMaDmq7cFi0of+waE2M4uSCyd16zgyWxdPOY7fN2VBmSLKEzkfbZgeOjJq61kSqPBNNtXjggiQiSD6gMQ==}
+  '@expo-google-fonts/chakra-petch@0.4.1':
+    resolution: {integrity: sha512-a0Lf+kHUO1UrCWTylvfssuoIpyoU+4ey8HoHmu0XSutFbq2FqkAGYChaiaHksQqayqv+X2R7cUKcBY+4zFqr1w==}
 
   '@expo/cli@54.0.23':
     resolution: {integrity: sha512-km0h72SFfQCmVycH/JtPFTVy69w6Lx1cHNDmfLfQqgKFYeeHTjx7LVDP4POHCtNxFP2UeRazrygJhlh4zz498g==}
@@ -6225,7 +6222,7 @@ snapshots:
   '@esbuild/win32-x64@0.27.3':
     optional: true
 
-  '@expo-google-fonts/inter@0.4.2': {}
+  '@expo-google-fonts/chakra-petch@0.4.1': {}
 
   '@expo/cli@54.0.23(expo-router@6.0.23)(expo@54.0.34)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(typescript@5.9.3)':
     dependencies:

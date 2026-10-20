@@ -121,7 +121,7 @@ export default function RecapScreen() {
         {/* Header */}
         <View style={styles.headerRow}>
           <TouchableOpacity
-            onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/stats"))}
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/status"))}
             accessibilityRole="button"
             accessibilityLabel="Back"
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}

@@ -1,10 +1,9 @@
 import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
+  ChakraPetch_500Medium,
+  ChakraPetch_600SemiBold,
+  ChakraPetch_700Bold,
   useFonts,
-} from "@expo-google-fonts/inter";
+} from "@expo-google-fonts/chakra-petch";
 import { Stack, router, useRootNavigationState, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
@@ -72,10 +71,9 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
+    ChakraPetch_500Medium,
+    ChakraPetch_600SemiBold,
+    ChakraPetch_700Bold,
   });
 
   useEffect(() => {
