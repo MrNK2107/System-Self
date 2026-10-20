@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deadlineLine, formatReward, pickContextCard, pickNextQuest, questReward } from "./today";
+import { deadlineLine, formatReward, pickContextCard, pickNextQuest, questReward, rewardStatement } from "./today";
 import type { Quest } from "./types";
 
 const q = (over: Partial<Quest> = {}): Quest => ({
@@ -79,4 +79,9 @@ test("'N more today' counts only what the Quests tab's Today segment lists (dail
   const r = pickNextQuest(quests, null);
   assert.equal(r.quest?.id, "a");
   assert.equal(r.more, 2);
+});
+
+test("reward statement: one honest sentence for every surface (DISCIPLINE whatever the quest's domain; streak scales it)", () => {
+  assert.equal(rewardStatement(q({ domain: "MIND" })), "+3 DISCIPLINE base. Your streak adds more.");
+  assert.equal(rewardStatement(q({ bonus: true })), "No rank effect. Bonus quests don't score.");
 });

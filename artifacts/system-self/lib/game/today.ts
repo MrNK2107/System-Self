@@ -71,3 +71,13 @@ export function pickContextCard(s: { shadow: boolean; comeback: boolean; duo: bo
   if (s.floor) return "floor";
   return null;
 }
+
+/**
+ * The reward in one sentence, the same on the Today card and the quest sheet. Completion always pays DISCIPLINE
+ * (whatever the quest's domain) and the streak multiplier scales it, so the base is stated as a base; the
+ * [ QUEST COMPLETE ] window then reports the exact amount applied.
+ */
+export function rewardStatement(q: Pick<Quest, "bonus">): string {
+  const r = questReward(q);
+  return r ? `${formatReward(r.delta)} ${r.domain} base. Your streak adds more.` : "No rank effect. Bonus quests don't score.";
+}

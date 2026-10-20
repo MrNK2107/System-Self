@@ -1,8 +1,8 @@
 # Open-source licences
 
-SYSTEM // SELF is built with 805 open-source packages. Thank you to their authors.
+SYSTEM // SELF is built with 806 open-source packages. Thank you to their authors.
 
-Licences: MIT (690), ISC (42), BSD-2-Clause (17), BSD-3-Clause (17), Apache-2.0 (13), BlueOak-1.0.0 (9), UNKNOWN (2), Unlicense (2), 0BSD (2), MPL-2.0 (2), (MIT OR CC0-1.0) (2), MIT AND OFL-1.1 (1), Python-2.0 (1), CC-BY-4.0 (1), CC0-1.0 (1), (BSD-3-Clause OR GPL-2.0) (1), Apache 2.0 (1), (BSD-2-Clause OR MIT OR Apache-2.0) (1).
+Licences: MIT (690), ISC (42), BSD-2-Clause (17), BSD-3-Clause (17), Apache-2.0 (13), BlueOak-1.0.0 (9), MIT AND OFL-1.1 (2), UNKNOWN (2), Unlicense (2), 0BSD (2), MPL-2.0 (2), (MIT OR CC0-1.0) (2), Python-2.0 (1), CC-BY-4.0 (1), CC0-1.0 (1), (BSD-3-Clause OR GPL-2.0) (1), Apache 2.0 (1), (BSD-2-Clause OR MIT OR Apache-2.0) (1).
 
 The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped with the source.
 
@@ -106,6 +106,7 @@ The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped 
 - @egjs/hammerjs 2.0.17: MIT
 - @esbuild/win32-x64 0.27.3: MIT
 - @expo-google-fonts/chakra-petch 0.4.1: MIT AND OFL-1.1
+- @expo-google-fonts/noto-sans 0.4.2: MIT AND OFL-1.1
 - @expo/cli 54.0.23: MIT
 - @expo/cli 54.0.24: MIT
 - @expo/code-signing-certificates 0.0.6: MIT

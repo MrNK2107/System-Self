@@ -12,7 +12,7 @@ export default function NotFoundScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen options={{ headerShown: false, statusBarStyle: "light" }} />
       <View style={[s.container, { backgroundColor: colors.background }]}>
         <SystemWindow title="NOT FOUND" style={s.window}>
           <Text style={[type.title, s.center, { color: colors.foreground }]}>This screen does not exist.</Text>

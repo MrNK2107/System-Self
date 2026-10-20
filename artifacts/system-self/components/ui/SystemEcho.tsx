@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
+import { TAB_BAR_HEIGHT } from "./Screen";
 import { SystemWindow } from "./SystemWindow";
 
 interface Echo {
@@ -21,8 +22,8 @@ const HOLD_MS = 2600;
 const TYPE_MS = 22;
 
 /**
- * THE SYSTEM answering an action: a window that drops in under the status bar, types its line, and leaves on its own.
- * It never takes a tap (the screen behind stays usable); a newer echo replaces the current one.
+ * THE SYSTEM answering an action: a window that rises above the tab bar, types its line, and leaves on its own. It sits
+ * clear of every screen's title and controls, never takes a tap (the screen stays usable), and a newer echo replaces it.
  */
 export function SystemEchoProvider({ children }: { children: ReactNode }) {
   const [current, setCurrent] = useState<(Echo & { id: number }) | null>(null);
@@ -48,7 +49,7 @@ export function useSystemEcho(): (e: Echo) => void {
 function EchoWindow({ echo, onDone }: { echo: Echo; onDone: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const y = useRef(new Animated.Value(-32)).current;
+  const y = useRef(new Animated.Value(32)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const [shown, setShown] = useState(0);
 
@@ -88,7 +89,7 @@ function EchoWindow({ echo, onDone }: { echo: Echo; onDone: () => void }) {
   }, []);
 
   return (
-    <Animated.View pointerEvents="none" style={[s.wrap, { top: insets.top + space.sm, opacity, transform: [{ translateY: y }] }]}>
+    <Animated.View pointerEvents="none" style={[s.wrap, { bottom: TAB_BAR_HEIGHT + insets.bottom + space.sm, opacity, transform: [{ translateY: y }] }]}>
       <SystemWindow title={echo.title} solid>
         <View>
           {/* The full line holds the layout; the typed part is drawn over it so nothing jumps. */}

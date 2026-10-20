@@ -1,6 +1,6 @@
 THIRD-PARTY SOFTWARE NOTICES: SYSTEM // SELF mobile app
 
-This product includes the following 805 third-party packages. Each is listed with its version,
+This product includes the following 806 third-party packages. Each is listed with its version,
 its licence and the licence text it ships with. Generated from the lockfile-resolved dependency graph; do not
 edit by hand.
 
@@ -102,6 +102,7 @@ edit by hand.
   @egjs/hammerjs@2.0.17  (MIT)
   @esbuild/win32-x64@0.27.3  (MIT)
   @expo-google-fonts/chakra-petch@0.4.1  (MIT AND OFL-1.1)
+  @expo-google-fonts/noto-sans@0.4.2  (MIT AND OFL-1.1)
   @expo/cli@54.0.23  (MIT)
   @expo/cli@54.0.24  (MIT)
   @expo/code-signing-certificates@0.0.6  (MIT)
@@ -3603,6 +3604,34 @@ Source: git+https://github.com/evanw/esbuild.git
 @expo-google-fonts/chakra-petch@0.4.1
 License: MIT AND OFL-1.1
 Source: https://github.com/expo/google-fonts/tree/master/font-packages/chakra-petch#readme
+
+--- LICENSE ---
+MIT License
+
+Copyright (c) 2020 Expo
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+==============================================================================
+@expo-google-fonts/noto-sans@0.4.2
+License: MIT AND OFL-1.1
+Source: https://github.com/expo/google-fonts/tree/master/font-packages/noto-sans#readme
 
 --- LICENSE ---
 MIT License

@@ -57,9 +57,13 @@ export function NextQuestCard({ quest, reward, status, primary, secondary, busy 
       </View>
 
       {reward ? (
-        <View style={s.reward} accessible accessibilityLabel={`Reward ${reward.delta} ${reward.domain}`}>
-          <Text style={[type.display, { color: colors.foreground }]}>{reward.delta}</Text>
-          <Text style={[type.label, s.rewardDomain, { color: DOMAIN_COLORS[reward.domain] }]}>{reward.domain}</Text>
+        <View accessible accessibilityLabel={`Reward ${reward.delta} ${reward.domain}, base. Your streak adds more.`}>
+          <View style={s.reward}>
+            <Text style={[type.display, { color: colors.foreground }]}>{reward.delta}</Text>
+            <Text style={[type.label, s.rewardDomain, { color: DOMAIN_COLORS[reward.domain] }]}>{reward.domain}</Text>
+          </View>
+          {/* Same sentence as the quest sheet (lib/game/today rewardStatement); the completion window shows the exact amount. */}
+          <Text style={[type.meta, { color: colors.mutedForeground }]}>Base. Your streak adds more.</Text>
         </View>
       ) : (
         <Text style={[type.bodyStrong, { color: colors.mutedForeground }]}>Bonus quest. No rank effect.</Text>

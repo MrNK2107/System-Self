@@ -1,6 +1,7 @@
 // Quest details: what the quest asks, when it is due, and what you can do with it. One primary action
 // (Mark complete); the slot, briefing and Shame Mode sit as rows; Refuse is a quiet text action.
 import { Feather } from "@expo/vector-icons";
+import { rewardStatement } from "@/lib/game/today";
 import * as Haptics from "expo-haptics";
 import React from "react";
 import { StyleSheet, Switch, Text, View } from "react-native";
@@ -123,7 +124,7 @@ export function QuestSheet({
             tone={due?.urgent ? colors.warn : undefined}
           />
         ) : null}
-        <Fact label="Reward" value={quest.bonus ? "None to rank. Bonus quests do not score." : `Counts toward ${quest.domain} and your rank.`} />
+        <Fact label="Reward" value={rewardStatement(quest)} />
         {quest.status !== "active" ? <Fact label="Outcome" value={OUTCOME[quest.status]} tone={quest.status === "complete" ? colors.success : colors.mutedForeground} /> : null}
       </View>
 

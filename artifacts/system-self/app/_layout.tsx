@@ -4,6 +4,7 @@ import {
   ChakraPetch_700Bold,
   useFonts,
 } from "@expo-google-fonts/chakra-petch";
+import { NotoSans_400Regular, NotoSans_600SemiBold } from "@expo-google-fonts/noto-sans";
 import { Stack, router, useRootNavigationState, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
@@ -48,7 +49,7 @@ function RootLayoutNav() {
   useNotificationSync();
   return (
     <>
-      <Stack screenOptions={{ headerShown: false }}>
+      <Stack screenOptions={{ headerShown: false, statusBarStyle: "light" }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="auth" options={{ gestureEnabled: false }} />
         <Stack.Screen name="legal/[doc]" />
@@ -76,6 +77,8 @@ export default function RootLayout() {
     ChakraPetch_500Medium,
     ChakraPetch_600SemiBold,
     ChakraPetch_700Bold,
+    NotoSans_400Regular,
+    NotoSans_600SemiBold,
   });
 
   useEffect(() => {

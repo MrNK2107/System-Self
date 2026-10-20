@@ -12,6 +12,9 @@ catalogs:
     '@types/node':
       specifier: ^25.3.5
       version: 25.3.5
+    drizzle-orm:
+      specifier: ^0.45.2
+      version: 0.45.2
     react:
       specifier: 19.1.0
       version: 19.1.0
@@ -154,6 +157,9 @@ importers:
       '@expo-google-fonts/chakra-petch':
         specifier: ^0.4.1
         version: 0.4.1
+      '@expo-google-fonts/noto-sans':
+        specifier: ^0.4.2
+        version: 0.4.2
       '@react-native-community/netinfo':
         specifier: 11.4.1
         version: 11.4.1(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))
@@ -1106,6 +1112,9 @@ packages:
 
   '@expo-google-fonts/chakra-petch@0.4.1':
     resolution: {integrity: sha512-a0Lf+kHUO1UrCWTylvfssuoIpyoU+4ey8HoHmu0XSutFbq2FqkAGYChaiaHksQqayqv+X2R7cUKcBY+4zFqr1w==}
+
+  '@expo-google-fonts/noto-sans@0.4.2':
+    resolution: {integrity: sha512-zYD8G2ijWLxqmquoQgghNh/x9p0yxWwArD0oxO1oXY1qx5vOd4t0Kbhnu/Cx8RTy08OgA8RtxuULZFaXwVPnPw==}
 
   '@expo/cli@54.0.23':
     resolution: {integrity: sha512-km0h72SFfQCmVycH/JtPFTVy69w6Lx1cHNDmfLfQqgKFYeeHTjx7LVDP4POHCtNxFP2UeRazrygJhlh4zz498g==}
@@ -6223,6 +6232,8 @@ snapshots:
     optional: true
 
   '@expo-google-fonts/chakra-petch@0.4.1': {}
+
+  '@expo-google-fonts/noto-sans@0.4.2': {}
 
   '@expo/cli@54.0.23(expo-router@6.0.23)(expo@54.0.34)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(typescript@5.9.3)':
     dependencies:
