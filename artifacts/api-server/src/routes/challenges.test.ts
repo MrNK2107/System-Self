@@ -4,6 +4,7 @@ import request from "supertest";
 import { and, eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
 import {
+  achievements,
   blocks,
   clanMembers,
   clans,
@@ -94,6 +95,11 @@ async function list(who: P) {
 }
 const noticesOf = (id: string, kind: string) => db!.select().from(notices).where(and(eq(notices.userId, id), eq(notices.kind, kind)));
 const payloadOf = (n: { payload: unknown }) => n.payload as Record<string, unknown>;
+const challengeAchievements = async (id: string) =>
+  (await db!.select().from(achievements).where(eq(achievements.userId, id)))
+    .map((r) => r.achievementId)
+    .filter((a) => a.startsWith("challenge_"))
+    .sort();
 const row = async (id: string) => (await db!.select().from(namedChallenges).where(eq(namedChallenges.id, id)))[0]!;
 
 /** x follows y (a public player, so the username resolves). */
@@ -321,6 +327,47 @@ test("draw -> resolved with no score events", { skip }, async () => {
   assert.equal((await challengeEvents(x.id)).length + (await challengeEvents(y.id)).length, 0);
   const n = await noticesOf(x.id, "challenge_result");
   assert.deepEqual([payloadOf(n[0]!).outcome, payloadOf(n[0]!).delta], ["draw", 0]);
+});
+
+test("a win unlocks challenge_win for the winner only", { skip }, async () => {
+  const { x, y } = await pair();
+  const id = await active(x, y);
+  await bump(x.id, "MIND", 6);
+  await rollTo(x, END);
+  await rollTo(y, END);
+  assert.equal((await row(id)).winnerId, x.id);
+  assert.deepEqual(await challengeAchievements(x.id), ["challenge_win"]);
+  assert.deepEqual(await challengeAchievements(y.id), []);
+});
+
+/** Seeds settled challenges between x and y: `wins` won by x, plus one each lost, drawn and voided. */
+async function pastChallenges(x: P, y: P, wins: number) {
+  const past = { challengerId: x.id, opponentId: y.id, domain: "MIND", days: 3, status: "resolved", respondBy: at(D0), resolvedAt: at(D0) };
+  for (let i = 0; i < wins; i++) await db!.insert(namedChallenges).values({ ...past, winnerId: x.id, outcome: "challenger_won" });
+  await db!.insert(namedChallenges).values({ ...past, winnerId: y.id, outcome: "opponent_won" });
+  await db!.insert(namedChallenges).values({ ...past, winnerId: null, outcome: "draw" });
+  await db!.insert(namedChallenges).values({ ...past, status: "void", winnerId: null, outcome: "void" });
+}
+async function liveWin(x: P, y: P) {
+  const id = await active(x, y);
+  await bump(x.id, "MIND", 6);
+  await rollTo(x, END);
+  await rollTo(y, END);
+  assert.equal((await row(id)).winnerId, x.id);
+}
+
+test("losses, draws and voids are not wins: 3 past wins + this one = 4 -> no challenge_5", { skip }, async () => {
+  const { x, y } = await pair();
+  await pastChallenges(x, y, 3);
+  await liveWin(x, y);
+  assert.deepEqual(await challengeAchievements(x.id), ["challenge_win"]);
+});
+
+test("the fifth win unlocks challenge_5", { skip }, async () => {
+  const { x, y } = await pair();
+  await pastChallenges(x, y, 4);
+  await liveWin(x, y);
+  assert.deepEqual(await challengeAchievements(x.id), ["challenge_5", "challenge_win"]);
 });
 
 test("deleted opponent -> void, no events, no result notice", { skip }, async () => {

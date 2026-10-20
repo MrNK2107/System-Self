@@ -4,6 +4,7 @@ import {
   domainScores,
   logs,
   milestones as milestonesTable,
+  namedChallenges,
   notices as noticesTable,
   quests,
   scoreEvents,
@@ -187,6 +188,11 @@ export async function applyChanges(
     .select({ n: count() })
     .from(quests)
     .where(and(eq(quests.userId, userId), eq(quests.status, "complete"), countsForRank));
+  // Named challenges only; rival challenges have no score effect. Resolution sets winnerId before the win's applyChanges.
+  const [challengeWins] = await tx
+    .select({ n: count() })
+    .from(namedChallenges)
+    .where(and(eq(namedChallenges.winnerId, userId), eq(namedChallenges.status, "resolved")));
   const shadowRows = await tx.select().from(shadowSelves).where(eq(shadowSelves.userId, userId)).limit(1);
   const unlockedRows = await tx.select().from(achievementsTable).where(eq(achievementsTable.userId, userId));
   const unlocked = new Set(unlockedRows.map((a) => a.achievementId as AchievementId));
@@ -195,8 +201,7 @@ export async function applyChanges(
       logsCount: logsCount!.n,
       completedQuests: completedQuests!.n,
       forbiddenLogs: forbiddenLogs!.n,
-      // TODO(P5): count won named challenges once the challenges feature exists.
-      challengeWins: 0,
+      challengeWins: challengeWins!.n,
       maxStreak: Math.max(...streaks),
       minStreak: Math.min(...streaks),
       scores,
