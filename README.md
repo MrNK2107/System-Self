@@ -31,6 +31,9 @@ deterministic templates, so the app works fully offline from AI.
 
 Prerequisites: Node 22, pnpm 11 (`corepack enable`), Docker, and Expo Go on a phone on the same Wi-Fi as your machine.
 
+On Windows, `start-dev.cmd` (double-click, or `.\start-dev.ps1 -Fresh` for an empty database) does all of the
+steps below and shows the Expo Go QR code.
+
 ```sh
 pnpm install
 docker compose up -d postgres                  # Postgres 16 on localhost:5432 (also creates system_self_test)
