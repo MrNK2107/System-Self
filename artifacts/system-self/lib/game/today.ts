@@ -12,7 +12,9 @@ export const URGENT_HOURS = 3;
 export function pickNextQuest(quests: readonly Quest[], missed: Quest | null): { quest: Quest | null; more: number } {
   const active = quests.filter((q) => q.status === "active");
   if (active.length === 0) return { quest: null, more: 0 };
-  if (missed && active.some((q) => q.id === missed.id)) return { quest: missed, more: active.length - 1 };
+  // "N more today" matches the Quests tab's Today segment: dailies and bonus quests, not weeklies or arcs.
+  const moreToday = (picked: Quest) => active.filter((q) => q.id !== picked.id && (q.bonus || q.type === "daily")).length;
+  if (missed && active.some((q) => q.id === missed.id)) return { quest: missed, more: moreToday(missed) };
   const sorted = [...active].sort((a, b) => {
     if (!!a.bonus !== !!b.bonus) return a.bonus ? 1 : -1;
     const ta = Date.parse(a.expiresAt);
@@ -20,7 +22,7 @@ export function pickNextQuest(quests: readonly Quest[], missed: Quest | null): {
     if (ta !== tb) return (Number.isNaN(ta) ? Infinity : ta) - (Number.isNaN(tb) ? Infinity : tb);
     return 0;
   });
-  return { quest: sorted[0]!, more: active.length - 1 };
+  return { quest: sorted[0]!, more: moreToday(sorted[0]!) };
 }
 
 /**

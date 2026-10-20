@@ -67,3 +67,16 @@ test("context card: shadow > comeback > duo > floor", () => {
   assert.equal(pickContextCard({ shadow: false, comeback: false, duo: false, floor: true }), "floor");
   assert.equal(pickContextCard({ shadow: false, comeback: false, duo: false, floor: false }), null);
 });
+
+test("'N more today' counts only what the Quests tab's Today segment lists (dailies and bonus), not weeklies or arcs", () => {
+  const quests = [
+    q({ id: "a", expiresAt: "2026-10-19T10:00:00.000Z" }),
+    q({ id: "b", expiresAt: "2026-10-19T11:00:00.000Z" }),
+    q({ id: "c", expiresAt: "2026-10-19T12:00:00.000Z" }),
+    q({ id: "w", type: "weekly", expiresAt: "2026-10-25T00:00:00.000Z" }),
+    q({ id: "x", type: "arc", expiresAt: "2026-11-01T00:00:00.000Z" }),
+  ];
+  const r = pickNextQuest(quests, null);
+  assert.equal(r.quest?.id, "a");
+  assert.equal(r.more, 2);
+});
