@@ -93,7 +93,9 @@ function EchoWindow({ echo, onDone }: { echo: Echo; onDone: () => void }) {
       <SystemWindow title={echo.title} solid>
         <View>
           {/* The full line holds the layout; the typed part is drawn over it so nothing jumps. */}
-          <Text style={[type.number, s.center, { color: "transparent" }]}>{echo.line}</Text>
+          <Text style={[type.number, s.center, s.hidden]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            {echo.line}
+          </Text>
           <Text style={[type.number, s.center, s.overlay, { color: colors.foreground }]}>{echo.line.slice(0, shown)}</Text>
         </View>
       </SystemWindow>
@@ -104,5 +106,7 @@ function EchoWindow({ echo, onDone }: { echo: Echo; onDone: () => void }) {
 const s = StyleSheet.create({
   wrap: { position: "absolute", left: space.md, right: space.md, zIndex: 100, elevation: 12 },
   center: { textAlign: "center" },
+  // Android still draws faint glyph edges for transparent-coloured text; opacity 0 hides the layout copy fully.
+  hidden: { opacity: 0 },
   overlay: { ...StyleSheet.absoluteFillObject },
 });
