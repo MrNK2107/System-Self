@@ -2,9 +2,8 @@
 // for "Acknowledged"; reminders (the quest-expiry warning) are a slim banner at the top that never blocks the app.
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import React, { useEffect, useRef } from "react";
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AchievementModal } from "@/components/AchievementModal";
@@ -180,8 +179,7 @@ function NoticeBanner({ label, line, onDismiss, onOpen }: { label: string; line:
         accessibilityLabel={`${line} Opens Quests.`}
         android_ripple={{ color: "rgba(168,121,255,0.16)" }}
       >
-        <SolidBacking color={colors.surface} />
-        <SystemWindow style={s.window}>
+        <SystemWindow style={s.window} solid>
           <View style={s.row}>
             <View style={s.text}>
               <Text style={[type.label, { color: colors.warn }]}>{`[ ${label} ]`}</Text>
@@ -194,29 +192,6 @@ function NoticeBanner({ label, line, onDismiss, onOpen }: { label: string; line:
         </SystemWindow>
       </Pressable>
     </Animated.View>
-  );
-}
-
-/**
- * The System window's panel is translucent (it is meant to sit on the ink ground); a banner floats over content, so it
- * gets an opaque notched backing of the same shape (kit SystemWindow: 10px 45° corners).
- */
-function SolidBacking({ color }: { color: string }) {
-  const [size, setSize] = useState({ w: 0, h: 0 });
-  const onLayout = (e: LayoutChangeEvent) => {
-    const { width, height } = e.nativeEvent.layout;
-    if (width !== size.w || height !== size.h) setSize({ w: width, h: height });
-  };
-  const n = 10;
-  const { w, h } = size;
-  return (
-    <View style={StyleSheet.absoluteFill} onLayout={onLayout} pointerEvents="none">
-      {w > 0 ? (
-        <Svg width={w} height={h}>
-          <Path d={`M${n},0 H${w - n} L${w},${n} V${h - n} L${w - n},${h} H${n} L0,${h - n} V${n} Z`} fill={color} />
-        </Svg>
-      ) : null}
-    </View>
   );
 }
 

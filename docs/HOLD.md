@@ -83,3 +83,9 @@ Status key: 🟥 blocks public launch · 🟨 needed before launch, fallback in 
 **Why I can't:** pushing publishes the code to a shared remote; that's your call.
 **Doing instead:** all work is merged into the local `main` (fast-forward from `feat/production-build`; the full server suite passed 701/701 on that exact tree (708/708 as of 2026-10-20), plus engine 154, app 364, db 29). Nothing has been pushed. `git push origin main` publishes it, and CI (`.github/workflows/ci.yml`) then runs every check including the real-image docker smoke.
 **Resolution:**
+
+## H-13 🟨 Redesign: two checks that need a store build or a fresh quest
+**Need:** (1) one screenshot of Today after a cold launch from an EAS preview build (needs H-03), to confirm the status-bar icons are light; (2) one recapture of the [ QUEST COMPLETE ] window while it types, to confirm the fix in commit `ae36ad7`.
+**Why open:** the redesign (branch `feat/ui-redesign`, design record in `artifacts/system-self/DESIGN.md`) passed the finish review on everything else. (1) In Expo Go on the vivo/iQOO test phone the status-bar icons draw dark until a dialog opens, although Android records the app's light-icon request in every state (`dumpsys window`); app code, all stack navigators and `app.json` `androidStatusBar` already ask for light icons, so a store build that runs the app's own theme is the real test. (2) The test account had no quest left that day.
+**Doing instead:** both are tracked here; nothing else in the redesign is open. Raster assets (icon, rank emblems, empty states) are separate: prompts in `artifacts/system-self/design/image-prompts.md`, results go in `artifacts/system-self/design/generated/`.
+**Resolution:**

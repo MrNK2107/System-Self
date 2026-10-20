@@ -47,7 +47,7 @@ export function Sheet({ visible, title, onClose, locked, footer, children }: She
 const s = StyleSheet.create({
   fill: { flex: 1, justifyContent: "flex-end" },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.6)" },
-  sheet: { maxHeight: "88%", borderTopWidth: 1, borderTopLeftRadius: 12, borderTopRightRadius: 12 },
+  sheet: { maxHeight: "88%", borderTopWidth: 1, borderTopLeftRadius: 4, borderTopRightRadius: 4 },
   grip: { width: 32, height: 4, borderRadius: 2, alignSelf: "center", marginTop: space.sm },
   body: { paddingHorizontal: space.md, paddingTop: space.md, paddingBottom: space.sm, gap: space.sm },
   footer: { paddingHorizontal: space.md, paddingTop: space.sm, gap: space.sm },
