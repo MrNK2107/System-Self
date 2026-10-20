@@ -391,11 +391,11 @@ export default function QuestsScreen() {
             <Text style={[type.meta, { color: colors.mutedForeground }]}>{REFUSAL_RULE}</Text>
           ) : null}
 
-          <SystemWindow title="BONUS">
-            <Text style={[type.body, s.center, { color: colors.mutedForeground }]}>
-              {knownFree || bonusPro ? "Bonus quests are PRO. Up to 3 a day, no rank effect." : "Up to 3 a day. No rank effect."}
-            </Text>
-            <View style={s.centerRow}>
+          <View style={s.bonus}>
+            <View style={s.flush}>
+              <ListRow title="Bonus quests" subtitle="Up to 3 a day. No rank effect." />
+            </View>
+            <View style={s.bonusAction}>
               {knownFree || bonusPro ? (
                 <ProLock label="BONUS QUEST" />
               ) : (
@@ -408,7 +408,7 @@ export default function QuestsScreen() {
                 />
               )}
             </View>
-          </SystemWindow>
+          </View>
 
           {showRankUpPrep && nextRank && prepItems.length > 0 ? (
             <View style={s.flush}>
@@ -575,6 +575,7 @@ const s = StyleSheet.create({
   sectionLabel: { marginTop: space.sm, marginBottom: space.xs },
   empty: { alignItems: "flex-start", gap: space.md, paddingVertical: space.lg, paddingHorizontal: space.md },
   center: { textAlign: "center" },
-  centerRow: { alignItems: "center" },
+  bonus: { gap: space.sm },
+  bonusAction: { alignItems: "flex-start" },
   sheetList: { marginHorizontal: -space.md, marginTop: space.sm },
 });

@@ -79,7 +79,7 @@ export default function LogHistoryScreen() {
       ) : logsQuery.isError && !logsQuery.data && sections.length === 0 ? (
         <View style={s.empty}>
           <SystemLine>The log archive is out of reach. Check your connection.</SystemLine>
-          <Button label="Retry" variant="tonal" onPress={() => void logsQuery.refetch()} />
+          <Button label="Retry" variant="tonal" onPress={() => void logsQuery.refetch()} style={s.centered} />
         </View>
       ) : (
         <SectionList
@@ -101,7 +101,7 @@ export default function LogHistoryScreen() {
           ListEmptyComponent={
             <View style={s.empty}>
               <SystemLine>No logs yet. Every entry is permanent.</SystemLine>
-              <Button label="Log the first entry" onPress={() => setLogVisible(true)} />
+              <Button label="Log the first entry" onPress={() => setLogVisible(true)} style={s.centered} />
             </View>
           }
         />
@@ -115,6 +115,7 @@ export default function LogHistoryScreen() {
 const s = StyleSheet.create({
   flex: { flex: 1 },
   grow: { flexGrow: 1 },
+  centered: { alignSelf: "center" },
   list: { paddingHorizontal: space.md },
   header: { flexDirection: "row", alignItems: "center", paddingTop: space.lg, paddingBottom: space.xs },
   row: { flexDirection: "row", gap: space.sm, alignItems: "center" },

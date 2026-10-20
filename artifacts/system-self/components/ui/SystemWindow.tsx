@@ -40,16 +40,19 @@ export function SystemWindow({ title, children, style, frameColor, solid }: Syst
   const d = size.w > 0 ? notchedPath(size.w, size.h) : null;
 
   return (
-    <View onLayout={onLayout} style={[s.root, style]}>
+    <View onLayout={onLayout} style={[s.root, title ? s.titled : null, style]}>
       {d ? (
         <Svg width={size.w} height={size.h} style={StyleSheet.absoluteFill} pointerEvents="none">
           <Path d={d} fill={solid ? SOLID_PANEL : colors.panel} stroke={frameColor ?? colors.frame} strokeWidth={1} />
         </Svg>
       ) : null}
       {title ? (
-        <Text style={[type.label, s.title, { color: frameColor ?? colors.primary }]} accessibilityRole="header">
-          {`[ ${title} ]`}
-        </Text>
+        // The title is part of the frame: a title bar closed by a hairline rule in the frame colour.
+        <View style={[s.titleBar, { borderBottomColor: frameColor ?? colors.frame }]}>
+          <Text style={[type.label, s.title, { color: frameColor ?? colors.primary }]} accessibilityRole="header">
+            {`[ ${title} ]`}
+          </Text>
+        </View>
       ) : null}
       {children}
     </View>
@@ -57,6 +60,13 @@ export function SystemWindow({ title, children, style, frameColor, solid }: Syst
 }
 
 const s = StyleSheet.create({
-  root: { padding: space.md, paddingTop: space.md, gap: space.sm },
-  title: { textAlign: "center", letterSpacing: 2.4, marginBottom: space.xs },
+  root: { padding: space.md, gap: space.sm },
+  titled: { paddingTop: 0 },
+  titleBar: {
+    marginHorizontal: -space.md,
+    marginBottom: space.xs,
+    paddingVertical: space.sm + 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  title: { textAlign: "center" },
 });

@@ -1,5 +1,6 @@
 // Stats: score history (one line per domain, rank-change markers) and the Rank Freeze control.
-// Lines use the domain colour; rank markers use the readable accent text (colors.primary).
+// Lines use the domain colour; rank markers and quest bars use muted text (violet is kept for pressable things).
+// Fewer than two days of history shows one System line instead of an empty chart.
 import React, { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
 import Svg, { Line, Path, Rect, Text as SvgText } from "react-native-svg";
@@ -37,6 +38,7 @@ import {
   scoreHistoryKey,
   startRankFreeze,
 } from "@/lib/history/history";
+import { HISTORY_NOT_READY_LINE, historyReady } from "@/lib/status/status";
 
 const CHART_H = 40;
 const LABEL_H = 16;
@@ -75,7 +77,7 @@ export function HistoryPanel({ domain }: { domain?: Domain } = {}) {
     queryFn: () => fetchQuestTrend(api, days),
     enabled: !!userId && !domain,
   });
-  const bars = !domain && trendQ.data ? barRects(trendQ.data.items, trendQ.data.from, trendQ.data.days, chartW, CHART_H) : [];
+  const bars = !domain && trendQ.data && historyReady(trendQ.data.items) ? barRects(trendQ.data.items, trendQ.data.from, trendQ.data.days, chartW, CHART_H) : [];
   const shown = domain ? [domain] : ALL_DOMAINS;
 
   return (
@@ -88,8 +90,8 @@ export function HistoryPanel({ domain }: { domain?: Domain } = {}) {
         <ActivityIndicator color={colors.primary} />
       ) : historyQ.isError && items.length === 0 ? (
         <Text style={[type.body, { color: colors.mutedForeground }]}>History is out of reach.</Text>
-      ) : items.length === 0 ? (
-        <Text style={[type.body, { color: colors.mutedForeground }]}>No history yet. The first day closes at rollover.</Text>
+      ) : !historyReady(items) ? (
+        <Text style={[type.body, { color: colors.mutedForeground }]}>{HISTORY_NOT_READY_LINE}</Text>
       ) : (
         shown.map((d) => (
           <View key={d} style={s.row} accessible accessibilityLabel={`${d} score history`}>
@@ -105,7 +107,7 @@ export function HistoryPanel({ domain }: { domain?: Domain } = {}) {
               ))}
               <Path d={seriesPath(domainSeries(items, d), from, span, chartW, CHART_H)} stroke={DOMAIN_COLORS[d]} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
               {changes.map((c) => (
-                <SvgText key={`t${c.index}`} x={Math.min(xAt(c.index) + 3, chartW - 10)} y={CHART_H + 12} fontSize={12} fontWeight="600" fill={colors.primary}>
+                <SvgText key={`t${c.index}`} x={Math.min(xAt(c.index) + 3, chartW - 10)} y={CHART_H + 12} fontSize={12} fontWeight="600" fill={colors.mutedForeground}>
                   {c.to}
                 </SvgText>
               ))}
@@ -119,7 +121,7 @@ export function HistoryPanel({ domain }: { domain?: Domain } = {}) {
           <Svg width={chartW} height={CHART_H}>
             <Line x1={0} x2={chartW} y1={CHART_H} y2={CHART_H} stroke={colors.border} strokeWidth={1} />
             {bars.map((b, i) => (
-              <Rect key={i} x={b.x} y={b.y} width={b.width} height={b.height} fill={colors.primary} />
+              <Rect key={i} x={b.x} y={b.y} width={b.width} height={b.height} fill={colors.mutedForeground} />
             ))}
           </Svg>
         </View>
@@ -178,7 +180,7 @@ export function RankFreezeCard() {
       <Text style={[type.label, { color: colors.mutedForeground }]} accessibilityRole="header">RANK FREEZE</Text>
       {mode === "active" && view.kind === "active" ? (
         <>
-          <Text style={[type.bodyStrong, { color: colors.primary }]}>{view.line}</Text>
+          <Text style={[type.bodyStrong, { color: colors.foreground }]}>{view.line}</Text>
           {note(`Through ${view.until}.`)}
         </>
       ) : mode === "locked" ? (

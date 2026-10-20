@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   changeTone,
+  domainSummaryLine,
+  historyReady,
+  overviewLine,
+  performanceLine,
   formatChange,
   groupByDay,
   latestTitle,
@@ -97,4 +101,29 @@ test("groupByDay: newest day first, newest entry first", () => {
       ["2026-10-19", ["a"]],
     ],
   );
+});
+
+test("historyReady: needs two distinct days", () => {
+  assert.equal(historyReady([]), false);
+  assert.equal(historyReady([{ date: "2026-10-01" }]), false);
+  assert.equal(historyReady([{ date: "2026-10-01" }, { date: "2026-10-01" }]), false);
+  assert.equal(historyReady([{ date: "2026-10-01" }, { date: "2026-10-02" }]), true);
+});
+
+test("domainSummaryLine: one sentence, honest when empty", () => {
+  assert.equal(domainSummaryLine({ streak: 0, multiplier: 1, logs: 0, change: null }), "Streak 0 days. Multiplier x1.0. No logs yet.");
+  assert.equal(
+    domainSummaryLine({ streak: 1, multiplier: 1.2, logs: 12, change: 1.4, title: "Iron" }),
+    "Streak 1 day. Multiplier x1.2. 12 logs. +1.4 this week. Title earned: Iron.",
+  );
+});
+
+test("overviewLine: days, logs and quests in words", () => {
+  assert.equal(overviewLine({ day: 1, logs: 0, quests: 0, forbidden: 0 }), "Day 1. No logs yet. No quests completed.");
+  assert.equal(overviewLine({ day: 12, logs: 1, quests: 9, forbidden: 2 }), "Day 12. 1 log. 9 quests completed. 2 forbidden logs.");
+});
+
+test("performanceLine: no fake rate before any attempt", () => {
+  assert.equal(performanceLine(0, 0, 14), "No quests tried in 14 days.");
+  assert.equal(performanceLine(7, 10, 14), "7 of 10 quests tried were completed in 14 days.");
 });

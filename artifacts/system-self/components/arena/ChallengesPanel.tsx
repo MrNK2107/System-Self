@@ -6,7 +6,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import type { Challenge } from "@workspace/contracts";
 
 import { ChallengeComposer } from "@/components/ChallengeComposer";
-import { Group, Notice, Section, Sheet, useToneColor } from "@/components/arena/parts";
+import { Group, Notice, RankMark, Section, Sheet, useToneColor } from "@/components/arena/parts";
 import { ProLock } from "@/components/ProLock";
 import { Button } from "@/components/ui/Button";
 import { ListRow } from "@/components/ui/ListRow";
@@ -72,7 +72,7 @@ function NewChallengeSheet({ visible, onClose }: { visible: boolean; onClose: ()
             <Section label="Following">
               <Group>
                 {followed.map((p) => (
-                  <ListRow key={p.handle} title={p.handle} subtitle={`Rank ${p.rank}`} chevron onPress={() => setOpponent(p.handle)} />
+                  <ListRow key={p.handle} title={p.handle} trailing={<RankMark rank={p.rank} />} accessibilityLabel={`${p.handle}, rank ${p.rank}`} chevron onPress={() => setOpponent(p.handle)} />
                 ))}
               </Group>
             </Section>
@@ -81,7 +81,7 @@ function NewChallengeSheet({ visible, onClose }: { visible: boolean; onClose: ()
             <Section label="Clanmates">
               <Group>
                 {clanmates.map((m) => (
-                  <ListRow key={m.userId} title={m.profile.handle} subtitle={`Rank ${m.profile.rank}`} chevron onPress={() => setOpponent(m.profile.handle)} />
+                  <ListRow key={m.userId} title={m.profile.handle} trailing={<RankMark rank={m.profile.rank} />} accessibilityLabel={`${m.profile.handle}, rank ${m.profile.rank}`} chevron onPress={() => setOpponent(m.profile.handle)} />
                 ))}
               </Group>
             </Section>

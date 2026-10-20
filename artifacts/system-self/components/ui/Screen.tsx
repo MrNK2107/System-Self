@@ -39,7 +39,8 @@ export function Screen({ title, back, action, tab, scroll = true, refreshing, on
     <View style={[s.root, { backgroundColor: colors.background }]}>
       <View style={[s.bar, { paddingTop: insets.top, backgroundColor: colors.background }]}>
         <View style={s.barRow}>
-          {back ? <IconButton icon="arrow-left" label="Back" onPress={() => router.back()} /> : <View style={s.barGap} />}
+          {/* Tab roots have no back button: the title aligns with the content edge (16dp). */}
+          {back ? <IconButton icon="arrow-left" label="Back" onPress={() => router.back()} /> : <View style={s.edge} />}
           {title ? (
             <Text style={[type.title, s.barTitle, { color: colors.foreground }]} numberOfLines={1} accessibilityRole="header">
               {title}
@@ -93,6 +94,7 @@ const s = StyleSheet.create({
   bar: { zIndex: 1 },
   barRow: { height: 56, flexDirection: "row", alignItems: "center", paddingHorizontal: space.xs },
   barGap: { width: 48 },
+  edge: { width: space.sm },
   barTitle: { flex: 1, paddingHorizontal: space.xs },
   icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
   content: { paddingHorizontal: space.md, paddingTop: space.sm, gap: space.lg },

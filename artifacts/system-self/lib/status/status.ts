@@ -102,3 +102,43 @@ export function groupByDay<T extends { timestamp: string }>(logs: readonly T[], 
   }
   return out;
 }
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** Score history needs two closed days before a line can be drawn. */
+export const HISTORY_MIN_DAYS = 2;
+export const HISTORY_NOT_READY_LINE = "History builds after your second day.";
+
+/** True when a history series has enough distinct days to draw a line. */
+export function historyReady(items: readonly { date: string }[]): boolean {
+  return new Set(items.map((i) => i.date)).size >= HISTORY_MIN_DAYS;
+}
+
+/** Domain detail: one System line under the score, e.g. "Streak 3 days. Multiplier x1.2. 12 logs. +1.4 this week." */
+export function domainSummaryLine(input: { streak: number; multiplier: number; logs: number; change: number | null; title?: string | null }): string {
+  const parts = [
+    `Streak ${plural(input.streak, "day")}.`,
+    `Multiplier x${input.multiplier.toFixed(1)}.`,
+    input.logs === 0 ? "No logs yet." : `${plural(input.logs, "log")}.`,
+  ];
+  if (input.change !== null) parts.push(`${formatChange(input.change)} this week.`);
+  if (input.title) parts.push(`Title earned: ${input.title}.`);
+  return parts.join(" ");
+}
+
+/** Stats overview: days, logs and quests in words, e.g. "Day 12. 40 logs. 9 quests completed." */
+export function overviewLine(input: { day: number; logs: number; quests: number; forbidden: number }): string {
+  const parts = [
+    `Day ${input.day}.`,
+    input.logs === 0 ? "No logs yet." : `${plural(input.logs, "log")}.`,
+    input.quests === 0 ? "No quests completed." : `${plural(input.quests, "quest")} completed.`,
+  ];
+  if (input.forbidden > 0) parts.push(`${plural(input.forbidden, "forbidden log")}.`);
+  return parts.join(" ");
+}
+
+/** Stats performance: what the completion rate is made of, in words. */
+export function performanceLine(completed: number, attempts: number, days: number): string {
+  if (attempts === 0) return `No quests tried in ${days} days.`;
+  return `${completed} of ${plural(attempts, "quest")} tried were completed in ${days} days.`;
+}

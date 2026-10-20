@@ -6,6 +6,7 @@ import {
 } from "@expo-google-fonts/chakra-petch";
 import { Stack, router, useRootNavigationState, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { LogBox } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -86,6 +87,8 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
+      {/* Dark app, light status-bar icons everywhere (modals included). */}
+      <StatusBar style="light" />
       <ErrorBoundary>
         <QueryProvider>
           <AuthProvider>

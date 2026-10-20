@@ -8,7 +8,7 @@ import React, { useState } from "react";
 import { ActivityIndicator, Alert, Platform, Share, StyleSheet, Text, View } from "react-native";
 import type { ClanLeaderboardItem, MyClanResponse, RaidSummary } from "@workspace/contracts";
 
-import { Group, Notice, Section, Sheet } from "@/components/arena/parts";
+import { Group, Notice, RankMark, Section, Sheet } from "@/components/arena/parts";
 import { Button } from "@/components/ui/Button";
 import { ListRow } from "@/components/ui/ListRow";
 import { SystemWindow } from "@/components/ui/SystemWindow";
@@ -32,7 +32,7 @@ function Board({ items, mine }: { items: ClanLeaderboardItem[]; mine?: string })
           key={c.id}
           title={`#${c.clanRank}  ${clanLabel(c)}`}
           subtitle={c.id === mine ? "Your clan" : undefined}
-          dot={c.id === mine ? colors.primary : undefined}
+          dot={c.id === mine ? colors.foreground : undefined}
           trailing={<Text style={[type.number, { color: colors.foreground }]}>{scoreLabel(c.clanScore)}</Text>}
         />
       ))}
@@ -51,7 +51,7 @@ function RaidStandings({ raid }: { raid: RaidSummary }) {
             key={c.clanId}
             title={`#${c.position}  ${clanLabel(c)}`}
             subtitle={c.isMine ? "Your clan" : undefined}
-            dot={c.isMine ? colors.primary : undefined}
+            dot={c.isMine ? colors.foreground : undefined}
             trailing={<Text style={[type.number, { color: colors.foreground }]}>{raidValueLabel(raid.type, c.metricValue)}</Text>}
           />
         ))}
@@ -102,7 +102,7 @@ function MyClan({ data, onError, openSheet }: { data: MyClanResponse; onError: (
         <Text style={[type.title, { color: colors.foreground }]} accessibilityRole="header">
           {clanLabel(clan)}
         </Text>
-        <Text style={[type.meta, { color: clan.status === "active" ? colors.primary : colors.warn }]}>{clanStatusLine(clan)}</Text>
+        <Text style={[type.meta, { color: clan.status === "active" ? colors.success : colors.warn }]}>{clanStatusLine(clan)}</Text>
         <Text style={[type.meta, { color: colors.mutedForeground }]}>
           Clan score {scoreLabel(clan.clanScore)} · {clan.clanRank ? `Global #${clan.clanRank}` : "Unranked"} · {clan.raidWins} raid win{clan.raidWins === 1 ? "" : "s"}
         </Text>
@@ -135,10 +135,12 @@ function MyClan({ data, onError, openSheet }: { data: MyClanResponse; onError: (
             <ListRow
               key={m.userId}
               title={`${m.profile.handle}${m.role === "leader" ? " · Leader" : ""}${m.isSelf ? " · You" : ""}`}
-              subtitle={[`Rank ${m.profile.rank}`, `Quests 30d ${completionLabel(m.questCompletionRate30d)}`, m.flagged ? "Inactive 5 days" : null, m.profile.shadowActive ? "Shadow active" : null]
+              subtitle={[`Quests 30d ${completionLabel(m.questCompletionRate30d)}`, m.flagged ? "Inactive 5 days" : null, m.profile.shadowActive ? "Shadow active" : null]
                 .filter(Boolean)
                 .join(" · ")}
               dot={m.flagged ? colors.warn : undefined}
+              trailing={<RankMark rank={m.profile.rank} />}
+              accessibilityLabel={`${m.profile.handle}, rank ${m.profile.rank}${m.isSelf ? ", you" : ""}`}
               chevron
               onPress={() => router.push("/clan/members")}
             />

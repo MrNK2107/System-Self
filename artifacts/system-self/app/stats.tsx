@@ -1,5 +1,5 @@
 // Full stats: the long record behind Status, split into four sections so no one view is a wall.
-// Overview (counters, rank progress, performance, calendar, shadow), History (charts, Rank Freeze),
+// Overview (a line of counts, rank progress, performance, calendar, shadow), History (charts, Rank Freeze),
 // Awards (achievements, milestones), Debrief (nightly debrief, deferral ledger).
 import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
@@ -11,7 +11,7 @@ import { HistoryPanel, RankFreezeCard } from "@/components/HistoryPanel";
 import { ScreenStatus } from "@/components/ScreenStatus";
 import { StreakCalendar } from "@/components/StreakCalendar";
 import { SystemMessage } from "@/components/SystemMessage";
-import { Figure, ProgressLine, Section, SystemLine } from "@/components/status/parts";
+import { ProgressLine, Section, SystemLine } from "@/components/status/parts";
 import { Button } from "@/components/ui/Button";
 import { ListRow } from "@/components/ui/ListRow";
 import { Screen } from "@/components/ui/Screen";
@@ -27,7 +27,7 @@ import { LEDGER_HEADER, ledgerLine } from "@/lib/game/adherence";
 import { completionSummaryKey, debriefKey } from "@/lib/game/keys";
 import { fetchCompletionSummary, fetchDebriefToday } from "@/lib/game/messages";
 import { shouldShowRankUpPrep } from "@/lib/game/rank-prep";
-import { rankLine } from "@/lib/status/status";
+import { overviewLine, performanceLine, rankLine } from "@/lib/status/status";
 
 const MILESTONE_TIERS: MilestoneTier[] = [60, 70, 80, 90, 100];
 
@@ -133,16 +133,14 @@ export default function StatsScreen() {
 
       {tab === "overview" && (
         <>
-          <View style={s.figures}>
-            <Figure label="DAYS" value={user.dayNumber} />
-            <Figure label="LOGS" value={logs.length} />
-            <Figure label="QUESTS" value={completedQuests} />
-            {forbiddenLogs > 0 && <Figure label="FORBIDDEN" value={forbiddenLogs} color={colors.destructive} />}
-          </View>
+          <Text style={[type.body, { color: colors.foreground }]}>
+            {overviewLine({ day: user.dayNumber, logs: logs.length, quests: completedQuests, forbidden: forbiddenLogs })}
+          </Text>
 
           {line.next && (
-            <Section title={`Rank progress to ${line.next}`} trailing={<Text style={[type.number, { color: colors.primary }]}>{`${line.progress}%`}</Text>}>
-              <ProgressLine value={line.progress} color={showRankUpPrep ? colors.warn : colors.accentFill} />
+            <Section title={`Rank ${rank}`}>
+              <ProgressLine value={line.progress} color={showRankUpPrep ? colors.warn : colors.rank[rank as keyof typeof colors.rank] ?? colors.foreground} />
+              <Text style={[type.body, { color: colors.foreground }]}>{line.progressLine}</Text>
               {line.promotionLine ? <Text style={[type.meta, { color: colors.mutedForeground }]}>{line.promotionLine}</Text> : null}
               {showRankUpPrep && (
                 <ListRow
@@ -164,20 +162,22 @@ export default function StatsScreen() {
               </>
             ) : perfSummary ? (
               <>
-                <View style={s.figures}>
-                  <Figure label="COMPLETE RATE" value={`${perfSummary.completionRate}%`} />
-                  <Figure label="DONE / TRIED" value={`${perfSummary.completed}/${perfSummary.attempts}`} />
-                </View>
-                {trend.length > 0 ? (
+                {perfSummary.attempts > 0 ? (
+                  <Text style={[type.number, { color: colors.foreground }]} accessibilityLabel={`${perfSummary.completionRate}% complete rate`}>
+                    {`${perfSummary.completionRate}% complete`}
+                  </Text>
+                ) : null}
+                <SystemLine>{performanceLine(perfSummary.completed, perfSummary.attempts, 14)}</SystemLine>
+                {trend.length >= 2 ? (
                   <View style={s.bars} accessible accessibilityLabel={`Daily completion over ${trend.length} days`}>
                     {trend.map((p) => (
                       <View key={p.day} style={[s.barSlot, { backgroundColor: colors.muted }]}>
-                        <View style={[s.bar, { height: `${Math.max(4, p.rate * 100)}%`, backgroundColor: colors.primary }]} />
+                        <View style={[s.bar, { height: `${Math.max(4, p.rate * 100)}%`, backgroundColor: colors.mutedForeground }]} />
                       </View>
                     ))}
                   </View>
                 ) : (
-                  <SystemLine>No daily completion trend yet.</SystemLine>
+                  <SystemLine>The daily trend builds after your second day.</SystemLine>
                 )}
                 {weakestExecutionDomain && (
                   <ListRow
@@ -322,7 +322,6 @@ export default function StatsScreen() {
 
 const s = StyleSheet.create({
   flex: { flex: 1 },
-  figures: { flexDirection: "row", paddingVertical: space.sm },
   bars: { flexDirection: "row", alignItems: "flex-end", gap: space.xs, height: 40 },
   barSlot: { flex: 1, height: "100%", justifyContent: "flex-end", borderRadius: 1, overflow: "hidden" },
   bar: { width: "100%" },

@@ -1,4 +1,4 @@
-// One domain's detail: score, week change, streak, its score history, milestones, recent logs, and where its
+// One domain's detail: the score, one System line (streak, multiplier, logs, week change), its score history, milestones, recent logs, and where its
 // deeper tools live (BODY -> Gym, WEALTH -> Finance).
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import React, { useMemo } from "react";
@@ -7,16 +7,16 @@ import { StyleSheet, Text, View } from "react-native";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { ScreenStatus } from "@/components/ScreenStatus";
 import { LogRow } from "@/components/status/LogRow";
-import { ChangeText, Figure, Section, SystemLine } from "@/components/status/parts";
+import { Section, SystemLine } from "@/components/status/parts";
 import { useStatus } from "@/components/status/useStatus";
 import { Button } from "@/components/ui/Button";
 import { ListRow } from "@/components/ui/ListRow";
 import { Screen } from "@/components/ui/Screen";
-import { SystemWindow } from "@/components/ui/SystemWindow";
 import { ALL_DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
 import { space, type } from "@/constants/type";
 import { MILESTONE_TITLES, getStreakMultiplier, type Domain, type MilestoneTier } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { domainSummaryLine } from "@/lib/status/status";
 
 const MILESTONE_TIERS: MilestoneTier[] = [60, 70, 80, 90, 100];
 const RECENT = 10;
@@ -58,26 +58,20 @@ export default function DomainDetail() {
   const link = DOMAIN_LINKS[domain];
   const unlockedTop = milestones.filter((m) => m.domain === domain && m.unlockedAt !== null).sort((a, b) => b.tier - a.tier)[0];
   const name = domain.charAt(0) + domain.slice(1).toLowerCase();
+  const summary = domainSummaryLine({
+    streak,
+    multiplier: getStreakMultiplier(streak),
+    logs: recent.length,
+    change: changes[domain] ?? null,
+    title: unlockedTop?.title ?? null,
+  });
 
   return (
     <Screen title={name} back>
-      <SystemWindow title={domain} frameColor={color}>
-        <View style={s.hero} accessible accessibilityLabel={`${domain} score ${score.toFixed(1)}`}>
-          <Text style={[type.display, { color: colors.foreground }]}>{score.toFixed(1)}</Text>
-          <View style={s.heroMeta}>
-            <ChangeText value={changes[domain] ?? null} />
-            <Text style={[type.meta, { color: colors.mutedForeground }]}>this week</Text>
-          </View>
-        </View>
-        <View style={s.figures}>
-          <Figure label="STREAK" value={`${streak}d`} />
-          <Figure label="MULTIPLIER" value={`x${getStreakMultiplier(streak).toFixed(1)}`} />
-          <Figure label="LOGS" value={recent.length} />
-        </View>
-        {unlockedTop ? (
-          <Text style={[type.meta, s.center, { color: colors.mutedForeground }]}>{`Title earned: ${unlockedTop.title}`}</Text>
-        ) : null}
-      </SystemWindow>
+      <View style={s.hero} accessible accessibilityLabel={`${domain} score ${score.toFixed(1)}. ${summary}`}>
+        <Text style={[type.display, { color: colors.foreground }]}>{score.toFixed(1)}</Text>
+        <Text style={[type.body, s.center, { color: colors.mutedForeground }]}>{summary}</Text>
+      </View>
 
       {link ? <ListRow title={link.title} subtitle={link.subtitle} dot={color} chevron onPress={() => router.push(link.href)} /> : null}
 
@@ -120,9 +114,7 @@ export default function DomainDetail() {
 const s = StyleSheet.create({
   flex: { flex: 1 },
   center: { textAlign: "center" },
-  hero: { alignItems: "center", gap: space.xs, paddingVertical: space.sm },
-  heroMeta: { flexDirection: "row", alignItems: "center", gap: space.xs },
-  figures: { flexDirection: "row", paddingVertical: space.sm },
+  hero: { alignItems: "center", gap: space.sm, paddingVertical: space.md },
   milestone: { flexDirection: "row", alignItems: "center", gap: space.md, minHeight: 48, borderBottomWidth: StyleSheet.hairlineWidth },
   tier: { width: 40 },
 });

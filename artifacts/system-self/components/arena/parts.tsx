@@ -5,6 +5,7 @@ import React, { useCallback, useState, type ReactNode } from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { RankEmblem } from "@/components/ui/RankEmblem";
 import { IconButton } from "@/components/ui/Screen";
 import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
@@ -87,7 +88,7 @@ export function Section({ label, children, trailing }: { label: string; children
   return (
     <View style={s.section}>
       <View style={s.sectionHead}>
-        <Text style={[type.label, s.flex, { color: colors.mutedForeground }]} accessibilityRole="header">
+        <Text style={[isCaps(label) ? type.label : type.bodyStrong, s.flex, { color: colors.mutedForeground }]} accessibilityRole="header">
           {label}
         </Text>
         {trailing}
@@ -153,15 +154,14 @@ export function Chip({
   );
 }
 
-/** The rank letter in its rank colour, framed. Shown once per player; never with a second rank word beside it. */
-export function RankMark({ rank }: { rank: string }) {
-  const colors = useColors();
-  const tone = (colors.rank as Record<string, string>)[rank] ?? colors.mutedForeground;
-  return (
-    <View style={[s.rank, { borderColor: tone }]} accessibilityLabel={`Rank ${rank}`}>
-      <Text style={[type.label, { color: tone }]}>{rank}</Text>
-    </View>
-  );
+/** The rank glyph: the kit's hexagon emblem, small. Shown once per player; never with a second rank word beside it. */
+export function RankMark({ rank, size = 36 }: { rank: string; size?: number }) {
+  return <RankEmblem rank={rank} size={size} />;
+}
+
+/** type.label carries tracking, so it is only for ALL-CAPS labels; mixed-case headings use bodyStrong. */
+function isCaps(label: string): boolean {
+  return /[A-Z]/.test(label) && label === label.toUpperCase();
 }
 
 const s = StyleSheet.create({
@@ -180,5 +180,4 @@ const s = StyleSheet.create({
   chipClip: { borderRadius: 4, overflow: "hidden" },
   chip: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: space.sm, paddingHorizontal: space.md, borderWidth: 1, borderRadius: 4 },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  rank: { width: 32, height: 32, borderWidth: 1, borderRadius: 4, alignItems: "center", justifyContent: "center" },
 });

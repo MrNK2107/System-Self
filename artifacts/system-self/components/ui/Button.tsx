@@ -38,7 +38,7 @@ export function Button({ label, onPress, variant = "filled", disabled, loading, 
         accessibilityState={{ disabled: !!inactive, busy: !!loading }}
         style={[s.button, { backgroundColor: fill }, variant === "text" && s.textButton]}
       >
-        {loading ? <ActivityIndicator color={ink} /> : <Text style={[type.label, s.label, { color: ink }]}>{label.toUpperCase()}</Text>}
+        {loading ? <ActivityIndicator color={ink} /> : <Text style={[type.label, { color: ink }]}>{label.toUpperCase()}</Text>}
       </Pressable>
     </View>
   );
@@ -50,5 +50,4 @@ const s = StyleSheet.create({
   inactive: { opacity: 0.45 },
   button: { minHeight: 48, paddingHorizontal: 24, alignItems: "center", justifyContent: "center" },
   textButton: { paddingHorizontal: 12 },
-  label: { fontSize: 14, letterSpacing: 2 },
 });

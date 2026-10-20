@@ -1,7 +1,7 @@
 // Rivals panel: your standing against your rivals (GET /api/rivals, polled every minute while focused). One ranked
 // list with you highlighted; the Shadow Self and Past You sit below as rows; a rival's domains, challenges and
 // transmissions open in sheets. Ghost rivals (server simulations for the cold start) read "Simulated", and the
-// feed badge says LIVE only when at least one rival is a real player. The composite is the plain mean of the five
+// feed badge says LIVE only when at least one rival is a real player. The "average" shown is the plain mean of the five
 // visible domain scores; the hidden score never reaches the app.
 import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -68,13 +68,13 @@ function RankedRow({ entry, position, userComposite, onPress }: { entry: LeaderE
       disabled={!onPress}
       android_ripple={onPress ? { color: "rgba(168,121,255,0.12)" } : undefined}
       accessibilityRole={onPress ? "button" : undefined}
-      accessibilityLabel={`Position ${position}, ${name}, rank ${entry.rank}, composite ${entry.composite.toFixed(1)}${isUser ? "" : `, ${gapLine(gap)}`}`}
+      accessibilityLabel={`Position ${position}, ${name}, rank ${entry.rank}, average ${entry.composite.toFixed(1)}${isUser ? "" : `, ${gapLine(gap)}`}`}
       style={[s.row, { borderBottomColor: colors.border, backgroundColor: isUser ? colors.muted : "transparent" }]}
     >
-      <Text style={[type.label, s.pos, { color: isUser ? colors.primary : colors.mutedForeground }]}>#{position}</Text>
+      <Text style={[type.meta, s.pos, { color: colors.mutedForeground }]}>#{position}</Text>
       <RankMark rank={entry.rank} />
       <View style={s.rowText}>
-        <Text style={[type.bodyStrong, { color: isUser ? colors.primary : colors.foreground }]} numberOfLines={1}>
+        <Text style={[type.bodyStrong, { color: colors.foreground }]} numberOfLines={1}>
           {name}
         </Text>
         <Text style={[type.meta, { color: colors.mutedForeground }]} numberOfLines={1}>
@@ -225,12 +225,12 @@ export function RivalsPanel() {
         {board ? (
           <View style={s.metaLine}>
             <Text style={[type.meta, s.flex, { color: colors.mutedForeground }]}>
-              Composite {board.userComposite.toFixed(1)}
+              Average {board.userComposite.toFixed(1)}
               {totalRecord > 0 ? ` · Record ${record.wins}W ${record.losses}L ${record.draws}D` : ""}
             </Text>
             {feed ? (
               <Text
-                style={[type.label, { color: feed === "LIVE" ? colors.primary : colors.subtle }]}
+                style={[type.label, { color: feed === "LIVE" ? colors.foreground : colors.subtle }]}
                 accessibilityLabel={feed === "LIVE" ? "Live rivals" : "Every rival is simulated"}
               >
                 {feed}
@@ -244,7 +244,7 @@ export function RivalsPanel() {
       {!data && rivalsQ.isError ? <Notice message={describeRivalError(rivalsQ.error)} onRetry={() => void rivalsQ.refetch()} /> : null}
 
       {board ? (
-        <Section label="Ranked by composite">
+        <Section label="Ranked by average score">
           <Group>
             {board.entries.map((entry, i) => (
               <RankedRow
@@ -465,7 +465,7 @@ export function RivalsPanel() {
           marked Simulated.
         </Text>
         <Text style={[type.body, { color: colors.mutedForeground }]}>
-          Composite is the average of your five domain scores. The gap is your composite minus theirs: green when you lead, red when you
+          Average is the mean of your five domain scores. The gap is your average minus theirs: green when you lead, red when you
           trail.
         </Text>
         <Text style={[type.body, { color: colors.mutedForeground }]}>
