@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PARSE_MAX_PROPOSALS, parseFreeText } from "./parse";
+import { PARSE_MAX_PROPOSALS, parseFreeText, splitClauses } from "./parse";
 
 const only = (text: string) => {
   const p = parseFreeText(text);
@@ -71,4 +71,38 @@ test("nothing recognised, or out-of-range numbers, give no proposals", () => {
   assert.deepEqual(parseFreeText(""), []);
   assert.deepEqual(parseFreeText("slept 40 hours"), []);
   assert.deepEqual(parseFreeText("read 0 pages"), []);
+});
+
+test("splitClauses: and, then, commas, semicolons and full stops split; numbers stay whole", () => {
+  assert.deepEqual(
+    splitClauses("slept 7 hours and ran 5km").map((c) => c.text),
+    ["slept 7 hours", "ran 5km"],
+  );
+  assert.deepEqual(
+    splitClauses("paid 1,200 for rent; slept 7.5 hrs. Then read 20 pages, and then called mom").map((c) => c.text),
+    ["paid 1,200 for rent", "slept 7.5 hrs", "read 20 pages", "called mom"],
+  );
+  const text = "slept 7 hours and ran 5km";
+  for (const c of splitClauses(text)) assert.equal(text.slice(c.at, c.at + c.text.length), c.text);
+  assert.deepEqual(splitClauses("  "), []);
+});
+
+test("one proposal per clause: sleep and a distance run", () => {
+  const p = parseFreeText("slept 7 hours and ran 5km");
+  assert.deepEqual(p.map((x) => [x.domain, x.logType]), [["BODY", "sleep"], ["BODY", "workout"]]);
+  assert.deepEqual(p[1]!.data, { kind: "Run", minutes: 30, intensity: 3 });
+  assert.ok(p[1]!.confidence < p[0]!.confidence, "an estimated duration is less sure");
+});
+
+test("one proposal per clause across separators, in text order", () => {
+  assert.deepEqual(
+    parseFreeText("read 20 pages; spent 300 on lunch then walked 2 km").map((x) => x.logType),
+    ["reading", "expense", "workout"],
+  );
+  assert.deepEqual(parseFreeText("ran 30 minutes, then ran 5k").map((x) => x.logType), ["workout", "workout"]);
+});
+
+test("a phrase cut by the splitter still counts from the whole text", () => {
+  const p = only("went to the gym and did 40 min");
+  assert.deepEqual([p.logType, p.data.minutes], ["workout", 40]);
 });

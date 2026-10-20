@@ -1,10 +1,14 @@
 // Join a clan: by invite code, or by picking one from search (empty search lists clans by rank). Joining is free.
 import React, { useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import type { ClanSummary } from "@workspace/contracts";
 import { AuthField } from "@/components/AuthField";
-import { AuthButton, AuthNotice, AuthShell } from "@/components/AuthShell";
+import { Group, Notice, Section } from "@/components/arena/parts";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { useClanActions, useClanSearchQuery } from "@/hooks/useClan";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -15,27 +19,23 @@ function ClanRow({ clan, onJoin, disabled }: { clan: ClanSummary; onJoin: () => 
   const colors = useColors();
   const full = isFull(clan);
   return (
-    <View style={[s.row, { borderColor: colors.border, backgroundColor: colors.card }]}>
-      <View style={s.body}>
-        <Text style={[s.name, { color: colors.foreground }]} numberOfLines={1}>
-          {clanLabel(clan)}
-        </Text>
-        <Text style={[s.meta, { color: colors.mutedForeground }]}>{clanStatusLine(clan)}</Text>
-      </View>
-      <TouchableOpacity
-        onPress={onJoin}
-        disabled={disabled || full}
-        accessibilityRole="button"
-        accessibilityLabel={full ? `${clan.name} is full` : `Join ${clan.name}`}
-        style={[s.join, { borderColor: full ? colors.border : colors.primary }]}
-      >
-        <Text style={[s.joinText, { color: full ? colors.mutedForeground : colors.primary }]}>{full ? "FULL" : "JOIN"}</Text>
-      </TouchableOpacity>
-    </View>
+    <ListRow
+      title={clanLabel(clan)}
+      subtitle={clanStatusLine(clan)}
+      trailing={
+        full ? (
+          <Text style={[type.label, { color: colors.subtle }]}>FULL</Text>
+        ) : (
+          <Button label="Join" variant="text" disabled={disabled} onPress={onJoin} accessibilityLabel={`Join ${clan.name}`} />
+        )
+      }
+      accessibilityLabel={full ? `${clan.name} is full` : undefined}
+    />
   );
 }
 
 export default function JoinClanScreen() {
+  const colors = useColors();
   const actions = useClanActions();
   const [code, setCode] = useState("");
   const [text, setText] = useState("");
@@ -61,34 +61,33 @@ export default function JoinClanScreen() {
   const results = search.data ?? [];
 
   return (
-    <AuthShell tag="CLAN" title="Join a clan" subtitle="One clan per operator. Inside a clan, members see your username." back>
-      <AuthField label="INVITE CODE" value={code} onChangeText={(t) => setCode(normalizeInviteCode(t))} placeholder="8 characters" autoCapitalize="characters" mono />
-      <AuthButton label="JOIN BY CODE" onPress={() => void attempt(() => actions.joinByCode(code))} loading={busy} disabled={code.length < 4} />
-      {error ? <AuthNotice message={error} /> : null}
-      <AuthField label="SEARCH CLANS" value={text} onChangeText={setText} placeholder="Name or tag" returnKeyType="search" />
-      {search.isError ? (
-        <AuthNotice message={describeClanError(search.error)} onRetry={() => void search.refetch()} />
-      ) : search.isPending ? (
-        <AuthNotice tone="info" message="Searching." />
-      ) : results.length === 0 ? (
-        <AuthNotice tone="info" message="No clans found." />
-      ) : (
-        <View style={s.list}>
-          {results.map((c) => (
-            <ClanRow key={c.id} clan={c} disabled={busy} onJoin={() => void attempt(() => actions.joinById(c.id))} />
-          ))}
-        </View>
-      )}
-    </AuthShell>
+    <Screen title="Join a clan" back>
+      <Text style={[type.body, { color: colors.mutedForeground }]}>One clan per operator. Inside a clan, members see your username.</Text>
+      <View style={s.form}>
+        <AuthField label="INVITE CODE" value={code} onChangeText={(t) => setCode(normalizeInviteCode(t))} placeholder="8 characters" autoCapitalize="characters" />
+        <Button label="Join with code" block loading={busy} disabled={code.length < 4} onPress={() => void attempt(() => actions.joinByCode(code))} />
+        {error ? <Notice message={error} /> : null}
+      </View>
+      <Section label="Or find a clan">
+        <AuthField label="SEARCH CLANS" value={text} onChangeText={setText} placeholder="Name or tag" returnKeyType="search" />
+        {search.isError ? (
+          <Notice message={describeClanError(search.error)} onRetry={() => void search.refetch()} />
+        ) : search.isPending ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : results.length === 0 ? (
+          <Notice tone="info" message="No clans found." />
+        ) : (
+          <Group>
+            {results.map((c) => (
+              <ClanRow key={c.id} clan={c} disabled={busy} onJoin={() => void attempt(() => actions.joinById(c.id))} />
+            ))}
+          </Group>
+        )}
+      </Section>
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  list: { gap: 8 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderRadius: 4, padding: 12 },
-  body: { flex: 1, gap: 3 },
-  name: { fontSize: 13, fontWeight: "800" as const, letterSpacing: 1 },
-  meta: { fontSize: 10, lineHeight: 14, letterSpacing: 0.5 },
-  join: { borderWidth: 1, borderRadius: 3, paddingHorizontal: 12, paddingVertical: 6 },
-  joinText: { fontSize: 10, fontWeight: "800" as const, letterSpacing: 2 },
+  form: { gap: space.md },
 });

@@ -2,10 +2,15 @@
 // queued in the outbox), recent entries, and edit / archive. Never part of rank.
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+
 import { AuthField } from "@/components/AuthField";
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
+import { AuthNotice } from "@/components/AuthShell";
 import { CustomDomainForm } from "@/components/CustomDomainForm";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { useCustomActions, useCustomDomainQuery } from "@/hooks/useCustom";
 import { useOutboxSnapshot } from "@/hooks/useGameState";
@@ -66,34 +71,48 @@ export default function CustomDomainScreen() {
 
   const saveEdit = (input: CustomDomainInput) => void attempt(() => actions.update(id!, input), () => setEditing(false));
 
-  if (!domain) {
+  if (!domain || !detail) {
     return (
-      <AuthShell tag="CUSTOM" title="Stat" back>
+      <Screen title="Stat" back>
         {q.isError ? (
           <AuthNotice message={describeCustomError(q.error)} onRetry={() => void q.refetch()} />
         ) : (
-          <AuthNotice tone="info" message="Loading." />
+          <ActivityIndicator color={colors.primary} />
         )}
-      </AuthShell>
+      </Screen>
     );
   }
 
   const p = progressLine(domain);
+  const pct = Math.round(p.fraction * 100);
+  const entries = [
+    ...unsent.map((l) => ({ key: l.clientId, value: l.value, note: l.note, when: l.occurredAt.slice(0, 10), pending: true })),
+    ...detail.logs.map((l) => ({ key: l.id, value: l.value, note: l.note, when: l.localDate, pending: false })),
+  ];
+
   return (
-    <AuthShell tag="CUSTOM" title={domain.name} subtitle={`Score ${domain.score.toFixed(1)}  ·  ${domain.streak}D streak  ·  separate from rank`} back>
-      {error ? <AuthNotice message={error} /> : null}
-      <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <View style={[s.track, { backgroundColor: colors.muted }]}>
-          <View style={[s.fill, { backgroundColor: colors.accentFill, width: `${Math.round(p.fraction * 100)}%` }]} />
-        </View>
-        <Text style={[s.line, { color: colors.foreground }]}>{p.line}</Text>
-        <Text style={[s.meta, { color: colors.mutedForeground }]}>
-          {Math.round(p.fraction * 100)}% of the way{domain.isPublic ? "  ·  name and score are public" : "  ·  private"}
+    <Screen title={domain.name} back>
+      {/* The one figure: the stat's score. */}
+      <View style={s.hero}>
+        <Text style={[type.display, { color: colors.foreground }]}>{domain.score.toFixed(1)}</Text>
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>
+          {`Score · ${domain.streak}-day streak · separate from rank${domain.isPublic ? " · name and score are public" : " · private"}`}
         </Text>
       </View>
 
-      {archived ? <AuthNotice tone="info" message="Archived. It keeps its history and takes no new entries." /> : null}
-      {!archived ? (
+      <View style={s.progress}>
+        <View style={[s.track, { backgroundColor: colors.muted }]}>
+          <View style={[s.fill, { backgroundColor: colors.accentFill, width: `${pct}%` }]} />
+        </View>
+        <Text style={[type.body, { color: colors.foreground }]}>{p.line}</Text>
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>{`${pct}% of the way`}</Text>
+      </View>
+
+      {error ? <AuthNotice message={error} /> : null}
+
+      {archived ? (
+        <AuthNotice tone="info" message="Archived. It keeps its history and takes no new entries." />
+      ) : (
         <View style={s.form}>
           <AuthField
             label={`${domain.logLabel.toUpperCase()}${domain.unit ? ` (${domain.unit.toUpperCase()})` : ""}`}
@@ -106,31 +125,29 @@ export default function CustomDomainScreen() {
             mono
           />
           <AuthField label="NOTE (OPTIONAL)" value={note} onChangeText={setNote} autoCapitalize="sentences" maxLength={200} />
-          <AuthButton label={`${domain.logLabel.toUpperCase()}  +2.5`} loading={busy} onPress={() => void logIt()} />
+          <Button label={`${domain.logLabel}  +2.5`} loading={busy} onPress={() => void logIt()} block />
         </View>
-      ) : null}
+      )}
 
-      <Text style={[s.section, { color: colors.mutedForeground }]}>RECENT</Text>
-      {unsent.length === 0 && detail.logs.length === 0 ? <AuthNotice tone="info" message="No entries yet." /> : null}
-      {[
-        ...unsent.map((l) => ({ key: l.clientId, value: l.value, note: l.note, when: l.occurredAt.slice(0, 10), pending: true })),
-        ...detail.logs.map((l) => ({ key: l.id, value: l.value, note: l.note, when: l.localDate, pending: false })),
-      ].map((l) => (
-        <View key={l.key} style={[s.entry, { borderColor: colors.border }]}>
-          <Text style={[s.entryValue, { color: colors.foreground }]}>
-            {l.value}
-            {domain.unit ? ` ${domain.unit}` : ""}
-          </Text>
-          <Text style={[s.entryMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
-            {l.when}
-            {l.pending ? "  ·  PENDING" : ""}
-            {l.note ? `  ·  ${l.note}` : ""}
-          </Text>
-        </View>
-      ))}
+      <View>
+        <Text style={[type.label, s.section, { color: colors.mutedForeground }]}>RECENT</Text>
+        {entries.length === 0 ? (
+          <Text style={[type.body, { color: colors.mutedForeground }]}>No entries yet.</Text>
+        ) : (
+          <View style={s.flush}>
+            {entries.map((l) => (
+              <ListRow
+                key={l.key}
+                title={`${l.value}${domain.unit ? ` ${domain.unit}` : ""}`}
+                subtitle={`${l.when}${l.pending ? "  ·  pending" : ""}${l.note ? `  ·  ${l.note}` : ""}`}
+              />
+            ))}
+          </View>
+        )}
+      </View>
 
       {editing ? (
-        <>
+        <View style={s.form}>
           <CustomDomainForm
             initial={{
               name: domain.name,
@@ -145,30 +162,29 @@ export default function CustomDomainScreen() {
             error={null}
             onSubmit={saveEdit}
           />
-          <AuthLink label="CANCEL" onPress={() => setEditing(false)} />
-        </>
+          <Button label="Cancel" variant="text" onPress={() => setEditing(false)} block />
+        </View>
       ) : archived ? null : (
-        <>
-          <AuthLink label="EDIT STAT" onPress={() => setEditing(true)} />
-          <AuthLink
-            label="ARCHIVE STAT"
+        <View style={s.row}>
+          <Button label="Edit stat" variant="text" onPress={() => setEditing(true)} />
+          <Button
+            label="Archive stat"
+            variant="text"
             onPress={() => void attempt(() => actions.archive(id!), () => router.replace("/custom"))}
           />
-        </>
+        </View>
       )}
-    </AuthShell>
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 4, padding: 14, gap: 10 },
+  hero: { alignItems: "flex-start", gap: space.xs },
+  progress: { gap: space.sm },
   track: { height: 6, borderRadius: 3, overflow: "hidden" },
   fill: { height: 6, borderRadius: 3 },
-  line: { fontSize: 14, fontWeight: "700" },
-  meta: { fontSize: 11, lineHeight: 16 },
-  form: { gap: 14 },
-  section: { fontSize: 10, fontWeight: "800", letterSpacing: 2, marginTop: 6 },
-  entry: { borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 8, gap: 2 },
-  entryValue: { fontSize: 14, fontWeight: "700", fontFamily: "SpaceMono" },
-  entryMeta: { fontSize: 11 },
+  form: { gap: space.md },
+  section: { marginTop: space.sm, marginBottom: space.xs },
+  flush: { marginHorizontal: -space.md },
+  row: { flexDirection: "row", justifyContent: "space-between" },
 });

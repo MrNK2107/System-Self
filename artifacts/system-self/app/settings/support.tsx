@@ -1,10 +1,11 @@
-import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Linking, Text } from "react-native";
 
-import { AuthNotice, AuthShell } from "@/components/AuthShell";
-import { Separator, SettingsCard } from "@/components/SettingsParts";
+import { SettingsNote, SettingsSection } from "@/components/SettingsParts";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
 import { SUPPORT_EMERGENCY, SUPPORT_ENTRIES, SUPPORT_HEADLINE, type SupportEntry } from "@/constants/support";
+import { type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 
 // Plain, warm copy on purpose: this is the one screen where THE SYSTEM does not speak.
@@ -22,38 +23,22 @@ export default function SupportScreen() {
   };
 
   return (
-    <AuthShell tag="SUPPORT" title="Need support?" subtitle={SUPPORT_HEADLINE} back>
-      <SettingsCard>
-        {SUPPORT_ENTRIES.map((entry, i) => (
-          <View key={entry.id}>
-            {i > 0 ? <Separator /> : null}
-            <TouchableOpacity
-              style={s.row}
-              onPress={() => void open(entry)}
-              activeOpacity={0.7}
-              accessibilityRole="link"
-              accessibilityLabel={`${entry.label}, ${entry.detail}`}
-            >
-              <Feather name={entry.kind === "call" ? "phone" : "globe"} size={16} color={colors.primary} />
-              <View style={s.text}>
-                <Text style={[s.label, { color: colors.foreground }]}>{entry.label}</Text>
-                <Text style={[s.detail, { color: colors.mutedForeground }]}>{entry.detail}</Text>
-              </View>
-              <Feather name="chevron-right" size={14} color={colors.mutedForeground} />
-            </TouchableOpacity>
-          </View>
+    <Screen title="Need support?" back>
+      <Text style={[type.body, { color: colors.foreground }]}>{SUPPORT_HEADLINE}</Text>
+      <SettingsSection label="TALK TO SOMEONE">
+        {SUPPORT_ENTRIES.map((entry) => (
+          <ListRow
+            key={entry.id}
+            title={entry.label}
+            subtitle={`${entry.kind === "call" ? "Call" : "Website"}: ${entry.detail}`}
+            chevron
+            onPress={() => void open(entry)}
+            accessibilityLabel={`${entry.label}, ${entry.kind === "call" ? "call" : "open website"}, ${entry.detail}`}
+          />
         ))}
-      </SettingsCard>
-      {failed ? <AuthNotice message={failed} /> : null}
-      <Text style={[s.emergency, { color: colors.foreground }]}>{SUPPORT_EMERGENCY}</Text>
-    </AuthShell>
+      </SettingsSection>
+      {failed ? <SettingsNote message={failed} /> : null}
+      <Text style={[type.body, { color: colors.foreground }]}>{SUPPORT_EMERGENCY}</Text>
+    </Screen>
   );
 }
-
-const s = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 14, minHeight: 64 },
-  text: { flex: 1, gap: 2 },
-  label: { fontSize: 14, fontWeight: "600" as const },
-  detail: { fontSize: 13, fontFamily: "monospace" },
-  emergency: { fontSize: 14, lineHeight: 21, paddingHorizontal: 4 },
-});

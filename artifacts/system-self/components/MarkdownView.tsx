@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import React from "react";
 import { Linking, StyleSheet, Text, View } from "react-native";
 
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { parseMarkdown, type Block, type Inline } from "@/lib/legal/markdown";
 
@@ -16,7 +17,7 @@ function Inlines({ items }: { items: Inline[] }) {
   return (
     <>
       {items.map((it, i) => {
-        if (it.type === "bold") return <Text key={i} style={s.bold}>{it.text}</Text>;
+        if (it.type === "bold") return <Text key={i} style={[s.bold, { color: colors.foreground }]}>{it.text}</Text>;
         if (it.type === "link") {
           return (
             <Text key={i} style={[s.link, { color: colors.primary }]} accessibilityRole="link" onPress={() => openLink(it.href)}>
@@ -32,11 +33,11 @@ function Inlines({ items }: { items: Inline[] }) {
 
 function BlockView({ block }: { block: Block }) {
   const colors = useColors();
-  const body = [s.body, { color: colors.mutedForeground }];
+  const body = [type.body, { color: colors.mutedForeground }];
   switch (block.type) {
     case "heading":
       return (
-        <Text accessibilityRole="header" style={[block.level === 1 ? s.h1 : s.h2, { color: colors.foreground }]}>
+        <Text accessibilityRole="header" style={[type.title, block.level === 1 ? s.h1 : s.h2, { color: colors.foreground }]}>
           <Inlines items={block.inlines} />
         </Text>
       );
@@ -76,14 +77,14 @@ export function MarkdownView({ source }: { source: string }) {
 }
 
 const s = StyleSheet.create({
-  root: { gap: 12 },
-  h1: { fontSize: 18, fontWeight: "700" as const, letterSpacing: 1, marginTop: 4 },
-  h2: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 1, marginTop: 8 },
-  body: { fontSize: 13, lineHeight: 20 },
-  bold: { fontWeight: "700" as const },
+  root: { gap: space.md },
+  // More space above a heading than below it.
+  h1: { marginTop: space.sm },
+  h2: { marginTop: space.md },
+  bold: { fontWeight: "600" as const },
   link: { textDecorationLine: "underline" as const },
-  list: { gap: 6 },
-  item: { flexDirection: "row" as const, gap: 8 },
-  marker: { width: 18, textAlign: "right" as const },
+  list: { gap: space.sm },
+  item: { flexDirection: "row" as const, gap: space.sm },
+  marker: { width: 20, textAlign: "right" as const },
   itemText: { flex: 1 },
 });

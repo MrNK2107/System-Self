@@ -44,7 +44,7 @@ export async function computeDebriefFacts(tx: Pick<Db, "select">, userId: string
     .where(and(eq(quests.userId, userId), countsForRank, eq(quests.resolvedLocalDate, today)));
   const questCompleted = resolved.filter((q) => q.status === "complete").length;
   const questTotal = resolved.length;
-  const verdict = debriefVerdict(deltas, questTotal > 0 ? questCompleted / questTotal : 0);
+  const verdict = debriefVerdict(deltas, questTotal > 0 ? questCompleted / questTotal : null);
   const finance = await financeVerdictFor(tx, userId, today);
   return { deltas, questCompleted, questTotal, verdict, financeVerdict: finance?.line ?? null, financeWeekKey: finance?.weekKey ?? null };
 }

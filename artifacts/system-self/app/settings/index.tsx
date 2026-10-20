@@ -3,12 +3,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import React, { useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text } from "react-native";
 
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
-import { CodenameCard, shareCodename } from "@/components/CodenameCard";
-import { Separator, SettingsCard, SettingsRow } from "@/components/SettingsParts";
+import { ChoiceChips, ExpandTrailing, SettingsNote, SettingsPanel, SettingsSection } from "@/components/SettingsParts";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
 import { IDENTITY_OPTIONS } from "@/constants/identity";
+import { space, type } from "@/constants/type";
 import { useAuth } from "@/context/AuthContext";
 import { useGym } from "@/features/gym/context/GymContext";
 import { useColors } from "@/hooks/useColors";
@@ -20,34 +22,11 @@ import { describeSettingsError, type IdentitySetting } from "@/lib/settings/acti
 import { shareExportOnDevice } from "@/lib/settings/export-device";
 import { settingsActions } from "@/lib/settings/instance";
 
-const MORNING_TIMES = ["05:00", "05:30", "06:00", "06:30", "07:00", "07:30", "08:00", "09:00"];
-const NIGHTLY_TIMES = ["19:30", "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00"];
+const MORNING_TIMES = ["05:00", "05:30", "06:00", "06:30", "07:00", "07:30", "08:00", "09:00"].map((t) => ({ key: t, label: t }));
+const NIGHTLY_TIMES = ["19:30", "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00"].map((t) => ({ key: t, label: t }));
 
-function TimeChips({ times, selected, onSelect }: { times: string[]; selected: string; onSelect: (t: string) => void }) {
-  const colors = useColors();
-  return (
-    <View style={s.chips}>
-      {times.map((t) => {
-        const active = selected === t;
-        return (
-          <TouchableOpacity
-            key={t}
-            onPress={() => onSelect(t)}
-            activeOpacity={0.75}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-            style={[
-              s.chip,
-              { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? `${colors.accentFill}20` : "transparent" },
-            ]}
-          >
-            <Text style={[s.chipText, { color: active ? colors.primary : colors.mutedForeground }]}>{t}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-}
+/** Visibility names in plain words, from the stored setting (the onboarding names stay as the subtitle's lead). */
+const visibilityLabel = (v: string) => IDENTITY_OPTIONS.find((o) => o.value === v);
 
 export default function SettingsScreen() {
   const colors = useColors();
@@ -103,7 +82,6 @@ export default function SettingsScreen() {
     }
   };
 
-  // Signing out wipes the device: send what is queued first, and ask before erasing what could not be sent.
   const exportData = async () => {
     if (exporting) return;
     setExporting(true);
@@ -119,6 +97,7 @@ export default function SettingsScreen() {
     }
   };
 
+  // Signing out wipes the device: send what is queued first, and ask before erasing what could not be sent.
   const handleSignOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
@@ -142,155 +121,129 @@ export default function SettingsScreen() {
   };
 
   const unavailable = (
-    <AuthNotice
+    <SettingsNote
       tone={stateQ.isError ? "error" : "info"}
       message={stateQ.isError ? "The system is out of reach." : "Loading."}
       onRetry={stateQ.isError ? () => void stateQ.refetch() : undefined}
     />
   );
 
+  const visibility = profile ? visibilityLabel(profile.identitySetting) : undefined;
+
   return (
-    <AuthShell tag="SETTINGS" title="Settings" back>
-      <SettingsCard>
-        <SettingsRow icon="user" label="Account" value={user?.email} onPress={() => router.push("/settings/account")} />
-        <Separator />
-        <SettingsRow
-          icon="clock"
-          label="Schedule"
-          value={profile ? `${profile.morningTime} / ${profile.nightlyTime}` : undefined}
-          trailing={open === "schedule" ? "chevron-up" : "chevron-down"}
-          expanded={open === "schedule"}
+    <Screen title="Settings" back>
+      <SettingsSection label="ACCOUNT">
+        <ListRow
+          title="Account"
+          subtitle={[profile?.username, user?.email].filter(Boolean).join(" · ") || undefined}
+          chevron
+          onPress={() => router.push("/settings/account")}
+        />
+        <ListRow
+          title="Visibility"
+          subtitle={visibility ? `${visibility.label}: ${visibility.description}` : undefined}
+          trailing={<ExpandTrailing open={open === "identity"} />}
+          onPress={() => toggle("identity")}
+          accessibilityLabel={`Visibility${visibility ? `, ${visibility.label}` : ""}. ${open === "identity" ? "Collapse" : "Expand"}`}
+        />
+        {open === "identity" ? (
+          <SettingsPanel>
+            {profile
+              ? IDENTITY_OPTIONS.map((opt) => {
+                  const active = profile.identitySetting === opt.value;
+                  return (
+                    <ListRow
+                      key={opt.value}
+                      title={opt.label}
+                      subtitle={opt.description}
+                      trailing={active ? <Feather name="check" size={20} color={colors.primary} /> : null}
+                      accessibilityLabel={`${opt.label}${active ? ", current" : ""}. ${opt.description}`}
+                      onPress={saving || active ? undefined : () => void save(() => settingsActions.updateIdentity(opt.value as IdentitySetting), "identity")}
+                    />
+                  );
+                })
+              : unavailable}
+          </SettingsPanel>
+        ) : null}
+      </SettingsSection>
+
+      <SettingsSection label="SCHEDULE">
+        <ListRow
+          title="Briefing times"
+          subtitle="Morning briefing and nightly debrief"
+          trailing={<ExpandTrailing value={profile ? `${profile.morningTime} / ${profile.nightlyTime}` : undefined} open={open === "schedule"} />}
           onPress={() => toggle("schedule")}
         />
         {open === "schedule" ? (
-          <View style={s.panel}>
+          <SettingsPanel>
             {profile ? (
               <>
-                <Text style={[s.panelLabel, { color: colors.mutedForeground }]}>MORNING BRIEFING</Text>
-                <TimeChips times={MORNING_TIMES} selected={morningValue} onSelect={setMorning} />
-                <Text style={[s.panelLabel, { color: colors.mutedForeground }]}>NIGHTLY DEBRIEF</Text>
-                <TimeChips times={NIGHTLY_TIMES} selected={nightlyValue} onSelect={setNightly} />
-                <AuthButton
-                  label="SAVE SCHEDULE"
+                <Text style={[type.label, { color: colors.mutedForeground }]}>MORNING BRIEFING</Text>
+                <ChoiceChips options={MORNING_TIMES} value={morningValue} onChange={setMorning} />
+                <Text style={[type.label, s.gapAbove, { color: colors.mutedForeground }]}>NIGHTLY DEBRIEF</Text>
+                <ChoiceChips options={NIGHTLY_TIMES} value={nightlyValue} onChange={setNightly} />
+                <Button
+                  label="Save times"
+                  block
                   loading={saving}
                   disabled={!scheduleChanged}
-                  onPress={() =>
-                    void save(() => settingsActions.updateSchedule({ morningTime: morningValue, nightlyTime: nightlyValue }), "schedule")
-                  }
+                  onPress={() => void save(() => settingsActions.updateSchedule({ morningTime: morningValue, nightlyTime: nightlyValue }), "schedule")}
+                  style={s.gapAbove}
                 />
               </>
             ) : (
               unavailable
             )}
-          </View>
+          </SettingsPanel>
         ) : null}
-        <Separator />
-        <SettingsRow
-          icon="eye"
-          label="Identity visibility"
-          value={profile ? IDENTITY_OPTIONS.find((o) => o.value === profile.identitySetting)?.label : undefined}
-          trailing={open === "identity" ? "chevron-up" : "chevron-down"}
-          expanded={open === "identity"}
-          onPress={() => toggle("identity")}
+      </SettingsSection>
+
+      {error ? <SettingsNote message={error} /> : null}
+
+      <SettingsSection label="PREFERENCES">
+        <ListRow title="Notifications" chevron onPress={() => router.push("/settings/notifications")} />
+        <ListRow
+          title="Life context"
+          subtitle={profile?.season ? "Season active" : "Shapes the quests, never the score"}
+          chevron
+          onPress={() => router.push("/settings/life")}
         />
-        {open === "identity" ? (
-          <View style={s.panel}>
-            {profile
-              ? IDENTITY_OPTIONS.map((opt) => {
-                  const active = profile.identitySetting === opt.value;
-                  return (
-                    <TouchableOpacity
-                      key={opt.value}
-                      disabled={saving}
-                      onPress={() => !active && void save(() => settingsActions.updateIdentity(opt.value as IdentitySetting), "identity")}
-                      activeOpacity={0.75}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: active, disabled: saving }}
-                      style={[s.option, { borderColor: active ? colors.primary : colors.border, opacity: saving && !active ? 0.6 : 1 }]}
-                    >
-                      <Feather name={opt.icon} size={16} color={active ? colors.primary : colors.mutedForeground} />
-                      <View style={s.optionText}>
-                        <Text style={[s.optionLabel, { color: active ? colors.primary : colors.foreground }]}>{opt.label}</Text>
-                        <Text style={[s.optionDesc, { color: colors.mutedForeground }]}>{opt.description}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })
-              : unavailable}
-          </View>
+        <ListRow title="Custom stats" chevron onPress={() => router.push("/custom")} />
+      </SettingsSection>
+
+      <SettingsSection label="HELP AND LEGAL">
+        <ListRow title="Need support?" chevron onPress={() => router.push("/settings/support")} />
+        <ListRow title="Terms" chevron onPress={() => router.push("/legal/terms")} />
+        <ListRow title="Privacy" chevron onPress={() => router.push("/legal/privacy")} />
+        <ListRow title="Open-source licences" chevron onPress={() => router.push("/legal/licenses")} />
+      </SettingsSection>
+
+      <SettingsSection label="DATA">
+        <ListRow
+          title="Export my data"
+          subtitle="Everything you have logged, as text"
+          trailing={exporting ? <ActivityIndicator color={colors.primary} /> : null}
+          onPress={exporting ? undefined : () => void exportData()}
+        />
+        <ListRow
+          title="Sign out"
+          trailing={signingOut ? <ActivityIndicator color={colors.primary} /> : null}
+          onPress={signingOut ? undefined : () => void handleSignOut()}
+        />
+        {unsent !== null ? (
+          <SettingsPanel>
+            <SettingsNote message={`${unsent} ${unsent === 1 ? "entry has" : "entries have"} not reached the System. Signing out erases them.`} />
+            <Button label="Sign out anyway" variant="destructive" block loading={signingOut} onPress={confirmSignOut} />
+            <Button label="Cancel" variant="text" block onPress={() => setUnsent(null)} />
+          </SettingsPanel>
         ) : null}
-        {profile ? (
-          <>
-            <Separator />
-            {profile.identitySetting === "anonymous" ? (
-              // Anonymous operators can't be searched: the codename is shown to copy, with no share action.
-              <View style={s.codenameCopy}>
-                <CodenameCard codename={profile.publicCodename} identity="anonymous" />
-              </View>
-            ) : (
-              <SettingsRow
-                icon="hash"
-                label="Your codename"
-                value={profile.publicCodename}
-                trailing="share-2"
-                onPress={() => void shareCodename(profile.publicCodename)}
-              />
-            )}
-          </>
-        ) : null}
-      </SettingsCard>
+      </SettingsSection>
 
-      {error ? <AuthNotice message={error} /> : null}
-
-      <SettingsCard>
-        <SettingsRow icon="sliders" label="Custom stats" onPress={() => router.push("/custom")} />
-        <Separator />
-        <SettingsRow icon="bell" label="Notifications" onPress={() => router.push("/settings/notifications")} />
-        <Separator />
-        <SettingsRow icon="sun" label="Life context" value={profile?.season ? "Season active" : undefined} onPress={() => router.push("/settings/life")} />
-      </SettingsCard>
-
-      <SettingsCard>
-        <SettingsRow icon="life-buoy" label="Need support?" onPress={() => router.push("/settings/support")} />
-        <Separator />
-        <SettingsRow icon="file-text" label="Terms" onPress={() => router.push("/legal/terms")} />
-        <Separator />
-        <SettingsRow icon="shield" label="Privacy" onPress={() => router.push("/legal/privacy")} />
-        <Separator />
-        <SettingsRow icon="book-open" label="Open-source licences" onPress={() => router.push("/legal/licenses")} />
-        <Separator />
-        <SettingsRow icon="download" label="Export my data" trailing={null} busy={exporting} onPress={() => void exportData()} />
-      </SettingsCard>
-
-      {exportNote ? <AuthNotice message={exportNote} /> : null}
-
-      <SettingsCard>
-        <SettingsRow icon="log-out" label="Sign out" trailing={null} busy={signingOut} onPress={() => void handleSignOut()} />
-      </SettingsCard>
-
-      {unsent !== null ? (
-        <View style={s.confirm}>
-          <AuthNotice
-            message={`${unsent} ${unsent === 1 ? "entry has" : "entries have"} not reached the System. Signing out erases them.`}
-          />
-          <AuthButton label="SIGN OUT ANYWAY" loading={signingOut} onPress={confirmSignOut} />
-          <AuthLink label="CANCEL" onPress={() => setUnsent(null)} />
-        </View>
-      ) : null}
-    </AuthShell>
+      {exportNote ? <SettingsNote tone="info" message={exportNote} /> : null}
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  panel: { paddingBottom: 16, gap: 12 },
-  codenameCopy: { paddingVertical: 10 },
-  confirm: { gap: 12 },
-  panelLabel: { fontSize: 9, letterSpacing: 2.5, fontWeight: "700" as const },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderRadius: 4 },
-  chipText: { fontSize: 12, fontWeight: "600" as const, fontFamily: "monospace", letterSpacing: 0.5 },
-  option: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderRadius: 4, padding: 12 },
-  optionText: { flex: 1, gap: 2 },
-  optionLabel: { fontSize: 12, fontWeight: "700" as const, letterSpacing: 2 },
-  optionDesc: { fontSize: 11, lineHeight: 16 },
+  gapAbove: { marginTop: space.sm },
 });

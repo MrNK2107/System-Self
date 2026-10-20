@@ -10,7 +10,7 @@
     "gen:legal": "node scripts/gen-legal.mjs",
     "gen:notices": "node scripts/gen-notices.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test --test-concurrency=1 \"lib/**/*.test.ts\""
+    "test": "tsx --test --test-concurrency=1 \"lib/**/*.test.ts\" \"features/**/*.test.ts\""
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

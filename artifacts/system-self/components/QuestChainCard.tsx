@@ -1,214 +1,150 @@
-import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+// Arc chains: a row per chain in the Arcs list, and a sheet with its steps (and START for a catalog template).
 import { Feather } from "@expo/vector-icons";
-import { useColors } from "@/hooks/useColors";
+import React from "react";
+import { StyleSheet, Text, View } from "react-native";
+
+import { Sheet } from "@/components/quests/Sheet";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { DOMAIN_COLORS } from "@/constants/domains";
+import { space, type } from "@/constants/type";
 import type { ChainTemplate, QuestChain } from "@/context/AppContext";
-import { DOMAIN_COLORS, DOMAIN_GLYPHS as DOMAIN_ICONS } from "@/constants/domains";
+import { useColors } from "@/hooks/useColors";
 
-interface Props {
-  chain: QuestChain;
-  onStart?: (chain: QuestChain) => void;
-}
+const STATUS_WORD: Record<QuestChain["status"], string> = { active: "active", complete: "complete", abandoned: "abandoned" };
 
-export function QuestChainCard({ chain, onStart }: Props) {
+/** One chain in a list: name, "step 2 of 5 · active", and steps done on the right. */
+export function QuestChainRow({ chain, onPress }: { chain: QuestChain; onPress: (chain: QuestChain) => void }) {
   const colors = useColors();
-  const domColor = DOMAIN_COLORS[chain.domain];
-  const domIcon = DOMAIN_ICONS[chain.domain];
-  const isComplete = chain.status === "complete";
-  const isAbandoned = chain.status === "abandoned";
-  const total = chain.totalSteps;
-  const progress = Math.min(total, chain.currentStep);
-
+  const done = Math.min(chain.totalSteps, chain.currentStep);
+  const meta =
+    chain.status === "active"
+      ? `${chain.domain} · step ${Math.min(done + 1, chain.totalSteps)} of ${chain.totalSteps}`
+      : `${chain.domain} · ${STATUS_WORD[chain.status]}`;
   return (
-    <View style={[
-      styles.card,
-      {
-        borderColor: isComplete ? domColor + "50" : isAbandoned ? colors.border : domColor + "30",
-        backgroundColor: isComplete ? domColor + "08" : colors.card,
-      },
-    ]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={[styles.domainIcon, { color: domColor }]}>{domIcon}</Text>
-          <View>
-            <Text style={[styles.chainName, { color: colors.foreground }]}>{chain.name}</Text>
-            <Text style={[styles.chainDesc, { color: colors.mutedForeground }]} numberOfLines={1}>
-              {chain.description}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.headerRight}>
-          {isComplete && (
-            <View style={[styles.statusBadge, { borderColor: domColor + "50", backgroundColor: domColor + "10" }]}>
-              <Feather name="check" size={9} color={domColor} />
-              <Text style={[styles.statusText, { color: domColor }]}>COMPLETE</Text>
-            </View>
-          )}
-          {isAbandoned && (
-            <View style={[styles.statusBadge, { borderColor: colors.border }]}>
-              <Text style={[styles.statusText, { color: colors.mutedForeground }]}>ABANDONED</Text>
-            </View>
-          )}
-          {chain.status === "active" && (
-            <View style={[styles.statusBadge, { borderColor: domColor + "40", backgroundColor: domColor + "08" }]}>
-              <View style={[styles.activeDot, { backgroundColor: domColor }]} />
-              <Text style={[styles.statusText, { color: domColor }]}>ACTIVE</Text>
-            </View>
-          )}
-        </View>
-      </View>
-
-      {/* Progress bar */}
-      <View style={[styles.progressTrack, { backgroundColor: colors.muted }]}>
-        <View style={[styles.progressFill, {
-          width: `${total > 0 ? (progress / total) * 100 : 0}%` as `${number}%`,
-          backgroundColor: isComplete ? domColor : domColor + "80",
-        }]} />
-      </View>
-
-      {/* Steps */}
-      <View style={styles.steps}>
-        {chain.steps.map((step, i) => {
-          const done = i < chain.currentStep;
-          const current = i === chain.currentStep && chain.status === "active";
-          return (
-            <View key={i} style={styles.stepRow}>
-              <View style={[
-                styles.stepDot,
-                {
-                  backgroundColor: done ? domColor : current ? domColor + "40" : colors.muted,
-                  borderColor: current ? domColor : "transparent",
-                  borderWidth: current ? 1.5 : 0,
-                },
-              ]}>
-                {done && <Feather name="check" size={7} color="#fff" />}
-                {current && <View style={[styles.stepInner, { backgroundColor: domColor }]} />}
-              </View>
-              <View style={styles.stepContent}>
-                <Text style={[
-                  styles.stepTitle,
-                  { color: done ? colors.mutedForeground : current ? colors.foreground : colors.mutedForeground },
-                ]}>{step.title}</Text>
-                {current && (
-                  <Text style={[styles.stepDesc, { color: colors.mutedForeground }]} numberOfLines={2}>
-                    {step.description}
-                  </Text>
-                )}
-              </View>
-              <Text style={[styles.stepReward, { color: domColor }]}>{step.reward}</Text>
-            </View>
-          );
-        })}
-      </View>
-
-      {/* Step counter */}
-      <Text style={[styles.counter, { color: colors.mutedForeground }]}>
-        {progress}/{total} STEPS COMPLETE
-      </Text>
-    </View>
+    <ListRow
+      title={chain.name}
+      subtitle={meta}
+      dot={DOMAIN_COLORS[chain.domain]}
+      trailing={
+        chain.status === "complete" ? (
+          <Feather name="check-circle" size={22} color={colors.success} accessibilityLabel="Complete" />
+        ) : (
+          <Text style={[type.label, { color: colors.subtle }]}>{`${done}/${chain.totalSteps}`}</Text>
+        )
+      }
+      chevron
+      onPress={() => onPress(chain)}
+    />
   );
 }
 
-// Card for catalog (before starting)
-export function QuestChainCatalogCard({
-  chain, onStart, alreadyStarted, busy = false,
-}: {
-  chain: ChainTemplate;
-  onStart: () => void;
-  alreadyStarted: boolean;
-  busy?: boolean;
+/** A template in the catalog list. */
+export function ChainTemplateRow({ template, started, onPress }: { template: ChainTemplate; started: boolean; onPress: (t: ChainTemplate) => void }) {
+  return (
+    <ListRow
+      title={template.name}
+      subtitle={`${template.domain} · ${template.steps.length} steps${started ? " · active" : ""}`}
+      dot={DOMAIN_COLORS[template.domain]}
+      chevron
+      onPress={() => onPress(template)}
+    />
+  );
+}
+
+/** The step list. `current` is the index of the step in progress (omit for a template not yet started). */
+function ChainSteps({ steps, current, finished, domainColor }: {
+  steps: ChainTemplate["steps"];
+  current?: number;
+  finished?: boolean;
+  domainColor: string;
 }) {
   const colors = useColors();
-  const domColor = DOMAIN_COLORS[chain.domain];
-  const domIcon = DOMAIN_ICONS[chain.domain];
-
   return (
-    <View style={[styles.card, { borderColor: domColor + "25", backgroundColor: colors.card }]}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={[styles.domainIcon, { color: domColor }]}>{domIcon}</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.chainName, { color: colors.foreground }]}>{chain.name}</Text>
-            <Text style={[styles.chainDesc, { color: colors.mutedForeground }]}>{chain.description}</Text>
+    <View style={s.steps}>
+      {steps.map((step, i) => {
+        const done = current != null && (finished || i < current);
+        const now = current != null && !finished && i === current;
+        return (
+          <View key={i} style={[s.step, { borderBottomColor: colors.border }]}>
+            <View style={s.stepMark}>
+              {done ? (
+                <Feather name="check" size={16} color={domainColor} />
+              ) : (
+                <Text style={[type.label, { color: now ? domainColor : colors.subtle }]}>{i + 1}</Text>
+              )}
+            </View>
+            <View style={s.stepText}>
+              <Text style={[now ? type.bodyStrong : type.body, { color: done ? colors.mutedForeground : colors.foreground }]}>{step.title}</Text>
+              {now || current == null ? (
+                <Text style={[type.meta, { color: colors.mutedForeground }]}>{step.description}</Text>
+              ) : null}
+            </View>
+            <Text style={[type.meta, { color: colors.mutedForeground }]}>{step.reward}</Text>
           </View>
-        </View>
-        <Text style={[styles.stepCountBadge, { color: domColor, borderColor: domColor + "40" }]}>
-          {chain.steps.length} STEPS
-        </Text>
-      </View>
-
-      <View style={styles.catalogSteps}>
-        {chain.steps.map((step, i) => (
-          <View key={i} style={styles.catalogStep}>
-            <Text style={[styles.stepNum, { color: domColor + "80" }]}>{i + 1}.</Text>
-            <Text style={[styles.stepTitleSm, { color: colors.mutedForeground }]}>{step.title}</Text>
-            <Text style={[styles.stepRewardSm, { color: domColor }]}>{step.reward}</Text>
-          </View>
-        ))}
-      </View>
-
-      <Pressable
-        style={({ pressed }) => [
-          styles.startBtn,
-          {
-            borderColor: alreadyStarted ? colors.border : domColor + "60",
-            backgroundColor: alreadyStarted ? "transparent" : domColor + "10",
-            opacity: pressed ? 0.7 : 1,
-          },
-        ]}
-        onPress={onStart}
-        disabled={alreadyStarted || busy}
-      >
-        <Text style={[styles.startBtnText, { color: alreadyStarted ? colors.mutedForeground : domColor }]}>
-          {alreadyStarted ? "CHAIN ACTIVE" : "START CHAIN"}
-        </Text>
-        {!alreadyStarted && <Feather name="chevron-right" size={12} color={domColor} />}
-      </Pressable>
+        );
+      })}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 6, padding: 14, gap: 12 },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 8 },
-  headerLeft: { flexDirection: "row", alignItems: "flex-start", gap: 10, flex: 1 },
-  headerRight: {},
-  domainIcon: { fontSize: 14, marginTop: 1 },
-  chainName: { fontSize: 13, fontWeight: "700" as const, letterSpacing: 0.3 },
-  chainDesc: { fontSize: 10, lineHeight: 15, marginTop: 2 },
-  statusBadge: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    borderWidth: 1, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 3,
-  },
-  statusText: { fontSize: 7, fontWeight: "800" as const, letterSpacing: 1.5 },
-  activeDot: { width: 5, height: 5, borderRadius: 2.5 },
-  progressTrack: { height: 2, borderRadius: 1, overflow: "hidden" },
-  progressFill: { height: "100%", borderRadius: 1 },
-  steps: { gap: 10 },
-  stepRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  stepDot: {
-    width: 14, height: 14, borderRadius: 7,
-    alignItems: "center", justifyContent: "center", marginTop: 1,
-  },
-  stepInner: { width: 5, height: 5, borderRadius: 2.5 },
-  stepContent: { flex: 1 },
-  stepTitle: { fontSize: 11, fontWeight: "600" as const, letterSpacing: 0.3 },
-  stepDesc: { fontSize: 10, lineHeight: 15, marginTop: 3 },
-  stepReward: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 1 },
-  counter: { fontSize: 8, letterSpacing: 2, fontWeight: "600" as const, textAlign: "right" },
-  stepCountBadge: {
-    fontSize: 8, fontWeight: "800" as const, letterSpacing: 2,
-    borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 2,
-  },
-  catalogSteps: { gap: 7 },
-  catalogStep: { flexDirection: "row", alignItems: "center", gap: 8 },
-  stepNum: { fontSize: 9, fontWeight: "700" as const, width: 14 },
-  stepTitleSm: { fontSize: 10, flex: 1 },
-  stepRewardSm: { fontSize: 9, fontWeight: "700" as const, letterSpacing: 0.5 },
-  startBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, borderWidth: 1, borderRadius: 3, paddingVertical: 10,
-  },
-  startBtnText: { fontSize: 10, fontWeight: "800" as const, letterSpacing: 2.5 },
+interface ChainSheetProps {
+  /** A started chain (shows progress) or a catalog template (shows START). */
+  chain: QuestChain | null;
+  template: ChainTemplate | null;
+  onClose: () => void;
+  onStart?: (template: ChainTemplate) => void;
+  alreadyStarted?: boolean;
+  busy?: boolean;
+}
+
+export function ChainSheet({ chain, template, onClose, onStart, alreadyStarted = false, busy = false }: ChainSheetProps) {
+  const colors = useColors();
+  const subject = chain ?? template;
+  if (!subject) return <Sheet visible={false} onClose={onClose}>{null}</Sheet>;
+  const domainColor = DOMAIN_COLORS[subject.domain];
+
+  return (
+    <Sheet
+      visible
+      title={subject.name}
+      onClose={onClose}
+      footer={
+        !chain && template && onStart ? (
+          <Button
+            label={alreadyStarted ? "Chain active" : "Start chain"}
+            onPress={() => onStart(template)}
+            disabled={alreadyStarted}
+            loading={busy}
+            block
+          />
+        ) : undefined
+      }
+    >
+      <View style={s.metaRow}>
+        <View style={[s.dot, { backgroundColor: domainColor }]} />
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>
+          {chain
+            ? `${chain.domain} · ${Math.min(chain.currentStep, chain.totalSteps)} of ${chain.totalSteps} steps done · ${STATUS_WORD[chain.status]}`
+            : `${subject.domain} · ${subject.steps.length} steps`}
+        </Text>
+      </View>
+      {subject.description ? <Text style={[type.body, { color: colors.foreground }]}>{subject.description}</Text> : null}
+      <ChainSteps
+        steps={subject.steps}
+        current={chain ? chain.currentStep : undefined}
+        finished={chain?.status === "complete"}
+        domainColor={domainColor}
+      />
+    </Sheet>
+  );
+}
+
+const s = StyleSheet.create({
+  metaRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  steps: { marginTop: space.sm },
+  step: { flexDirection: "row", alignItems: "flex-start", gap: space.md, paddingVertical: space.sm + 4, borderBottomWidth: StyleSheet.hairlineWidth },
+  stepMark: { width: 20, alignItems: "center", paddingTop: 3 },
+  stepText: { flex: 1, gap: 2 },
 });

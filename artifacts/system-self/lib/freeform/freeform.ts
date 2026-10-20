@@ -7,7 +7,7 @@ import {
   type LogProposalDto,
   type VoiceResponse,
 } from "@workspace/contracts";
-import { VOICE_MAX_SECONDS, summarizeLog } from "@workspace/engine";
+import { VOICE_MAX_SECONDS, logChanges, streakMultiplier, summarizeLog, type RankedDomain } from "@workspace/engine";
 import { ApiError, type ApiClient } from "../api/client";
 import type { LogInput } from "../game/actions";
 import type { FormValues } from "../game/log-form";
@@ -76,4 +76,56 @@ export function describeFreeformError(err: unknown): string {
     default:
       return err.status === 400 ? "Check the text and retry." : "The system is unavailable. Retry shortly.";
   }
+}
+
+/** One entry about to be logged, as the score preview needs it. */
+export interface GainEntry {
+  domain: RankedDomain;
+  type: string;
+  data: unknown;
+  forbidden?: boolean;
+}
+
+/** A score change per domain, in the order the domains first appear. */
+export interface Gain {
+  label: string;
+  delta: number;
+}
+
+const round1 = (n: number) => Math.round(Number(n.toPrecision(12)) * 10) / 10;
+
+/**
+ * The preview of what a set of logs scores, summed per domain with the streak bonus (an estimate: the server
+ * applies the real delta). Domains whose changes cancel out are left out.
+ */
+export function logGains(entries: GainEntry[], streakOf: (domain: RankedDomain) => number): Gain[] {
+  const sums = new Map<string, number>();
+  for (const e of entries) {
+    for (const c of logChanges(e.domain, e.type, e.data, !!e.forbidden)) {
+      const delta = round1(c.bonus && c.delta > 0 ? c.delta * streakMultiplier(streakOf(e.domain)) : c.delta);
+      sums.set(c.domain, round1((sums.get(c.domain) ?? 0) + delta));
+    }
+  }
+  return [...sums].filter(([, d]) => d !== 0).map(([label, delta]) => ({ label, delta }));
+}
+
+/** A signed one-decimal score, with a true minus sign: "+2.5", "−1.0". */
+export function signedScore(n: number): string {
+  return n < 0 ? `−${Math.abs(n).toFixed(1)}` : `+${n.toFixed(1)}`;
+}
+
+/** The gains as one phrase: "+2.5 BODY", "+2.5 BODY · −2.0 DISCIPLINE". Empty when nothing changes. */
+export function gainsText(gains: Gain[]): string {
+  return gains.map((g) => `${signedScore(g.delta)} ${g.label}`).join(" · ");
+}
+
+/** THE SYSTEM's line after a log: "+2.5 BODY. Logged." (or "Logged." when the preview shows no change). */
+export function loggedLine(gains: Gain[]): string {
+  const text = gainsText(gains);
+  return text ? `${text}. Logged.` : "Logged.";
+}
+
+/** A proposal's detail without the domain prefix, for a card that shows the domain as a chip: `Sleep 6h · quality 3`. */
+export function proposalDetail(p: LogProposalDto): string {
+  return summarizeLog({ domain: p.domain, logType: p.logType, data: p.data });
 }

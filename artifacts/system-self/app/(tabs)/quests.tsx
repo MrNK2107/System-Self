@@ -1,134 +1,73 @@
-import React, { useRef, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Animated,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import { Feather } from "@expo/vector-icons";
+// Quests tab: one job, the list of what THE SYSTEM has issued. Today (dailies + bonus), This week (weeklies),
+// Arcs (arc quests and chains). Each quest is a row; tapping it opens its detail sheet with the actions.
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColors } from "@/hooks/useColors";
-import { useApp, type ChainTemplate, type Domain, type Quest } from "@/context/AppContext";
-import { useAuth } from "@/context/AuthContext";
-import { hasApiCode, isStaleFailure, isoWeekKey, mutationFailureLine, refuseFailureLine } from "@/lib/game/guards";
-import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
-import { QuestCard } from "@/components/QuestCard";
-import { ProLock } from "@/components/ProLock";
-import { useMyClanQuery } from "@/hooks/useClan";
-import { useBillingStatusQuery } from "@/hooks/usePro";
-import { isProStatus } from "@/lib/billing/core";
-import { isProRequired } from "@/lib/api/pro";
-import { describeChallengeError } from "@/lib/challenges/challenges";
-import { SlotPicker } from "@/components/SlotPicker";
+
 import { FloorQuestCard } from "@/components/FloorQuestCard";
-import { useQuietHours } from "@/hooks/useDungeon";
-import { localWeekday, quietChips, quietHint } from "@/lib/game/dungeon";
-import { shadowTallyLine } from "@/lib/game/adherence";
-import type { RefuseOutcome } from "@/context/AppContext";
-import { QuestChainCard, QuestChainCatalogCard } from "@/components/QuestChainCard";
-import { useQuestScheduler } from "@/hooks/useQuestScheduler";
+import { ProLock } from "@/components/ProLock";
+import { QuestRow } from "@/components/QuestCard";
+import { ChainSheet, ChainTemplateRow, QuestChainRow } from "@/components/QuestChainCard";
+import { RefuseSheet, REFUSAL_RULE } from "@/components/RefuseSheet";
+import { SlotPicker } from "@/components/SlotPicker";
+import { QuestSheet } from "@/components/quests/QuestSheet";
+import { Sheet } from "@/components/quests/Sheet";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { Segmented } from "@/components/ui/Segmented";
+import { SystemWindow } from "@/components/ui/SystemWindow";
 import { DOMAIN_COLORS } from "@/constants/domains";
+import { space, type } from "@/constants/type";
+import { useApp, type ChainTemplate, type Quest, type QuestChain, type RefuseOutcome } from "@/context/AppContext";
+import { useAuth } from "@/context/AuthContext";
+import { useMyClanQuery } from "@/hooks/useClan";
+import { useColors } from "@/hooks/useColors";
+import { useQuietHours } from "@/hooks/useDungeon";
+import { useBillingStatusQuery } from "@/hooks/usePro";
+import { useQuestScheduler } from "@/hooks/useQuestScheduler";
+import { isProRequired } from "@/lib/api/pro";
+import { isProStatus } from "@/lib/billing/core";
+import { describeChallengeError } from "@/lib/challenges/challenges";
+import { shadowTallyLine } from "@/lib/game/adherence";
+import { localWeekday, quietChips, quietHint } from "@/lib/game/dungeon";
+import { hasApiCode, isStaleFailure, isoWeekKey, mutationFailureLine, refuseFailureLine } from "@/lib/game/guards";
+import { shadowGapLine } from "@/lib/game/quest-row";
+import { nextRankOf, rankUpPrepItems, shouldShowRankUpPrep } from "@/lib/game/rank-prep";
 import { questCompleteHaptic } from "@/lib/haptics";
 
 const BONUS_LIMIT_LINE = "Bonus quests: 3 issued today. The limit resets tomorrow.";
 
-function GeneratingState() {
+type Tab = "today" | "week" | "arcs";
+const TABS: { key: Tab; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "week", label: "This week" },
+  { key: "arcs", label: "Arcs" },
+];
+
+/** Section heading inside a list (plain caps label; more space above than below). */
+function SectionLabel({ children }: { children: string }) {
   const colors = useColors();
-  const pulseAnim = useRef(new Animated.Value(0.3)).current;
-  const dotAnims = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
+  return <Text style={[type.label, s.sectionLabel, { color: colors.mutedForeground }]}>{children}</Text>;
+}
 
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 0.8, duration: 1200, useNativeDriver: false }),
-        Animated.timing(pulseAnim, { toValue: 0.3, duration: 1200, useNativeDriver: false }),
-      ])
-    ).start();
-
-    dotAnims.forEach((anim, i) => {
-      setTimeout(() => {
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(anim, { toValue: 1, duration: 500, useNativeDriver: false }),
-            Animated.timing(anim, { toValue: 0.2, duration: 500, useNativeDriver: false }),
-          ])
-        ).start();
-      }, i * 180);
-    });
-  }, []);
-
+/** An empty list: one System line and one action. */
+function EmptyLine({ line, action, onAction }: { line: string; action?: string; onAction?: () => void }) {
+  const colors = useColors();
   return (
-    <View style={genStyles.container}>
-      <View style={[genStyles.card, { borderColor: colors.border, backgroundColor: colors.card }]}>
-        <View style={genStyles.top}>
-          <Animated.View style={[genStyles.statusDot, { opacity: pulseAnim, backgroundColor: colors.accentFill }]} />
-          <Text style={[genStyles.label, { color: colors.primary }]}>GENERATING TRANSMISSION</Text>
-        </View>
-        <Text style={[genStyles.sub, { color: colors.mutedForeground }]}>
-          THE SYSTEM is calibrating your operations based on current rank, shadow gap, and domain weakness.
-        </Text>
-        <View style={genStyles.dotRow}>
-          {dotAnims.map((anim, i) => (
-            <Animated.View
-              key={i}
-              style={[genStyles.dot, { backgroundColor: colors.accentFill, opacity: anim }]}
-            />
-          ))}
-        </View>
-      </View>
+    <View style={s.empty}>
+      <Text style={[type.body, { color: colors.mutedForeground }]}>{line}</Text>
+      {action && onAction ? <Button label={action} variant="tonal" onPress={onAction} /> : null}
     </View>
   );
 }
-
-const genStyles = StyleSheet.create({
-  container: { paddingVertical: 24 },
-  card: { borderWidth: 1, borderRadius: 6, padding: 20, gap: 12 },
-  top: { flexDirection: "row", alignItems: "center", gap: 8 },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  label: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 3 },
-  sub: { fontSize: 12, lineHeight: 20 },
-  dotRow: { flexDirection: "row", gap: 6, marginTop: 4 },
-  dot: { width: 5, height: 5, borderRadius: 2.5 },
-});
-
-// ---- Rank-up prep quests ---------------------------------------------------
-
-const RANK_UP_PREP_QUESTS: Record<string, { title: string; description: string; domain: Domain }[]> = {
-  D: [
-    { title: "LOG 7 CONSECUTIVE DAYS", description: "Log at least one domain per day for 7 days without missing. This establishes the baseline for D-rank.", domain: "DISCIPLINE" },
-    { title: "AWARENESS AUDIT", description: "Log one detailed entry across all 5 domains this week. The system requires a complete assessment.", domain: "MIND" },
-  ],
-  C: [
-    { title: "3-DAY STREAK IN ALL DOMAINS", description: "Log all 5 domains for 3 days in a row. Consistency is the only qualifier for rank C.", domain: "DISCIPLINE" },
-    { title: "PUSH WEAKEST DOMAIN TO 60+", description: "Your weakest domain score must clear 60. Any method counts. The number does not lie.", domain: "BODY" },
-  ],
-  B: [
-    { title: "COMPLETE 3 QUESTS THIS WEEK", description: "Operatives at B rank complete, not attempt. Mark 3 quests done before the week ends.", domain: "DISCIPLINE" },
-    { title: "SHADOW GAP UNDER 5 POINTS", description: "Close the distance with your Shadow Self to under 5 composite points.", domain: "DISCIPLINE" },
-  ],
-  A: [
-    { title: "ALL DOMAINS ABOVE 70", description: "No ceiling below 70 in any domain. A-rank operatives do not have weak points.", domain: "MIND" },
-    { title: "10-DAY UNBROKEN STREAK", description: "Log at least 2 domains per day for 10 consecutive days. The system recognizes this.", domain: "DISCIPLINE" },
-  ],
-  S: [
-    { title: "DISCIPLINE SOVEREIGN", description: "Push DISCIPLINE past 90. S-rank requires system-level self-command.", domain: "DISCIPLINE" },
-    { title: "ALL DOMAINS ABOVE 85", description: "Every domain at 85 or higher. S-rank is total sovereignty, not selective excellence.", domain: "BODY" },
-  ],
-};
 
 export default function QuestsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ domain?: string }>();
   const colors = useColors();
-  const insets = useSafeAreaInsets();
   const {
-    quests, completeQuest, refuseQuest, setQuestSlot, setQuestShame, requestBonusQuest, shadowSelf, getWeakestDomain,
+    quests, completeQuest, refuseQuest, setQuestSlot, setQuestShame, requestBonusQuest, shadowSelf,
     questChains, chainTemplates, startQuestChain, user, tierProgress,
     loading, loadError, questsLoadError, refresh, offline,
   } = useApp();
@@ -136,8 +75,13 @@ export default function QuestsScreen() {
   // Quiet-hours chips are for the account's weekday (its timezone, as the server records reports), else the device's.
   const accountTz = useAuth().user?.timezone;
 
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [showChainCatalog, setShowChainCatalog] = useState(false);
+  const [tab, setTab] = useState<Tab>("today");
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedChainId, setSelectedChainId] = useState<string | null>(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [template, setTemplate] = useState<ChainTemplate | null>(null);
+  const [prepOpen, setPrepOpen] = useState(false);
   const [refusing, setRefusing] = useState<Quest | null>(null);
   const [refuseBusy, setRefuseBusy] = useState(false);
   const [slotting, setSlotting] = useState<Quest | null>(null);
@@ -150,7 +94,7 @@ export default function QuestsScreen() {
   const userId = user?.id ?? null;
   const [limitMark, setLimitMark] = useState<{ userId: string | null; week: string } | null>(null);
   const refusalLimit = limitMark !== null && limitMark.userId === userId && limitMark.week === isoWeekKey(new Date());
-  // Quests with a request in flight: repeats are ignored and the card's buttons are disabled.
+  // Quests with a request in flight: repeats are ignored and the sheet's buttons are disabled.
   const inFlight = useRef(new Set<string>());
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
   const setBusy = (id: string, on: boolean) => {
@@ -173,7 +117,6 @@ export default function QuestsScreen() {
     if (knownPro) setBonusPro(false);
   }, [knownPro]);
   const [bonusBusy, setBonusBusy] = useState(false);
-  const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -193,8 +136,10 @@ export default function QuestsScreen() {
     setNotice(null);
     try {
       const r = await completeQuest(id);
-      if (r.ok) questCompleteHaptic();
-      else if (!isStale(r)) setNotice(describeFailure(r));
+      if (r.ok) {
+        questCompleteHaptic();
+        setSelectedId((cur) => (cur === id ? null : cur));
+      } else if (!isStale(r)) setNotice(describeFailure(r));
     } finally {
       setBusy(id, false);
     }
@@ -268,69 +213,17 @@ export default function QuestsScreen() {
     }
   };
 
-  const domainFilter = (
-    params.domain === "BODY" ||
-    params.domain === "MIND" ||
-    params.domain === "WEALTH" ||
-    params.domain === "SOCIAL" ||
-    params.domain === "DISCIPLINE"
-  ) ? params.domain : null;
-
-  const visibleQuests = domainFilter
-    ? quests.filter(q => q.domain === domainFilter)
-    : quests;
-
-  // Partition quests
-  // Bonus quests have no rank effect: they sit in their own section and stay out of every count below.
-  const rankQuests = visibleQuests.filter(q => !q.bonus);
-  const activeBonus = visibleQuests.filter(q => q.bonus && q.status === "active");
-  const resolvedBonus = visibleQuests.filter(q => q.bonus && q.status !== "active");
-  const activeDailies = rankQuests.filter(q => q.type === "daily" && q.status === "active");
-  const activeWeeklies = rankQuests.filter(q => q.type === "weekly" && q.status === "active");
-  const activeArcs = rankQuests.filter(q => q.type === "arc" && q.status === "active");
-  const completedQuests = rankQuests.filter(q => q.status === "complete");
-  const failedQuests = rankQuests.filter(q => q.status === "failed" || q.status === "refused");
-
-  const completedCount = completedQuests.length;
-  const totalActive = activeDailies.length + activeWeeklies.length + activeArcs.length;
-  const rate = (completedCount + totalActive) > 0
-    ? Math.round((completedCount / (completedCount + totalActive)) * 100)
-    : 0;
-
-  const showGenerating = generating && totalActive === 0;
-  const showLoading = loading && quests.length === 0;
-  const showError = (!!loadError || !!questsLoadError) && quests.length === 0 && !loading;
-
-  // Shadow pressure
-  const shadowGap = shadowSelf.gap;
-  const shadowPressure = shadowGap > 20 ? "critical" : shadowGap > 10 ? "elevated" : shadowGap > 0 ? "active" : "none";
-  const weakest = getWeakestDomain();
-
-  // Rank-up prep: progress through the current rank band comes from the server (tierProgress).
-  const rank = user?.rank ?? "E";
-  const nextRank = ({ E: "D", D: "C", C: "B", B: "A", A: "S", S: null } as Record<string, string | null>)[rank];
-  const progressToNext = tierProgress;
-  const showRankUpPrep = nextRank && progressToNext >= 75;
-  const rankUpPrepItems = nextRank ? (RANK_UP_PREP_QUESTS[nextRank] ?? []) : [];
-
-  // Active chains
-  const activeChains = questChains.filter(c => c.status === "active");
-  const completedChains = questChains.filter(c => c.status === "complete");
-
-  // Next gen time: 4am tomorrow
-  const nextGen = new Date();
-  nextGen.setDate(nextGen.getDate() + 1);
-  nextGen.setHours(4, 0, 0, 0);
-  const nextGenStr = nextGen.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-  const handleStartChain = async (template: ChainTemplate) => {
+  const handleStartChain = async (t: ChainTemplate) => {
     if (startingKey) return;
-    if (questChains.some(c => c.templateKey === template.templateKey && c.status === "active")) return;
-    setStartingKey(template.templateKey);
+    if (questChains.some((c) => c.templateKey === t.templateKey && c.status === "active")) return;
+    setStartingKey(t.templateKey);
     setNotice(null);
     try {
-      const r = await startQuestChain(template.templateKey);
-      if (r.ok) return;
+      const r = await startQuestChain(t.templateKey);
+      if (r.ok) {
+        setTemplate(null);
+        return;
+      }
       // chain_active: another device started it; the refetch that follows shows it as active.
       if (r.reason === "error" && hasApiCode(r.error, "chain_active")) setNotice("Chain already active.");
       else setNotice(describeFailure(r));
@@ -339,373 +232,320 @@ export default function QuestsScreen() {
     }
   };
 
+  const domainFilter = (
+    params.domain === "BODY" ||
+    params.domain === "MIND" ||
+    params.domain === "WEALTH" ||
+    params.domain === "SOCIAL" ||
+    params.domain === "DISCIPLINE"
+  ) ? params.domain : null;
+
+  const visibleQuests = domainFilter ? quests.filter((q) => q.domain === domainFilter) : quests;
+
+  // Bonus quests have no rank effect: they stay out of every count below.
+  const rankQuests = visibleQuests.filter((q) => !q.bonus);
+  const activeBonus = visibleQuests.filter((q) => q.bonus && q.status === "active");
+  const resolvedBonus = visibleQuests.filter((q) => q.bonus && q.status !== "active");
+  const byType = (t: Quest["type"]) => rankQuests.filter((q) => q.type === t);
+  const activeOf = (list: Quest[]) => list.filter((q) => q.status === "active");
+  const resolvedOf = (list: Quest[]) => list.filter((q) => q.status !== "active");
+  const dailies = byType("daily");
+  const weeklies = byType("weekly");
+  const arcs = byType("arc");
+  const activeDailies = activeOf(dailies);
+  const activeWeeklies = activeOf(weeklies);
+  const activeArcs = activeOf(arcs);
+  const totalActive = activeDailies.length + activeWeeklies.length + activeArcs.length;
+  const doneToday = dailies.filter((q) => q.status === "complete").length;
+
+  const showGenerating = generating && totalActive === 0;
+  const showLoading = loading && quests.length === 0;
+  const showError = (!!loadError || !!questsLoadError) && quests.length === 0 && !loading;
+
+  // The Shadow's lead, in plain words; hidden when there is none.
+  const shadowLine = shadowGapLine(shadowSelf.gap);
+
+  // Rank-up prep only when the data supports it (a week on record and 75% through the band): lib/game/rank-prep.
+  const rank = user?.rank ?? "E";
+  const nextRank = nextRankOf(rank);
+  const showRankUpPrep = shouldShowRankUpPrep({ rank, tierProgress, dayNumber: user?.dayNumber });
+  const prepItems = rankUpPrepItems(rank);
+
+  const activeChains = questChains.filter((c) => c.status === "active");
+  const completedChains = questChains.filter((c) => c.status === "complete");
+  const selectedQuest = selectedId ? quests.find((q) => q.id === selectedId) ?? null : null;
+  const selectedChain = selectedChainId ? questChains.find((c) => c.id === selectedChainId) ?? null : null;
+
+  // Next board: 04:00 tomorrow.
+  const nextGen = new Date();
+  nextGen.setDate(nextGen.getDate() + 1);
+  nextGen.setHours(4, 0, 0, 0);
+  const nextGenStr = nextGen.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  // What the sheet offers depends on the quest's kind (as the old cards did).
+  const sheetActions = (q: Quest) => {
+    const refuse = (x: Quest) => {
+      setSelectedId(null);
+      setRefusing(x);
+    };
+    if (q.bonus) return { onRefuse: refuse };
+    const shame = inClan ? onShame : undefined;
+    if (q.type === "arc") return { onShame: shame };
+    return {
+      onSlot: (x: Quest) => {
+        setSelectedId(null);
+        setSlotting(x);
+      },
+      onBriefing: () => {
+        setSelectedId(null);
+        openBriefing();
+      },
+      onShame: shame,
+      onRefuse: refuse,
+      refuseDisabled: refusalLimit,
+    };
+  };
+
+  const open = (q: Quest) => {
+    setNotice(null);
+    setSelectedId(q.id);
+  };
+  const rows = (list: Quest[]) => list.map((q) => <QuestRow key={q.id} quest={q} onPress={open} />);
+  const listReady = !showGenerating && !showLoading && !showError;
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16, paddingBottom: insets.bottom + 80 }]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
-        }
-      >
-        {/* Header */}
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={[styles.title, { color: colors.foreground }]}>QUEST BOARD</Text>
-            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-              {totalActive > 0 ? "ISSUED BY THE SYSTEM" : generating ? "TRANSMITTING" : "AWAITING TRANSMISSION"}
-            </Text>
-          </View>
-          <View style={styles.headerRight}>
-            <View style={[styles.rateBadge, { borderColor: colors.border }]}>
-              <Text style={[styles.rateLabel, { color: colors.mutedForeground }]}>DONE</Text>
-              <Text style={[
-                styles.rateValue,
-                { color: rate >= 60 ? "#4B8B6F" : rate >= 30 ? "#C4873A" : colors.destructive },
-              ]}>
-                {rate}%
-              </Text>
-            </View>
-          </View>
-        </View>
+    <Screen title="Quests" tab refreshing={refreshing} onRefresh={() => void onRefresh()}>
+      <Segmented options={TABS} value={tab} onChange={setTab} />
 
-        {floorOffer?.floor && (
-          <FloorQuestCard
-            routine={floorOffer.floor}
-            shadowLine={floorOffer.shadowTook ? shadowTallyLine(floorOffer.shadowTook.questTitle) : null}
-            onStart={() => {
-              const { floor, questId } = floorOffer;
-              setFloorOffer(null);
-              router.push({ pathname: "/floor/[routineId]", params: { routineId: floor!.id, refusedQuestId: questId } });
-            }}
-            onDismiss={() => setFloorOffer(null)}
+      {floorOffer?.floor && (
+        <FloorQuestCard
+          routine={floorOffer.floor}
+          shadowLine={floorOffer.shadowTook ? shadowTallyLine(floorOffer.shadowTook.questTitle) : null}
+          onStart={() => {
+            const { floor, questId } = floorOffer;
+            setFloorOffer(null);
+            router.push({ pathname: "/floor/[routineId]", params: { routineId: floor!.id, refusedQuestId: questId } });
+          }}
+          onDismiss={() => setFloorOffer(null)}
+        />
+      )}
+
+      {domainFilter && (
+        <View style={s.flush}>
+          <ListRow
+            title={`Showing ${domainFilter} only`}
+            dot={DOMAIN_COLORS[domainFilter]}
+            trailing={<Button label="Clear" variant="text" onPress={() => router.replace("/(tabs)/quests")} />}
           />
-        )}
+        </View>
+      )}
 
-        {domainFilter && (
-          <View style={[styles.filterBar, { borderColor: colors.border, backgroundColor: colors.card }]}>
-            <Text style={[styles.filterText, { color: colors.mutedForeground }]}>
-              FILTER:{" "}
-              <Text style={{ color: DOMAIN_COLORS[domainFilter], fontWeight: "700" }}>
-                {domainFilter}
-              </Text>
+      {notice && !selectedQuest ? <Text style={[type.meta, { color: colors.destructive }]}>{notice}</Text> : null}
+
+      {showLoading && (
+        <View style={s.empty}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[type.body, { color: colors.mutedForeground }]}>Loading quests.</Text>
+        </View>
+      )}
+
+      {showError && (
+        <EmptyLine
+          line={offline ? "Offline. No saved quest list on this device yet." : "The quest list could not be loaded."}
+          action="Retry"
+          onAction={() => void refresh()}
+        />
+      )}
+
+      {showGenerating && (
+        <SystemWindow title="TRANSMITTING">
+          <Text style={[type.body, s.center, { color: colors.foreground }]}>THE SYSTEM is issuing today's quests.</Text>
+          <ActivityIndicator color={colors.primary} />
+        </SystemWindow>
+      )}
+
+      {listReady && tab === "today" && (
+        <>
+          <View style={s.block}>
+            <Text style={[type.meta, { color: colors.mutedForeground }]}>
+              {`${doneToday} of ${dailies.length} done today · new quests at ${nextGenStr}`}
             </Text>
-            <TouchableOpacity
-              onPress={() => router.replace("/(tabs)/quests")}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.clearFilterText, { color: colors.primary }]}>CLEAR</Text>
-            </TouchableOpacity>
+            {shadowLine ? <Text style={[type.meta, { color: colors.mutedForeground }]}>{shadowLine}</Text> : null}
           </View>
-        )}
 
-        {/* Calibration banner */}
-        {totalActive > 0 && (
-          <View style={[styles.calibrationBanner, { borderColor: colors.border, backgroundColor: colors.card }]}>
-            <View style={styles.calibRow}>
-              <View style={styles.calibItem}>
-                <Text style={[styles.calibLabel, { color: colors.mutedForeground }]}>RANK</Text>
-                <Text style={[styles.calibValue, { color: colors.foreground }]}>{user?.rank ?? "E"}</Text>
-              </View>
-              <View style={[styles.calibDiv, { backgroundColor: colors.border }]} />
-              <View style={styles.calibItem}>
-                <Text style={[styles.calibLabel, { color: colors.mutedForeground }]}>WEAKEST</Text>
-                <Text style={[styles.calibValue, { color: DOMAIN_COLORS[weakest] }]}>{weakest}</Text>
-              </View>
-              <View style={[styles.calibDiv, { backgroundColor: colors.border }]} />
-              <View style={styles.calibItem}>
-                <Text style={[styles.calibLabel, { color: colors.mutedForeground }]}>SHADOW GAP</Text>
-                <Text style={[
-                  styles.calibValue,
-                  { color: shadowGap > 0 ? colors.destructive : "#4B8B6F" },
-                ]}>
-                  {shadowGap > 0 ? `+${shadowGap.toFixed(1)}` : shadowGap.toFixed(1)}
-                </Text>
-              </View>
-              <View style={[styles.calibDiv, { backgroundColor: colors.border }]} />
-              <View style={styles.calibItem}>
-                <Text style={[styles.calibLabel, { color: colors.mutedForeground }]}>RESETS</Text>
-                <Text style={[styles.calibValue, { color: colors.mutedForeground }]}>{nextGenStr}</Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Shadow pressure badge */}
-        {shadowPressure !== "none" && (
-          <View style={[styles.pressureBadge, {
-            borderColor: shadowPressure === "critical" ? "#E0555550" : "#E0555530",
-            backgroundColor: shadowPressure === "critical" ? "#E0555510" : "#E0555508",
-          }]}>
-            <Feather name="alert-triangle" size={10} color="#E05555" />
-            <Text style={styles.pressureText}>
-              {shadowPressure === "critical"
-                ? `CRITICAL — SHADOW LEADS BY ${shadowGap.toFixed(1)} PTS — OPERATIONS ESCALATED`
-                : shadowPressure === "elevated"
-                ? `SHADOW +${shadowGap.toFixed(1)} — DISCIPLINE BIAS APPLIED TO BOARD`
-                : `SHADOW ACTIVE — ${shadowGap.toFixed(1)} PTS AHEAD`}
-            </Text>
-          </View>
-        )}
-
-        {/* Rank-up prep missions */}
-        {showRankUpPrep && rankUpPrepItems.length > 0 && (
-          <View style={[styles.rankUpSection, { borderColor: "#C4873A40", backgroundColor: "#C4873A06" }]}>
-            <View style={styles.rankUpHeader}>
-              <Feather name="arrow-up-circle" size={12} color="#C4873A" />
-              <Text style={[styles.rankUpLabel, { color: "#C4873A" }]}>
-                RANK-UP PREP — PROMOTE TO {nextRank}
-              </Text>
-              <Text style={[styles.rankUpPct, { color: "#C4873A", fontFamily: "SpaceMono" }]}>
-                {Math.round(progressToNext)}%
-              </Text>
-            </View>
-            <Text style={[styles.rankUpDesc, { color: colors.mutedForeground }]}>
-              You are near the promotion threshold. Complete these preparations before rank evaluation.
-            </Text>
-            {rankUpPrepItems.map((item, i) => (
-              <View key={i} style={[styles.prepItem, { borderColor: "#C4873A30" }]}>
-                <View style={[styles.prepNum, { backgroundColor: "#C4873A20" }]}>
-                  <Text style={[styles.prepNumText, { color: "#C4873A" }]}>{i + 1}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.prepTitle, { color: colors.foreground }]}>{item.title}</Text>
-                  <Text style={[styles.prepDesc, { color: colors.mutedForeground }]}>{item.description}</Text>
-                </View>
-                <View style={[styles.prepDomain, { borderColor: (DOMAIN_COLORS[item.domain] ?? "#C4873A") + "50" }]}>
-                  <Text style={[styles.prepDomainText, { color: DOMAIN_COLORS[item.domain] ?? "#C4873A" }]}>
-                    {item.domain.slice(0, 4)}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {notice && <Text style={[styles.notice, { color: colors.destructive }]}>{notice}</Text>}
-        {shamePro && <ProLock label="SHAME MODE" />}
-
-        {showLoading && (
-          <View style={[styles.emptyCard, { borderColor: colors.border }]}>
-            <ActivityIndicator color={colors.primary} />
-            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>Loading operations.</Text>
-          </View>
-        )}
-
-        {showError && (
-          <View style={[styles.emptyCard, { borderColor: colors.border }]}>
-            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-              {offline ? "Offline. No cached board yet." : "The board could not be loaded."}
-            </Text>
-            <TouchableOpacity onPress={() => void refresh()} activeOpacity={0.7}>
-              <Text style={[styles.clearFilterText, { color: colors.primary }]}>RETRY</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Generating state */}
-        {showGenerating && <GeneratingState />}
-
-        {/* Quest sections */}
-        {!showGenerating && !showLoading && !showError && (
-          <>
-            {/* Daily */}
-            {activeDailies.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DAILY</Text>
-                  <Text style={[styles.sectionMeta, { color: colors.mutedForeground }]}>
-                    {activeDailies.length} active
-                  </Text>
-                </View>
-                {activeDailies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} onBriefing={openBriefing} onShame={inClan ? onShame : undefined} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
-                ))}
-                {refusalLimit && (
-                  <Text style={[styles.refusalNote, { color: colors.destructive }]}>{REFUSAL_RULE}</Text>
-                )}
-              </View>
+          <View style={s.flush}>
+            {activeDailies.length + activeBonus.length > 0 ? (
+              <>
+                {rows(activeDailies)}
+                {rows(activeBonus)}
+              </>
+            ) : (
+              <EmptyLine
+                line={dailies.length > 0 ? "Every quest today is resolved." : "No quests issued today. Pull down to check again."}
+                action={dailies.length > 0 ? undefined : "Check now"}
+                onAction={() => void onRefresh()}
+              />
             )}
+          </View>
+          {refusalLimit && activeDailies.length > 0 ? (
+            <Text style={[type.meta, { color: colors.mutedForeground }]}>{REFUSAL_RULE}</Text>
+          ) : null}
 
-            {/* Bonus (PRO): no rank effect */}
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>BONUS</Text>
-                <Text style={[styles.sectionMeta, { color: colors.mutedForeground }]}>3 a day, no rank effect</Text>
-              </View>
-              {activeBonus.map(q => (
-                <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} busy={busyIds.has(q.id)} />
-              ))}
+          <SystemWindow title="BONUS">
+            <Text style={[type.body, s.center, { color: colors.mutedForeground }]}>
+              {knownFree || bonusPro ? "Bonus quests are PRO. Up to 3 a day, no rank effect." : "Up to 3 a day. No rank effect."}
+            </Text>
+            <View style={s.centerRow}>
               {knownFree || bonusPro ? (
                 <ProLock label="BONUS QUEST" />
               ) : (
-                <TouchableOpacity
+                <Button
+                  label="Request bonus quest"
+                  variant="tonal"
                   onPress={() => void onRequestBonus()}
-                  disabled={bonusBusy}
-                  accessibilityRole="button"
+                  loading={bonusBusy}
                   accessibilityLabel="Request bonus quest"
-                  style={[styles.bonusBtn, { borderColor: colors.primary + "60", opacity: bonusBusy ? 0.5 : 1 }]}
-                  activeOpacity={0.7}
-                >
-                  <Feather name="plus" size={12} color={colors.primary} />
-                  <Text style={[styles.bonusBtnText, { color: colors.primary }]}>{bonusBusy ? "REQUESTING" : "REQUEST BONUS QUEST"}</Text>
-                </TouchableOpacity>
+                />
               )}
-              {resolvedBonus.map(q => (
-                <QuestCard key={q.id} quest={q} onComplete={onComplete} busy={busyIds.has(q.id)} />
+            </View>
+          </SystemWindow>
+
+          {showRankUpPrep && nextRank && prepItems.length > 0 ? (
+            <View style={s.flush}>
+              <ListRow
+                title={`Rank-up prep: rank ${nextRank}`}
+                subtitle={`${Math.round(tierProgress)}% through rank ${rank}. ${prepItems.length} things THE SYSTEM looks for.`}
+                dot={colors.rank[nextRank]}
+                chevron
+                onPress={() => setPrepOpen(true)}
+              />
+            </View>
+          ) : null}
+
+          {resolvedOf(dailies).length + resolvedBonus.length > 0 ? (
+            <View>
+              <SectionLabel>RESOLVED TODAY</SectionLabel>
+              <View style={s.flush}>
+                {rows(resolvedOf(dailies))}
+                {rows(resolvedBonus)}
+              </View>
+            </View>
+          ) : null}
+
+          <View style={s.flush}>
+            <ListRow
+              title="Custom stats"
+              subtitle="Track anything with a number. Separate from rank."
+              chevron
+              onPress={() => router.push("/custom")}
+            />
+          </View>
+        </>
+      )}
+
+      {listReady && tab === "week" && (
+        <>
+          <View style={s.flush}>
+            {activeWeeklies.length > 0 ? (
+              rows(activeWeeklies)
+            ) : (
+              <EmptyLine line="No weekly quest is open. THE SYSTEM issues them at the start of the week." />
+            )}
+          </View>
+          {resolvedOf(weeklies).length > 0 ? (
+            <View>
+              <SectionLabel>RESOLVED</SectionLabel>
+              <View style={s.flush}>{rows(resolvedOf(weeklies))}</View>
+            </View>
+          ) : null}
+        </>
+      )}
+
+      {listReady && tab === "arcs" && (
+        <>
+          {activeArcs.length > 0 || activeChains.length > 0 ? (
+            <View style={s.flush}>
+              {rows(activeArcs)}
+              {activeChains.map((c) => (
+                <QuestChainRow key={c.id} chain={c} onPress={(x: QuestChain) => setSelectedChainId(x.id)} />
               ))}
             </View>
-
-            {/* Weekly */}
-            {activeWeeklies.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>WEEKLY</Text>
-                  <Text style={[styles.sectionMeta, { color: colors.mutedForeground }]}>
-                    {activeWeeklies.length} active
-                  </Text>
-                </View>
-                {activeWeeklies.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onRefuse={setRefusing} onSlot={setSlotting} onBriefing={openBriefing} onShame={inClan ? onShame : undefined} refuseDisabled={refusalLimit} busy={busyIds.has(q.id)} />
-                ))}
-              </View>
-            )}
-
-            {/* Arc */}
-            {activeArcs.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionLabel, { color: "#C4873A" }]}>ARC OPERATION</Text>
-                  <View style={[styles.arcBadge, { borderColor: "#C4873A40" }]}>
-                    <Text style={[styles.arcBadgeText, { color: "#C4873A" }]}>MULTI-WEEK</Text>
-                  </View>
-                </View>
-                {activeArcs.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} onShame={inClan ? onShame : undefined} busy={busyIds.has(q.id)} />
-                ))}
-              </View>
-            )}
-
-            {/* Active Quest Chains */}
-            {activeChains.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>ACTIVE ARC CHAINS</Text>
-                  <Text style={[styles.sectionMeta, { color: colors.mutedForeground }]}>
-                    {activeChains.length} running
-                  </Text>
-                </View>
-                {activeChains.map(chain => (
-                  <QuestChainCard key={chain.id} chain={chain} />
-                ))}
-              </View>
-            )}
-
-            {/* Completed */}
-            {completedQuests.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>COMPLETED</Text>
-                  <Text style={[styles.sectionMeta, { color: "#4B8B6F" }]}>+{completedQuests.length}</Text>
-                </View>
-                {completedQuests.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} busy={busyIds.has(q.id)} />
-                ))}
-              </View>
-            )}
-
-            {/* Completed chains */}
-            {completedChains.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>COMPLETED CHAINS</Text>
-                  <Text style={[styles.sectionMeta, { color: "#4B8B6F" }]}>
-                    {completedChains.length}
-                  </Text>
-                </View>
-                {completedChains.map(chain => (
-                  <QuestChainCard key={chain.id} chain={chain} />
-                ))}
-              </View>
-            )}
-
-            {/* Failed/Refused */}
-            {failedQuests.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>EXPIRED / REFUSED</Text>
-                  <Text style={[styles.sectionMeta, { color: colors.destructive }]}>
-                    −{failedQuests.length}
-                  </Text>
-                </View>
-                {failedQuests.map(q => (
-                  <QuestCard key={q.id} quest={q} onComplete={onComplete} busy={busyIds.has(q.id)} />
-                ))}
-              </View>
-            )}
-
-            {/* Empty */}
-            {totalActive === 0 && completedCount === 0 && (
-              <View style={[styles.emptyCard, { borderColor: colors.border }]}>
-                <Feather name="inbox" size={24} color={colors.mutedForeground} />
-                <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Board empty.</Text>
-                <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-                  Pull down to check for new operations. THE SYSTEM issues the board once per day.
-                </Text>
-              </View>
-            )}
-          </>
-        )}
-
-        {/* Arc Chain Catalog */}
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={styles.catalogToggle}
-            onPress={() => setShowChainCatalog(s => !s)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              ARC CHAIN CATALOG
-            </Text>
-            <View style={[styles.catalogCount, { borderColor: colors.border }]}>
-              <Text style={[styles.catalogCountText, { color: colors.mutedForeground }]}>
-                {chainTemplates.length} CHAINS
-              </Text>
-            </View>
-            <Feather
-              name={showChainCatalog ? "chevron-up" : "chevron-down"}
-              size={13} color={colors.mutedForeground}
-            />
-          </TouchableOpacity>
-          {showChainCatalog && (
-            <View style={styles.catalogList}>
-              {chainTemplates.map(chain => {
-                const alreadyStarted = questChains.some(
-                  c => c.templateKey === chain.templateKey && c.status === "active"
-                );
-                return (
-                  <QuestChainCatalogCard
-                    key={chain.name}
-                    chain={chain}
-                    onStart={() => handleStartChain(chain)}
-                    alreadyStarted={alreadyStarted}
-                    busy={startingKey !== null}
-                  />
-                );
-              })}
-            </View>
+          ) : (
+            <EmptyLine line="No arc is running. Start a chain: several steps, one domain." action="Browse chains" onAction={() => setCatalogOpen(true)} />
           )}
-        </View>
 
-        {/* Manual refresh hint */}
-        {!showGenerating && totalActive > 0 && (
-          <TouchableOpacity onPress={onRefresh} activeOpacity={0.6} style={styles.refreshHint}>
-            <Text style={[styles.refreshHintText, { color: colors.mutedForeground }]}>
-              ↓ Pull to refresh
-            </Text>
-          </TouchableOpacity>
-        )}
-      </ScrollView>
+          {resolvedOf(arcs).length + completedChains.length > 0 ? (
+            <View>
+              <SectionLabel>FINISHED</SectionLabel>
+              <View style={s.flush}>
+                {completedChains.map((c) => (
+                  <QuestChainRow key={c.id} chain={c} onPress={(x: QuestChain) => setSelectedChainId(x.id)} />
+                ))}
+                {rows(resolvedOf(arcs))}
+              </View>
+            </View>
+          ) : null}
+
+          <View style={s.flush}>
+            <ListRow
+              title="Arc chain catalog"
+              subtitle={`${chainTemplates.length} chains to start`}
+              chevron
+              onPress={() => setCatalogOpen(true)}
+            />
+          </View>
+        </>
+      )}
+
+      <QuestSheet
+        quest={selectedQuest}
+        busy={selectedQuest ? busyIds.has(selectedQuest.id) : false}
+        notice={notice}
+        onClose={() => setSelectedId(null)}
+        onComplete={(id) => void onComplete(id)}
+        shameLocked={shamePro}
+        {...(selectedQuest && selectedQuest.status === "active" ? sheetActions(selectedQuest) : {})}
+      />
+
+      <ChainSheet chain={selectedChain} template={null} onClose={() => setSelectedChainId(null)} />
+
+      <Sheet visible={catalogOpen} title="Arc chains" onClose={() => setCatalogOpen(false)}>
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>Each chain is a run of quests in one domain. One active chain per kind.</Text>
+        <View style={s.sheetList}>
+          {chainTemplates.map((t) => (
+            <ChainTemplateRow
+              key={t.templateKey}
+              template={t}
+              started={questChains.some((c) => c.templateKey === t.templateKey && c.status === "active")}
+              onPress={(x) => {
+                setCatalogOpen(false);
+                setTemplate(x);
+              }}
+            />
+          ))}
+        </View>
+      </Sheet>
+
+      <ChainSheet
+        chain={null}
+        template={template}
+        onClose={() => setTemplate(null)}
+        onStart={(t) => void handleStartChain(t)}
+        alreadyStarted={!!template && questChains.some((c) => c.templateKey === template.templateKey && c.status === "active")}
+        busy={startingKey !== null}
+      />
+
+      <Sheet visible={prepOpen} title={nextRank ? `Rank-up prep: rank ${nextRank}` : "Rank-up prep"} onClose={() => setPrepOpen(false)}>
+        <Text style={[type.body, { color: colors.mutedForeground }]}>
+          {`You are ${Math.round(tierProgress)}% through rank ${rank}. THE SYSTEM decides promotion. This is what it looks for.`}
+        </Text>
+        <View style={s.sheetList}>
+          {prepItems.map((item) => (
+            <ListRow key={item.title} title={item.title} subtitle={item.description} dot={DOMAIN_COLORS[item.domain]} />
+          ))}
+        </View>
+      </Sheet>
+
       <SlotPicker
         visible={slotting !== null}
         questTitle={slotting?.title ?? ""}
@@ -724,103 +564,17 @@ export default function QuestsScreen() {
         onCancel={() => setRefusing(null)}
         onConfirm={(reason) => void confirmRefuse(reason)}
       />
-    </View>
+    </Screen>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scroll: { paddingHorizontal: 20, gap: 12 },
-
-  headerRow: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
-  },
-  title: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 3 },
-  subtitle: { fontSize: 9, letterSpacing: 1.5, marginTop: 3, fontWeight: "500" as const },
-  headerRight: {},
-  rateBadge: {
-    borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 2, alignItems: "center",
-  },
-  rateLabel: { fontSize: 7, letterSpacing: 2, fontWeight: "700" as const },
-  rateValue: { fontSize: 16, fontWeight: "800" as const },
-
-  calibrationBanner: { borderWidth: 1, borderRadius: 4, padding: 12 },
-  calibRow: { flexDirection: "row", alignItems: "center" },
-  calibItem: { flex: 1, alignItems: "center", gap: 3 },
-  calibDiv: { width: StyleSheet.hairlineWidth, height: 24 },
-  calibLabel: { fontSize: 7, letterSpacing: 1.5, fontWeight: "600" as const },
-  calibValue: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 0.5 },
-
-  pressureBadge: {
-    flexDirection: "row", alignItems: "center", gap: 7,
-    borderWidth: 1, borderRadius: 3, paddingHorizontal: 12, paddingVertical: 8,
-  },
-  pressureText: {
-    flex: 1, fontSize: 9, fontWeight: "700" as const, letterSpacing: 1.5, color: "#E05555",
-  },
-  filterBar: {
-    borderWidth: 1,
-    borderRadius: 3,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  filterText: { fontSize: 10, letterSpacing: 1.2, fontWeight: "600" as const },
-  clearFilterText: { fontSize: 10, letterSpacing: 1.5, fontWeight: "700" as const },
-
-  rankUpSection: {
-    borderWidth: 1, borderRadius: 6, padding: 14, gap: 10,
-  },
-  rankUpHeader: {
-    flexDirection: "row", alignItems: "center", gap: 7,
-  },
-  rankUpLabel: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 2, flex: 1 },
-  rankUpPct: { fontSize: 11, fontWeight: "700" as const },
-  rankUpDesc: { fontSize: 11, lineHeight: 17 },
-  prepItem: {
-    flexDirection: "row", alignItems: "flex-start", gap: 10,
-    borderWidth: 1, borderRadius: 4, padding: 10,
-  },
-  prepNum: { width: 24, height: 24, borderRadius: 4, alignItems: "center", justifyContent: "center" },
-  prepNumText: { fontSize: 10, fontWeight: "800" as const },
-  prepTitle: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 0.3, marginBottom: 3 },
-  prepDesc: { fontSize: 10, lineHeight: 15 },
-  prepDomain: {
-    borderWidth: 1, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 2, alignSelf: "flex-start",
-  },
-  prepDomainText: { fontSize: 8, fontWeight: "800" as const, letterSpacing: 1 },
-
-  section: { gap: 8 },
-  bonusBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 3, paddingHorizontal: 10, paddingVertical: 8, alignSelf: "flex-start" },
-  bonusBtnText: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 2 },
-  sectionHeader: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2,
-  },
-  sectionLabel: { fontSize: 9, letterSpacing: 3, fontWeight: "700" as const },
-  sectionMeta: { fontSize: 9, letterSpacing: 1, fontWeight: "600" as const },
-  arcBadge: { borderWidth: 1, borderRadius: 2, paddingHorizontal: 6, paddingVertical: 2 },
-  arcBadgeText: { fontSize: 7, letterSpacing: 2, fontWeight: "700" as const },
-
-  catalogToggle: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-  },
-  catalogCount: {
-    borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 2,
-  },
-  catalogCountText: { fontSize: 8, fontWeight: "700" as const, letterSpacing: 1.5 },
-  catalogList: { gap: 10 },
-
-  emptyCard: {
-    borderWidth: 1, borderRadius: 6, alignItems: "center",
-    paddingVertical: 48, paddingHorizontal: 24, gap: 10, marginTop: 8,
-  },
-  emptyTitle: { fontSize: 16, fontWeight: "600" as const, marginTop: 4 },
-  emptyText: { fontSize: 12, textAlign: "center", lineHeight: 19 },
-  notice: { fontSize: 11, lineHeight: 17, letterSpacing: 0.3 },
-  refusalNote: { fontSize: 10, lineHeight: 15, letterSpacing: 0.3 },
-  refreshHint: { alignItems: "center", paddingVertical: 8, marginTop: 4 },
-  refreshHintText: { fontSize: 10, letterSpacing: 1 },
+const s = StyleSheet.create({
+  /** Rows run edge to edge of the screen's 16dp gutter. */
+  flush: { marginHorizontal: -space.md },
+  block: { gap: space.xs },
+  sectionLabel: { marginTop: space.sm, marginBottom: space.xs },
+  empty: { alignItems: "flex-start", gap: space.md, paddingVertical: space.lg, paddingHorizontal: space.md },
+  center: { textAlign: "center" },
+  centerRow: { alignItems: "center" },
+  sheetList: { marginHorizontal: -space.md, marginTop: space.sm },
 });

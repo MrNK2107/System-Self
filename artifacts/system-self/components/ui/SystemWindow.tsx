@@ -22,10 +22,15 @@ interface SystemWindowProps {
   style?: ViewStyle;
   /** Frame colour override (a domain colour for domain-scoped windows). */
   frameColor?: string;
+  /** Opaque fill, for windows that float over other content (notices, banners). */
+  solid?: boolean;
 }
 
+/** The translucent panel composited once over the ink ground, so a floating window reads the same but hides what's behind. */
+const SOLID_PANEL = "#1A1430";
+
 /** THE SYSTEM's window: a translucent violet panel with a hairline notched frame and a bracketed header. */
-export function SystemWindow({ title, children, style, frameColor }: SystemWindowProps) {
+export function SystemWindow({ title, children, style, frameColor, solid }: SystemWindowProps) {
   const colors = useColors();
   const [size, setSize] = useState({ w: 0, h: 0 });
   const onLayout = (e: LayoutChangeEvent) => {
@@ -38,7 +43,7 @@ export function SystemWindow({ title, children, style, frameColor }: SystemWindo
     <View onLayout={onLayout} style={[s.root, style]}>
       {d ? (
         <Svg width={size.w} height={size.h} style={StyleSheet.absoluteFill} pointerEvents="none">
-          <Path d={d} fill={colors.panel} stroke={frameColor ?? colors.frame} strokeWidth={1} />
+          <Path d={d} fill={solid ? SOLID_PANEL : colors.panel} stroke={frameColor ?? colors.frame} strokeWidth={1} />
         </Svg>
       ) : null}
       {title ? (

@@ -1,148 +1,127 @@
-// Monthly budgets per category, the stated savings target and currency, and recurring income (posted on its day each
-// month by the rollover; it counts in the figures but never scores on its own).
+// Budgets: this month's spend per category against its monthly limit (Spend), and the limits themselves (Limits).
+// Each category over its limit costs WEALTH at the week's close.
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { AuthField } from "@/components/AuthField";
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
-import { SettingsCard } from "@/components/SettingsParts";
+
+import { Button } from "@/components/ui/Button";
+import { Screen } from "@/components/ui/Screen";
+import { Segmented } from "@/components/ui/Segmented";
+import { space, type } from "@/constants/type";
+import { Bar, LoadState, StatusLine, useAttempt } from "@/features/finance/components";
+import { TextField } from "@/features/gym/components/Fields";
 import { useColors } from "@/hooks/useColors";
 import { useFinanceActions, useFinanceQuery } from "@/hooks/useFinance";
 import {
   EXPENSE_CATEGORIES,
+  budgetBar,
   budgetDraft,
   budgetItemsFromDraft,
   categoryLabel,
-  describeFinanceError,
   money,
-  parseAmount,
-  parseSavingsTarget,
   type BudgetDraft,
 } from "@/lib/finance/finance";
-import type { MutationResult } from "@/lib/game/actions";
 
-const SYNC_PENDING = "Queued entries have not reached the System yet. Retry shortly.";
+type Tab = "spend" | "limits";
 
 export default function BudgetScreen() {
   const colors = useColors();
   const q = useFinanceQuery();
   const actions = useFinanceActions();
   const f = q.data;
+  const [tab, setTab] = useState<Tab>("spend");
   const [draft, setDraft] = useState<BudgetDraft | null>(null);
-  const [target, setTarget] = useState("");
-  const [currency, setCurrency] = useState("");
-  const [label, setLabel] = useState("");
-  const [amount, setAmount] = useState("");
-  const [day, setDay] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<{ tone: "info" | "error"; message: string } | null>(null);
+  const { busy, notice, attempt, fail } = useAttempt();
 
   // The form starts from the server's figures once; later edits stay the user's until they save.
   useEffect(() => {
     if (!f || draft) return;
     setDraft(budgetDraft(f));
-    setTarget(String(Math.round(f.target * 1000) / 10));
-    setCurrency(f.currency);
   }, [f, draft]);
-
-  const attempt = async (send: () => Promise<MutationResult<unknown>>, done: string): Promise<boolean> => {
-    if (busy) return false;
-    setBusy(true);
-    setNotice(null);
-    try {
-      const r = await send();
-      setNotice(r.ok ? { tone: "info", message: done } : { tone: "error", message: SYNC_PENDING });
-      return r.ok;
-    } catch (e) {
-      setNotice({ tone: "error", message: describeFinanceError(e) });
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const saveBudgets = async () => {
     if (!draft) return;
     const parsed = budgetItemsFromDraft(draft);
-    if (!parsed.ok) return setNotice({ tone: "error", message: `Not an amount: ${parsed.invalid.map(categoryLabel).join(", ")}.` });
+    if (!parsed.ok) return fail(`Not an amount: ${parsed.invalid.map(categoryLabel).join(", ")}.`);
     await attempt(() => actions.saveBudgets(parsed.items), "Budgets recorded. Spend is measured against them every Sunday.");
   };
 
-  const saveSettings = async () => {
-    const savingsTarget = parseSavingsTarget(target);
-    const code = currency.trim().toUpperCase();
-    if (savingsTarget === null) return setNotice({ tone: "error", message: "The savings target is a percentage from 5 to 90." });
-    if (!/^[A-Z]{3}$/.test(code)) return setNotice({ tone: "error", message: "The currency is a three-letter code, like INR or USD." });
-    await attempt(() => actions.saveSettings({ savingsTarget, currency: code }), "Target recorded.");
-  };
+  if (!f || !draft) {
+    return (
+      <Screen title="Budgets" back>
+        <LoadState error={q.isError ? q.error : null} onRetry={() => void q.refetch()} />
+      </Screen>
+    );
+  }
 
-  const addRecurring = async () => {
-    const value = parseAmount(amount);
-    const dayOfMonth = Number(day);
-    if (!label.trim() || value === null || !Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 28) {
-      return setNotice({ tone: "error", message: "Name it, give a positive amount and a day from 1 to 28." });
-    }
-    if (await attempt(() => actions.addRecurring({ label: label.trim(), amount: value, dayOfMonth }), "Recurring income recorded.")) {
-      setLabel("");
-      setAmount("");
-      setDay("");
-    }
-  };
-
-  const section = (text: string) => <Text style={[s.section, { color: colors.mutedForeground }]}>{text}</Text>;
+  const shown = f.byCategory.filter((c) => c.limit !== null || c.spent > 0);
 
   return (
-    <AuthShell tag="WEALTH" title="Budgets" subtitle="Monthly limits per category. Each category over its limit costs WEALTH at the week's close." back>
-      {notice ? <AuthNotice tone={notice.tone} message={notice.message} /> : null}
-      {q.isError && !f ? (
-        <AuthNotice message={describeFinanceError(q.error)} onRetry={() => void q.refetch()} />
-      ) : !f || !draft ? (
-        <AuthNotice tone="info" message="Loading." />
+    <Screen title="Budgets" back>
+      <Segmented<Tab>
+        options={[
+          { key: "spend", label: "Spend" },
+          { key: "limits", label: "Limits" },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+
+      {tab === "spend" ? (
+        shown.length === 0 ? (
+          <View style={s.empty}>
+            <Text style={[type.body, { color: colors.mutedForeground }]}>No spend and no limits this month.</Text>
+            <Button label="Set limits" variant="tonal" onPress={() => setTab("limits")} />
+          </View>
+        ) : (
+          <View>
+            {shown.map((c) => {
+              const bar = budgetBar(c.spent, c.limit);
+              const over = bar?.over ?? false;
+              return (
+                <View key={c.category} style={[s.category, { borderBottomColor: colors.border }]}>
+                  <View style={s.categoryHead}>
+                    <Text style={[type.body, s.flex, { color: colors.foreground }]}>{categoryLabel(c.category)}</Text>
+                    <Text style={[type.number, { color: over ? colors.destructive : colors.foreground }]}>{money(c.spent, f.currency)}</Text>
+                  </View>
+                  {bar ? <Bar fraction={bar.fraction} over={over} /> : null}
+                  <Text style={[type.meta, { color: over ? colors.destructive : colors.mutedForeground }]}>
+                    {c.limit === null
+                      ? "No limit"
+                      : over
+                        ? `${money(c.spent - c.limit, f.currency)} over a ${money(c.limit, f.currency)} limit`
+                        : `${money(c.limit - c.spent, f.currency)} left of ${money(c.limit, f.currency)}`}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )
       ) : (
-        <>
-          {section("MONTHLY LIMITS (BLANK = NONE)")}
+        <View style={s.form}>
+          <Text style={[type.body, { color: colors.mutedForeground }]}>Monthly limit per category in {f.currency}. Blank means no limit.</Text>
           {EXPENSE_CATEGORIES.map((c) => (
-            <AuthField
+            <TextField
               key={c}
-              label={`${categoryLabel(c).toUpperCase()} (${f.currency})`}
+              label={categoryLabel(c).toUpperCase()}
               value={draft[c]}
               onChangeText={(t) => setDraft({ ...draft, [c]: t })}
               keyboardType="decimal-pad"
+              placeholder="No limit"
             />
           ))}
-          <AuthButton label="SAVE BUDGETS" loading={busy} onPress={() => void saveBudgets()} />
-
-          {section("TARGET")}
-          <AuthField label="SAVINGS TARGET (%)" value={target} onChangeText={setTarget} keyboardType="decimal-pad" />
-          <AuthField label="CURRENCY" value={currency} onChangeText={setCurrency} autoCapitalize="characters" maxLength={3} mono />
-          <AuthButton label="SAVE TARGET" loading={busy} onPress={() => void saveSettings()} />
-
-          {section("RECURRING INCOME")}
-          {f.recurring.map((r) => (
-            <SettingsCard key={r.id}>
-              <View style={s.panel}>
-                <Text style={[s.line, { color: r.active ? colors.foreground : colors.mutedForeground }]}>
-                  {r.label.toUpperCase()} // {money(r.amount, f.currency)} // DAY {r.dayOfMonth}
-                  {r.active ? "" : " // PAUSED"}
-                </Text>
-                <AuthLink
-                  label={r.active ? "PAUSE" : "RESUME"}
-                  onPress={() => void attempt(() => actions.setRecurringActive(r.id, !r.active), r.active ? "Paused." : "Resumed.")}
-                />
-              </View>
-            </SettingsCard>
-          ))}
-          <AuthField label="LABEL" value={label} onChangeText={setLabel} autoCapitalize="words" maxLength={40} />
-          <AuthField label={`AMOUNT (${f.currency})`} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-          <AuthField label="DAY OF MONTH (1–28)" value={day} onChangeText={setDay} keyboardType="number-pad" maxLength={2} />
-          <AuthButton label="ADD RECURRING INCOME" loading={busy} onPress={() => void addRecurring()} />
-        </>
+          <StatusLine notice={notice} />
+          <Button label="Save budgets" block loading={busy} onPress={() => void saveBudgets()} />
+        </View>
       )}
-    </AuthShell>
+      {tab === "spend" ? <StatusLine notice={notice} /> : null}
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  section: { fontSize: 10, letterSpacing: 2, fontWeight: "800" as const, marginTop: 6 },
-  panel: { paddingVertical: 12, gap: 8 },
-  line: { fontSize: 11, letterSpacing: 1, fontWeight: "700" as const },
+  flex: { flex: 1 },
+  empty: { gap: space.md },
+  category: { paddingVertical: space.md, gap: space.sm, borderBottomWidth: StyleSheet.hairlineWidth },
+  categoryHead: { flexDirection: "row", alignItems: "center", gap: space.md },
+  form: { gap: space.md },
 });

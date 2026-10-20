@@ -22,9 +22,9 @@ export function briefingHeader(date: string): string {
   return `DUNGEON BRIEFING — ${WEEKDAY_NAMES[new Date(`${date}T00:00:00Z`).getUTCDay()]}`;
 }
 
-/** `If taken: A / B`, or null when the exercise has no fallback. */
+/** `Equipment taken? Do: A / B` (what to do when the station is in use), or null when the exercise has no fallback. */
 export function fallbackLine(block: Pick<BriefingBlock, "fallbacks">): string | null {
-  return block.fallbacks.length > 0 ? `If taken: ${block.fallbacks.map((f) => f.name).join(" / ")}` : null;
+  return block.fallbacks.length > 0 ? `Equipment taken? Do: ${block.fallbacks.map((f) => f.name).join(" / ")}` : null;
 }
 
 export const briefingRowMeta = (b: Pick<BriefingBlock, "sets" | "repRange" | "restSec">): string =>

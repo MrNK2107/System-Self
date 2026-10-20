@@ -1,25 +1,44 @@
-// CUSTOM section of the log modal: pick one of your own stats, enter a value and a note, log it. A custom entry is
-// queued in the outbox like any log, but it scores only that stat (+2.5, its own streak); it is never ranked activity.
+// Your own stats inside the manual log form: pick one of them (a chip beside the five domains), enter a value and a
+// note, log it. A custom entry is queued in the outbox like any log, but it scores only that stat (+2.5, its own
+// streak); it is never ranked activity. The sheet controls which chip is selected, so only one submit shows at a time.
 import React, { useState } from "react";
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
+import { Button } from "@/components/ui/Button";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { useCustomActions, useCustomDomainsQuery } from "@/hooks/useCustom";
 import { checkCustomLogForm } from "@/lib/custom/custom";
+import { CUSTOM_LOG_DELTA } from "@workspace/engine";
 
-export function CustomLogSection({ onLogged, onNavigate }: { onLogged: () => void; onNavigate: () => void }) {
+/** What a custom log scores before its streak bonus (the server applies it). */
+const CUSTOM_GAIN = CUSTOM_LOG_DELTA;
+
+export function CustomLogSection({
+  selectedId,
+  onSelect,
+  onLogged,
+  onNavigate,
+}: {
+  /** The selected stat, or null when a ranked domain (or nothing) is chosen. */
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  /** Logged: THE SYSTEM's line for it, e.g. "+2.5 Spanish. Logged." */
+  onLogged: (line: string) => void;
+  /** The sheet is about to navigate away (to create a stat). */
+  onNavigate: () => void;
+}) {
   const colors = useColors();
   const q = useCustomDomainsQuery();
   const actions = useCustomActions();
-  const [selected, setSelected] = useState<string | null>(null);
   const [value, setValue] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const items = q.data?.items ?? [];
-  const domain = items.find((d) => d.id === selected) ?? null;
+  const domain = items.find((d) => d.id === selectedId) ?? null;
 
   const submit = async () => {
     if (!domain || busy) return;
@@ -32,8 +51,7 @@ export function CustomLogSection({ onLogged, onNavigate }: { onLogged: () => voi
       await actions.log(domain.id, { value: checked.value, note: checked.note });
       setValue("");
       setNote("");
-      setSelected(null);
-      onLogged();
+      onLogged(`+${CUSTOM_GAIN.toFixed(1)} ${domain.name}. Logged.`);
     } catch {
       setError("The entry could not be recorded on this device. Sign in again, then retry.");
     } finally {
@@ -41,84 +59,81 @@ export function CustomLogSection({ onLogged, onNavigate }: { onLogged: () => voi
     }
   };
 
+  if (items.length === 0) {
+    // Nothing to pick yet: one quiet way to make the first stat (or nothing while the list loads).
+    return q.data ? (
+      <Button
+        label="Track your own stat"
+        variant="text"
+        onPress={() => {
+          onNavigate();
+          router.push("/custom");
+        }}
+      />
+    ) : null;
+  }
+
   return (
-    <View style={s.section}>
-      <Text style={[s.label, { color: colors.mutedForeground }]}>CUSTOM</Text>
-      {items.length === 0 ? (
-        <TouchableOpacity
-          onPress={() => {
-            onNavigate();
-            router.push("/custom");
-          }}
-          accessibilityRole="link"
-          accessibilityLabel="Add a custom stat"
-        >
-          <Text style={[s.hint, { color: colors.primary }]}>
-            {q.data ? "+ TRACK YOUR OWN STAT" : "Your own stats appear here."}
-          </Text>
-        </TouchableOpacity>
-      ) : (
-        <View style={s.chips}>
-          {items.map((d) => {
-            const active = d.id === selected;
-            return (
-              <TouchableOpacity
-                key={d.id}
+    <View style={s.root}>
+      <Text style={[type.label, { color: colors.mutedForeground }]}>YOUR STATS</Text>
+      <View style={s.chips}>
+        {items.map((d) => {
+          const active = d.id === selectedId;
+          return (
+            <View key={d.id} style={[s.chipClip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.muted : "transparent" }]}>
+              <Pressable
                 onPress={() => {
                   Haptics.selectionAsync();
-                  setSelected(active ? null : d.id);
+                  onSelect(active ? null : d.id);
                   setError(null);
                 }}
-                activeOpacity={0.7}
+                android_ripple={{ color: "rgba(168,121,255,0.16)" }}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                style={[s.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.accentFill + "20" : "transparent" }]}
+                style={s.chip}
               >
-                <Text style={[s.chipText, { color: active ? colors.primary : colors.mutedForeground }]} numberOfLines={1}>
+                <Text style={[type.body, { color: active ? colors.primary : colors.mutedForeground }]} numberOfLines={1}>
                   {d.name}
                 </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
+              </Pressable>
+            </View>
+          );
+        })}
+      </View>
       {domain ? (
         <View style={s.form}>
-          <Text style={[s.hint, { color: colors.mutedForeground }]}>
-            {domain.logLabel.toUpperCase()}
-            {domain.unit ? ` (${domain.unit.toUpperCase()})` : ""}  ·  +2.5 to {domain.name}, not to your rank
-          </Text>
-          <TextInput
-            value={value}
-            onChangeText={(v) => {
-              setValue(v);
-              setError(null);
-            }}
-            keyboardType="numbers-and-punctuation"
-            placeholder="Value"
-            placeholderTextColor={colors.mutedForeground}
-            accessibilityLabel="Custom value"
-            style={[s.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
-          />
-          <TextInput
-            value={note}
-            onChangeText={setNote}
-            placeholder="Note (optional)"
-            placeholderTextColor={colors.mutedForeground}
-            accessibilityLabel="Custom note"
-            maxLength={200}
-            style={[s.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
-          />
-          {error ? <Text style={s.error}>{error}</Text> : null}
-          <TouchableOpacity
-            onPress={() => void submit()}
-            disabled={busy}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            style={[s.submit, { backgroundColor: colors.accentFill, opacity: busy ? 0.6 : 1 }]}
-          >
-            <Text style={[s.submitText, { color: colors.primaryForeground }]}>LOG {domain.name.toUpperCase()}</Text>
-          </TouchableOpacity>
+          <View style={s.field}>
+            <Text style={[type.label, { color: colors.mutedForeground }]}>
+              {`${domain.logLabel}${domain.unit ? ` (${domain.unit})` : ""}`.toUpperCase()}
+            </Text>
+            <TextInput
+              value={value}
+              onChangeText={(v) => {
+                setValue(v);
+                setError(null);
+              }}
+              keyboardType="numbers-and-punctuation"
+              placeholder="Value"
+              placeholderTextColor={colors.subtle}
+              accessibilityLabel="Custom value"
+              style={[type.body, s.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
+            />
+          </View>
+          <View style={s.field}>
+            <Text style={[type.label, { color: colors.mutedForeground }]}>NOTE</Text>
+            <TextInput
+              value={note}
+              onChangeText={setNote}
+              placeholder="Optional"
+              placeholderTextColor={colors.subtle}
+              accessibilityLabel="Custom note"
+              maxLength={200}
+              style={[type.body, s.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
+            />
+          </View>
+          <Text style={[type.meta, { color: colors.subtle }]}>{`Scores ${domain.name} only, not your rank.`}</Text>
+          {error ? <Text style={[type.body, { color: colors.destructive }]}>{error}</Text> : null}
+          <Button label={`Log it · +${CUSTOM_GAIN.toFixed(1)} ${domain.name}`} onPress={() => void submit()} loading={busy} block />
         </View>
       ) : null}
     </View>
@@ -126,15 +141,11 @@ export function CustomLogSection({ onLogged, onNavigate }: { onLogged: () => voi
 }
 
 const s = StyleSheet.create({
-  section: { marginTop: 8, marginBottom: 24, gap: 10 },
-  label: { fontSize: 9, fontWeight: "600", letterSpacing: 2 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 2, maxWidth: "100%" },
-  chipText: { fontSize: 11, fontWeight: "600" },
-  form: { gap: 10 },
-  hint: { fontSize: 10, letterSpacing: 0.6, lineHeight: 15 },
-  input: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
-  error: { color: "#E05555", fontSize: 11, lineHeight: 16 },
-  submit: { padding: 14, borderRadius: 2, alignItems: "center" },
-  submitText: { fontSize: 11, fontWeight: "700", letterSpacing: 2.5 },
+  root: { gap: space.sm },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  chipClip: { borderWidth: 1, borderRadius: 4, overflow: "hidden", maxWidth: "100%" },
+  chip: { minHeight: 48, paddingHorizontal: space.md, justifyContent: "center" },
+  form: { gap: space.md, marginTop: space.md },
+  field: { gap: space.sm },
+  input: { minHeight: 48, borderWidth: 1, borderRadius: 4, paddingHorizontal: space.md, paddingVertical: space.sm },
 });

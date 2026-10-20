@@ -1,11 +1,15 @@
+// Find players: public players by username, semi-public players by codename. Anonymous players cannot be found.
 import React, { useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Text } from "react-native";
 import { router } from "expo-router";
 import { SOCIAL_SEARCH_MIN_CHARS } from "@workspace/contracts";
 import { AuthField } from "@/components/AuthField";
-import { AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { CodenameCard } from "@/components/CodenameCard";
 import { PlayerRow } from "@/components/PlayerRow";
+import { Group, Notice } from "@/components/arena/parts";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { useGameStateQuery } from "@/hooks/useGameState";
 import { useSearchQuery } from "@/hooks/useSocial";
@@ -21,40 +25,37 @@ export default function SocialSearchScreen() {
   const myCodename = me?.publicCodename;
 
   return (
-    <AuthShell tag="SEARCH" title="Find players" subtitle="Public players by username, semi-public players by codename. Anonymous players cannot be found." back>
-      {myCodename ? <CodenameCard codename={myCodename} identity={me?.identitySetting} /> : null}
+    <Screen title="Find players" back>
       <AuthField
         label="USERNAME OR CODENAME"
         value={text}
         onChangeText={setText}
         placeholder={`${SOCIAL_SEARCH_MIN_CHARS}+ characters`}
         returnKeyType="search"
+        autoFocus
       />
       {!ready ? (
-        <Text style={[s.hint, { color: colors.mutedForeground }]}>Type at least {SOCIAL_SEARCH_MIN_CHARS} characters.</Text>
+        <Text style={[type.body, { color: colors.mutedForeground }]}>
+          Public players by username, semi-public players by codename. Anonymous players cannot be found.
+        </Text>
       ) : q.isError ? (
-        <AuthNotice message={describeSocialError(q.error)} onRetry={() => void q.refetch()} />
+        <Notice message={describeSocialError(q.error)} onRetry={() => void q.refetch()} />
       ) : q.isPending ? (
-        <AuthNotice tone="info" message="Searching." />
+        <ActivityIndicator color={colors.primary} />
       ) : results.length === 0 ? (
-        <AuthNotice tone="info" message="No players found." />
+        <Notice tone="info" message="No players found." />
       ) : (
-        <View style={s.list}>
+        <Group>
           {results.map((p) => (
-            <PlayerRow
-              key={p.handle}
-              player={p}
-              onPress={() => router.push({ pathname: "/social/profile/[handle]", params: { handle: p.handle } })}
-            />
+            <PlayerRow key={p.handle} player={p} onPress={() => router.push({ pathname: "/social/profile/[handle]", params: { handle: p.handle } })} />
           ))}
-        </View>
+        </Group>
       )}
-      <AuthLink label="FOLLOWING" onPress={() => router.push("/social/following")} />
-    </AuthShell>
+      <Group>
+        <ListRow title="Following" subtitle="Players you follow" chevron onPress={() => router.push("/social/following")} />
+        <ListRow title="Party of Two" subtitle="Your one training partner" chevron onPress={() => router.push("/duo")} />
+      </Group>
+      {myCodename ? <CodenameCard codename={myCodename} identity={me?.identitySetting} /> : null}
+    </Screen>
   );
 }
-
-const s = StyleSheet.create({
-  hint: { fontSize: 12, lineHeight: 18, paddingHorizontal: 4 },
-  list: { gap: 8 },
-});

@@ -3,17 +3,18 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
+import { Feather } from "@expo/vector-icons";
+import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Button } from "@/components/ui/Button";
+import { Screen } from "@/components/ui/Screen";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { api } from "@/lib/api/client";
 import { useGameUserId } from "@/hooks/useGameState";
 import { useBillingStatusQuery } from "@/hooks/usePro";
-import { PRO_LOCK_LABEL } from "@/lib/api/pro";
 import {
   FALLBACK_PLANS,
   MANAGE_SUBSCRIPTION_LABEL,
-  PRO_FEATURES,
   STORE_ONLY_LINE,
   autoRenewDisclosure,
   billingStatusKey,
@@ -27,6 +28,34 @@ import {
 import { loadOfferings, purchasePlan, restorePurchases, type Offerings } from "@/lib/purchases";
 
 type Store = { state: "loading" } | { state: "unavailable" } | ({ state: "ready" } & Offerings);
+type IconName = React.ComponentProps<typeof Feather>["name"];
+
+/** What PRO adds, in plain words (the full list is lib/billing/core PRO_FEATURES). */
+const BENEFITS: { icon: IconName; line: string }[] = [
+  { icon: "plus-square", line: "Up to three bonus quests a day, with no effect on your score." },
+  { icon: "message-circle", line: "A System that remembers your logs and quotes your own words back." },
+  { icon: "users", line: "Create a clan, send named challenges and see who your rivals are." },
+  { icon: "clock", line: "A full year of history, and logging for days older than 48 hours." },
+  { icon: "layers", line: "Rank Freeze, voice logging, Shame Mode, priority rival matching and more than three custom stats." },
+];
+
+/** The number in a store price string ("₹3,999 / year" -> 3999), or null. */
+function priceValue(price: string): number | null {
+  const m = /(\d[\d,]*(?:\.\d+)?)/.exec(price);
+  if (!m) return null;
+  const n = Number(m[1]!.replace(/,/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Whole-percent saving of the yearly plan over twelve months of the monthly one (499 x 12 = 5988 vs 3999: 33%). */
+function yearlySaving(plans: readonly Plan[]): number | null {
+  const monthly = plans.find((p) => p.id === "monthly");
+  const annual = plans.find((p) => p.id === "annual");
+  const m = monthly ? priceValue(monthly.price) : null;
+  const a = annual ? priceValue(annual.price) : null;
+  if (m === null || a === null || a >= m * 12) return null;
+  return Math.round((1 - a / (m * 12)) * 100);
+}
 
 export default function PaywallScreen() {
   const colors = useColors();
@@ -116,78 +145,109 @@ export default function PaywallScreen() {
     if (mounted.current) setBusy(null);
   };
 
+  const saving = yearlySaving(plans);
+
   return (
-    <AuthShell tag={PRO_LOCK_LABEL} title="SYSTEM // SELF PRO" subtitle="More tools. The same rules." back>
+    <Screen title="PRO" back>
+      <View style={s.hero}>
+        <Text style={[type.title, { color: colors.foreground }]} accessibilityRole="header">
+          SYSTEM // SELF PRO
+        </Text>
+        <Text style={[type.body, { color: colors.mutedForeground }]}>More tools. The same rules.</Text>
+      </View>
+
+      <View style={s.benefits}>
+        {BENEFITS.map((b) => (
+          <View key={b.icon} style={s.benefit}>
+            <Feather name={b.icon} size={20} color={colors.primary} style={s.benefitIcon} />
+            <Text style={[type.body, s.flex, { color: colors.foreground }]}>{b.line}</Text>
+          </View>
+        ))}
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>PRO never changes rank, score, decay or matching fairness.</Text>
+      </View>
+
       {isPro ? (
-        <AuthNotice tone="info" message="PRO is active on this account." />
+        <Text style={[type.bodyStrong, { color: colors.success }]} accessibilityLiveRegion="polite">
+          PRO is active on this account.
+        </Text>
+      ) : (
+        <>
+          <View style={s.plans} accessibilityRole="radiogroup">
+            {plans.map((p) => {
+              const on = p.id === selected;
+              const yearly = p.id === "annual";
+              return (
+                <View key={p.id} style={[s.planClip, { borderColor: on ? colors.accentFill : colors.border }]}>
+                  <Pressable
+                    onPress={() => setSelected(p.id)}
+                    android_ripple={{ color: "rgba(168,121,255,0.14)" }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`${yearly ? "Yearly" : "Monthly"}, ${p.price}${yearly && saving ? `, save ${saving}%` : ""}`}
+                    style={[s.plan, { backgroundColor: colors.card }]}
+                  >
+                    <Feather name={on ? "check-circle" : "circle"} size={20} color={on ? colors.primary : colors.subtle} />
+                    <View style={s.flex}>
+                      <Text style={[type.bodyStrong, { color: colors.foreground }]}>{yearly ? "Yearly" : "Monthly"}</Text>
+                      <Text style={[type.meta, { color: colors.mutedForeground }]}>{p.price}</Text>
+                    </View>
+                    {yearly && saving ? <Text style={[type.label, { color: colors.success }]}>{`SAVE ${saving}%`}</Text> : null}
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+
+          {store.state === "unavailable" ? (
+            <Text style={[type.meta, s.center, { color: colors.mutedForeground }]}>{STORE_ONLY_LINE}</Text>
+          ) : (
+            <Button
+              label="Unlock PRO"
+              block
+              onPress={() => void buy()}
+              loading={store.state === "loading" || busy === "buy"}
+              disabled={store.state !== "ready" || busy !== null}
+            />
+          )}
+        </>
+      )}
+
+      {message ? (
+        <Text style={[type.body, { color: message.tone === "error" ? colors.destructive : colors.mutedForeground }]} accessibilityLiveRegion="polite">
+          {message.text}
+        </Text>
       ) : null}
 
-      <View style={[s.card, { borderColor: colors.border, backgroundColor: colors.card }]}>
-        <Text style={[s.heading, { color: colors.foreground }]}>WHAT PRO ADDS</Text>
-        {PRO_FEATURES.map((f) => (
-          <Text key={f} style={[s.feature, { color: colors.mutedForeground }]}>
-            {"> "}
-            {f}
-          </Text>
-        ))}
-        <Text style={[s.feature, { color: colors.foreground }]}>PRO never changes rank, score, decay or matching fairness.</Text>
+      <View style={s.quiet}>
+        <Button
+          label={busy === "restore" ? "Restoring" : "Restore purchases"}
+          variant="text"
+          disabled={busy !== null}
+          onPress={() => void restore()}
+        />
+        {manageUrl ? (
+          <Button label={MANAGE_SUBSCRIPTION_LABEL} variant="text" onPress={() => void Linking.openURL(manageUrl).catch(() => undefined)} />
+        ) : null}
+        <Text style={[type.meta, s.center, { color: colors.subtle }]}>{autoRenewDisclosure(Platform.OS)}</Text>
+        <View style={s.legal}>
+          <Button label="Terms" variant="text" onPress={() => router.push("/legal/terms")} />
+          <Button label="Privacy" variant="text" onPress={() => router.push("/legal/privacy")} />
+        </View>
       </View>
-
-      <View style={s.plans}>
-        {plans.map((p) => {
-          const on = p.id === selected;
-          return (
-            <TouchableOpacity
-              key={p.id}
-              onPress={() => setSelected(p.id)}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: on }}
-              style={[s.plan, { borderColor: on ? colors.primary : colors.border, backgroundColor: colors.card }]}
-            >
-              <Text style={[s.planLabel, { color: on ? colors.primary : colors.mutedForeground }]}>{p.label}</Text>
-              <Text style={[s.planPrice, { color: colors.foreground }]}>{p.price}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {store.state === "loading" ? <ActivityIndicator color={colors.primary} /> : null}
-      {store.state === "unavailable" ? <AuthNotice tone="info" message={STORE_ONLY_LINE} /> : null}
-      {message ? <AuthNotice tone={message.tone} message={message.text} /> : null}
-
-      <AuthButton
-        label="UNLOCK PRO"
-        onPress={buy}
-        loading={busy === "buy"}
-        disabled={store.state !== "ready" || isPro || busy !== null}
-      />
-      <AuthLink label={busy === "restore" ? "RESTORING..." : "RESTORE PURCHASES"} onPress={() => void (busy === null && restore())} />
-
-      <Text style={[s.disclosure, { color: colors.mutedForeground }]}>{autoRenewDisclosure(Platform.OS)}</Text>
-      {manageUrl ? <AuthLink label={MANAGE_SUBSCRIPTION_LABEL} onPress={() => void Linking.openURL(manageUrl).catch(() => undefined)} /> : null}
-
-      <View style={s.legal}>
-        <Text accessibilityRole="link" style={[s.legalText, { color: colors.mutedForeground }]} onPress={() => router.push("/legal/terms")}>
-          TERMS
-        </Text>
-        <Text accessibilityRole="link" style={[s.legalText, { color: colors.mutedForeground }]} onPress={() => router.push("/legal/privacy")}>
-          PRIVACY
-        </Text>
-      </View>
-      <AuthLink label="BACK" onPress={() => router.back()} />
-    </AuthShell>
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 4, padding: 16, gap: 8 },
-  heading: { fontSize: 11, fontWeight: "800", letterSpacing: 2 },
-  feature: { fontSize: 12, lineHeight: 18 },
-  plans: { flexDirection: "row", gap: 10 },
-  plan: { flex: 1, borderWidth: 1, borderRadius: 4, padding: 14, gap: 6 },
-  planLabel: { fontSize: 10, fontWeight: "800", letterSpacing: 2 },
-  planPrice: { fontSize: 14, fontWeight: "700" },
-  legal: { flexDirection: "row", justifyContent: "center", gap: 24 },
-  disclosure: { fontSize: 11, lineHeight: 17, textAlign: "center" },
-  legalText: { fontSize: 10, fontWeight: "700", letterSpacing: 2 },
+  hero: { gap: space.xs },
+  benefits: { gap: space.md },
+  benefit: { flexDirection: "row", alignItems: "flex-start", gap: space.md },
+  benefitIcon: { marginTop: 1 },
+  flex: { flex: 1 },
+  plans: { gap: space.sm },
+  planClip: { borderWidth: 1, borderRadius: 4, overflow: "hidden" },
+  plan: { minHeight: 64, flexDirection: "row", alignItems: "center", gap: space.md, paddingHorizontal: space.md, paddingVertical: space.sm },
+  center: { textAlign: "center" },
+  quiet: { alignItems: "center", gap: space.xs },
+  legal: { flexDirection: "row", justifyContent: "center", gap: space.md },
 });

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Modal, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
-import { AuthButton, AuthLink } from "@/components/AuthShell";
+import { NoticeLine, NoticeShell } from "@/components/SystemNoticeModal";
+import { Button } from "@/components/ui/Button";
+import { space } from "@/constants/type";
 import { useAuth } from "@/context/AuthContext";
-import { useColors } from "@/hooks/useColors";
 import { useGameStateQuery } from "@/hooks/useGameState";
 import { currentPermissionAction, markPrompted, requestPermission } from "@/lib/notifications";
 import { PERMISSION_EXPLANATION } from "@/lib/notifications-core";
@@ -13,7 +14,6 @@ import { PERMISSION_EXPLANATION } from "@/lib/notifications-core";
  * never asks by itself again; the notification settings screen links to the OS settings after a denial.
  */
 export function NotificationPrompt() {
-  const colors = useColors();
   const { status, user } = useAuth();
   const onboarded = !!useGameStateQuery().data?.profile.onboarded;
   const userId = status === "signed_in" ? (user?.id ?? null) : null;
@@ -46,22 +46,16 @@ export function NotificationPrompt() {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => void close(false)}>
-      <View style={s.backdrop}>
-        <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[s.tag, { color: colors.mutedForeground }]}>SYSTEM // NOTIFICATIONS</Text>
-          <Text style={[s.line, { color: colors.foreground }]}>{PERMISSION_EXPLANATION}</Text>
-          <AuthButton label="ALLOW" loading={busy} onPress={() => void close(true)} />
-          <AuthLink label="NOT NOW" onPress={() => void close(false)} />
-        </View>
+    <NoticeShell visible={visible} title="NOTIFICATIONS" onClose={() => void close(false)}>
+      <NoticeLine text={PERMISSION_EXPLANATION} />
+      <View style={s.actions}>
+        <Button label="Allow" block loading={busy} onPress={() => void close(true)} />
+        <Button label="Not now" variant="text" block disabled={busy} onPress={() => void close(false)} />
       </View>
-    </Modal>
+    </NoticeShell>
   );
 }
 
 const s = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", padding: 24 },
-  card: { borderWidth: 1, borderRadius: 4, padding: 20, gap: 16 },
-  tag: { fontSize: 9, letterSpacing: 2.5, fontWeight: "700" },
-  line: { fontSize: 16, lineHeight: 24, fontWeight: "600" },
+  actions: { gap: space.xs, marginTop: space.sm },
 });

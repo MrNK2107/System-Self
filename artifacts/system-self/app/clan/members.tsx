@@ -1,12 +1,17 @@
 // The clan roster as clanmates see it: username, rank, five domain scores, shadow status, 30-day quest completion
-// (% only) and the dead-weight flag. The leader can remove flagged members and transfer leadership.
+// (% only) and the inactivity flag. A member opens in a sheet: their scores, a challenge, and (for the leader)
+// remove a flagged member or hand over leadership.
 import React, { useState } from "react";
-import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Text } from "react-native";
 import { RANKED_DOMAINS } from "@workspace/engine";
 import type { ClanMember } from "@workspace/contracts";
-import { AuthNotice, AuthShell } from "@/components/AuthShell";
 import { ChallengeComposer } from "@/components/ChallengeComposer";
-import { RankBadge } from "@/components/RankBadge";
+import { Group, Notice, Sheet } from "@/components/arena/parts";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { DOMAIN_COLORS } from "@/constants/domains";
+import { type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { useClanActions, useMyClanQuery } from "@/hooks/useClan";
 import { SYNC_PENDING_MESSAGE, completionLabel, describeClanError, isLeader, removableMembers, transferCandidates } from "@/lib/clan/clan";
@@ -20,83 +25,19 @@ function confirm(title: string, body: string, action: string, run: () => void) {
   ]);
 }
 
-function MemberCard({
-  m,
-  canRemove,
-  canTransfer,
-  busy,
-  onRemove,
-  onTransfer,
-}: {
-  m: ClanMember;
-  canRemove: boolean;
-  canTransfer: boolean;
-  busy: boolean;
-  onRemove: () => void;
-  onTransfer: () => void;
-}) {
-  const colors = useColors();
-  const p = m.profile;
-  const [challenging, setChallenging] = useState(false);
-  return (
-    <View style={[s.card, { backgroundColor: colors.card, borderColor: m.flagged ? "#E0555560" : colors.border }]}>
-      <View style={s.head}>
-        <RankBadge rank={p.rank} size="sm" />
-        <View style={s.body}>
-          <Text style={[s.handle, { color: m.isSelf ? colors.primary : colors.foreground }]} numberOfLines={1}>
-            {p.handle}
-            {m.role === "leader" ? "  · LEADER" : ""}
-            {m.isSelf ? "  · YOU" : ""}
-          </Text>
-          <Text style={[s.meta, { color: colors.mutedForeground }]}>
-            QUESTS 30D {completionLabel(m.questCompletionRate30d)}
-            {p.shadowActive ? "  ·  SHADOW ACTIVE" : ""}
-            {m.flagged ? "  ·  DEAD WEIGHT" : ""}
-          </Text>
-        </View>
-      </View>
-      {p.scores ? (
-        <View style={s.scores}>
-          {RANKED_DOMAINS.map((d) => (
-            <View key={d} style={s.score}>
-              <Text style={[s.scoreVal, { color: colors.foreground }]}>{Math.round(p.scores![d])}</Text>
-              <Text style={[s.scoreLabel, { color: colors.mutedForeground }]}>{d.slice(0, 4)}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
-      {!m.isSelf ? (
-        challenging ? (
-          <ChallengeComposer opponent={p.handle} />
-        ) : (
-          <TouchableOpacity onPress={() => setChallenging(true)} accessibilityRole="button" style={[s.action, { borderColor: colors.primary, alignSelf: "flex-start" }]}>
-            <Text style={[s.actionText, { color: colors.primary }]}>CHALLENGE</Text>
-          </TouchableOpacity>
-        )
-      ) : null}
-      {canRemove || canTransfer ? (
-        <View style={s.actions}>
-          {canRemove ? (
-            <TouchableOpacity onPress={onRemove} disabled={busy} accessibilityRole="button" style={[s.action, { borderColor: colors.destructive }]}>
-              <Text style={[s.actionText, { color: colors.foreground }]}>REMOVE</Text>
-            </TouchableOpacity>
-          ) : null}
-          {canTransfer ? (
-            <TouchableOpacity onPress={onTransfer} disabled={busy} accessibilityRole="button" style={[s.action, { borderColor: colors.border }]}>
-              <Text style={[s.actionText, { color: colors.mutedForeground }]}>MAKE LEADER</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      ) : null}
-    </View>
-  );
-}
+const memberLine = (m: ClanMember) =>
+  [`Rank ${m.profile.rank}`, `Quests 30d ${completionLabel(m.questCompletionRate30d)}`, m.flagged ? "Inactive 5 days" : null, m.profile.shadowActive ? "Shadow active" : null]
+    .filter(Boolean)
+    .join(" · ");
 
 export default function ClanMembersScreen() {
+  const colors = useColors();
   const q = useMyClanQuery();
   const actions = useClanActions();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [challenging, setChallenging] = useState(false);
 
   const attempt = async (send: () => Promise<MutationResult<unknown>>) => {
     setBusy(true);
@@ -104,6 +45,7 @@ export default function ClanMembersScreen() {
     try {
       const r = await send();
       if (!r.ok) setError(SYNC_PENDING_MESSAGE);
+      else setOpenId(null);
     } catch (e) {
       setError(describeClanError(e));
     } finally {
@@ -113,50 +55,96 @@ export default function ClanMembersScreen() {
 
   const data = q.data;
   const leaderView = isLeader(data);
-  // Leader actions come from the plain helpers: remove flagged dead weight only, transfer to anyone but self.
+  // Leader actions come from the plain helpers: remove flagged members only, transfer to anyone but self.
   const removable = new Set(leaderView && data ? removableMembers(data.members).map((m) => m.userId) : []);
   const heirs = new Set(leaderView && data ? transferCandidates(data.members).map((m) => m.userId) : []);
+  const open = data?.members.find((m) => m.userId === openId) ?? null;
+  const show = (m: ClanMember) => {
+    setError(null);
+    setChallenging(false);
+    setOpenId(m.userId);
+  };
 
   return (
-    <AuthShell tag="CLAN" title="Roster" subtitle="Members see each other by username. Flagged: 5 consecutive inactive days, excluded from the clan score." back>
-      {error ? <AuthNotice message={error} /> : null}
+    <Screen title="Roster" back>
+      <Text style={[type.body, { color: colors.mutedForeground }]}>
+        Members see each other by username. A member quiet for 5 days in a row is flagged and stops counting toward the clan score.
+      </Text>
+      {error && !open ? <Notice message={error} /> : null}
       {!data ? (
-        <AuthNotice tone={q.isError ? "error" : "info"} message={q.isError ? describeClanError(q.error) : "Loading."} onRetry={q.isError ? () => void q.refetch() : undefined} />
+        q.isError ? (
+          <Notice message={describeClanError(q.error)} onRetry={() => void q.refetch()} />
+        ) : (
+          <ActivityIndicator color={colors.primary} />
+        )
       ) : !data.clan ? (
-        <AuthNotice tone="info" message="You are not in a clan." />
+        <Notice tone="info" message="You are not in a clan." />
       ) : (
-        <View style={s.list}>
+        <Group>
           {data.members.map((m) => (
-            <MemberCard
+            <ListRow
               key={m.userId}
-              m={m}
-              canRemove={removable.has(m.userId)}
-              canTransfer={heirs.has(m.userId)}
-              busy={busy}
-              onRemove={() => confirm("Remove dead weight?", `${m.profile.handle} leaves the clan.`, "Remove", () => void attempt(() => actions.remove(m.userId)))}
-              onTransfer={() =>
-                confirm("Transfer leadership?", `${m.profile.handle} becomes the leader. You become a member.`, "Transfer", () => void attempt(() => actions.transfer(m.userId)))
-              }
+              title={`${m.profile.handle}${m.role === "leader" ? " · Leader" : ""}${m.isSelf ? " · You" : ""}`}
+              subtitle={memberLine(m)}
+              dot={m.flagged ? colors.warn : undefined}
+              chevron
+              onPress={() => show(m)}
             />
           ))}
-        </View>
+        </Group>
       )}
-    </AuthShell>
+
+      <Sheet visible={open !== null} title={open?.profile.handle ?? "Member"} onClose={() => setOpenId(null)} dismissable={!busy}>
+        {open ? (
+          <>
+            <Text style={[type.meta, { color: colors.mutedForeground }]}>{memberLine(open)}</Text>
+            {open.profile.scores ? (
+              <Group>
+                {RANKED_DOMAINS.map((d) => (
+                  <ListRow
+                    key={d}
+                    title={d}
+                    dot={DOMAIN_COLORS[d]}
+                    trailing={<Text style={[type.number, { color: colors.foreground }]}>{open.profile.scores![d].toFixed(1)}</Text>}
+                  />
+                ))}
+              </Group>
+            ) : null}
+            {!open.isSelf ? (
+              challenging ? (
+                <ChallengeComposer opponent={open.profile.handle} />
+              ) : (
+                <Button label="Challenge" block onPress={() => setChallenging(true)} />
+              )
+            ) : null}
+            {error ? <Notice message={error} /> : null}
+            {heirs.has(open.userId) ? (
+              <Button
+                label="Make leader"
+                variant="tonal"
+                block
+                disabled={busy}
+                onPress={() =>
+                  confirm("Transfer leadership?", `${open.profile.handle} becomes the leader. You become a member.`, "Transfer", () =>
+                    void attempt(() => actions.transfer(open.userId)),
+                  )
+                }
+              />
+            ) : null}
+            {removable.has(open.userId) ? (
+              <Button
+                label="Remove from clan"
+                variant="destructive"
+                block
+                loading={busy}
+                onPress={() => confirm("Remove this member?", `${open.profile.handle} leaves the clan.`, "Remove", () => void attempt(() => actions.remove(open.userId)))}
+              />
+            ) : null}
+          </>
+        ) : null}
+      </Sheet>
+    </Screen>
   );
 }
 
-const s = StyleSheet.create({
-  list: { gap: 8 },
-  card: { borderWidth: 1, borderRadius: 4, padding: 12, gap: 10 },
-  head: { flexDirection: "row", alignItems: "center", gap: 12 },
-  body: { flex: 1, gap: 3 },
-  handle: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 0.5 },
-  meta: { fontSize: 9, letterSpacing: 1.5, fontWeight: "700" as const },
-  scores: { flexDirection: "row", justifyContent: "space-between" },
-  score: { alignItems: "center", gap: 2, flex: 1 },
-  scoreVal: { fontSize: 13, fontWeight: "800" as const, fontFamily: "SpaceMono" },
-  scoreLabel: { fontSize: 8, fontWeight: "800" as const, letterSpacing: 1.5 },
-  actions: { flexDirection: "row", gap: 8 },
-  action: { borderWidth: 1, borderRadius: 3, paddingHorizontal: 12, paddingVertical: 6 },
-  actionText: { fontSize: 10, fontWeight: "800" as const, letterSpacing: 2 },
-});
+

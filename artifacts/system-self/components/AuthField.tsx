@@ -1,28 +1,26 @@
 import { Feather } from "@expo/vector-icons";
 import React, { forwardRef, useState } from "react";
-import {
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  type TextInputProps,
-} from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
 
+import { fonts, space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 
 interface AuthFieldProps extends Omit<TextInputProps, "style"> {
   label: string;
   error?: string | null;
   hint?: string;
-  /** Adds a SHOW / HIDE toggle and hides the text. */
+  /** Adds a show / hide toggle and hides the text. */
   secret?: boolean;
-  /** Monospace text for codes and years. */
+  /** Tabular figures for codes and years. */
   mono?: boolean;
 }
 
+/**
+ * Labelled text input: 52dp frame (taller when multiline), primary frame while focused, destructive frame and
+ * message on error. The error replaces the hint, so the field always says what to do next.
+ */
 export const AuthField = forwardRef<TextInput, AuthFieldProps>(function AuthField(
-  { label, error, hint, secret, mono, onFocus, onBlur, ...input },
+  { label, error, hint, secret, mono, onFocus, onBlur, multiline, ...input },
   ref,
 ) {
   const colors = useColors();
@@ -33,17 +31,21 @@ export const AuthField = forwardRef<TextInput, AuthFieldProps>(function AuthFiel
 
   return (
     <View style={s.wrap}>
-      <Text style={[s.label, { color: colors.mutedForeground }]}>{label}</Text>
-      <View style={[s.inputWrap, { borderColor, backgroundColor: colors.card }]}>
+      <Text style={[type.label, { color: error ? colors.destructive : colors.mutedForeground }]}>{label}</Text>
+      <View style={[s.frame, multiline && s.frameMulti, { borderColor, backgroundColor: colors.card }]}>
         <TextInput
           ref={ref}
           {...input}
-          style={[s.input, { color: colors.foreground }, mono && s.mono]}
-          placeholderTextColor={colors.mutedForeground}
+          multiline={multiline}
+          style={[type.body, s.input, multiline && s.inputMulti, { color: colors.foreground }, mono && s.mono]}
+          placeholderTextColor={colors.subtle}
+          selectionColor={colors.primary}
+          cursorColor={colors.primary}
           secureTextEntry={secret && !revealed}
           autoCapitalize={input.autoCapitalize ?? "none"}
           autoCorrect={false}
           accessibilityLabel={label}
+          accessibilityHint={error ?? hint}
           onFocus={(e) => {
             setFocused(true);
             onFocus?.(e);
@@ -54,43 +56,37 @@ export const AuthField = forwardRef<TextInput, AuthFieldProps>(function AuthFiel
           }}
         />
         {secret ? (
-          <TouchableOpacity
+          <Pressable
             onPress={() => setRevealed((r) => !r)}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            android_ripple={{ color: "rgba(168,121,255,0.2)", borderless: true, radius: 24 }}
             accessibilityRole="button"
             accessibilityLabel={revealed ? "Hide password" : "Show password"}
+            style={s.toggle}
           >
-            <Text style={[s.toggle, { color: colors.mutedForeground }]}>{revealed ? "HIDE" : "SHOW"}</Text>
-          </TouchableOpacity>
+            <Feather name={revealed ? "eye-off" : "eye"} size={20} color={colors.mutedForeground} />
+          </Pressable>
         ) : null}
       </View>
       {error ? (
-        <View style={s.msgRow}>
-          <Feather name="alert-circle" size={12} color={colors.destructive} />
-          <Text style={[s.msg, { color: colors.destructive }]}>{error}</Text>
+        <View style={s.msgRow} accessibilityLiveRegion="polite">
+          <Feather name="alert-circle" size={14} color={colors.destructive} />
+          <Text style={[type.meta, s.msg, { color: colors.destructive }]}>{error}</Text>
         </View>
       ) : hint ? (
-        <Text style={[s.msg, { color: colors.mutedForeground }]}>{hint}</Text>
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>{hint}</Text>
       ) : null}
     </View>
   );
 });
 
 const s = StyleSheet.create({
-  wrap: { gap: 6 },
-  label: { fontSize: 9, letterSpacing: 2.5, fontWeight: "700" as const },
-  inputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  input: { flex: 1, fontSize: 16, letterSpacing: 0.5, padding: 0 },
-  mono: { fontFamily: "monospace", letterSpacing: 2 },
-  toggle: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 2 },
-  msgRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  msg: { fontSize: 12, lineHeight: 17 },
+  wrap: { gap: space.sm },
+  frame: { flexDirection: "row", alignItems: "center", minHeight: 52, borderWidth: 1, borderRadius: 4, paddingLeft: space.md, paddingRight: space.xs },
+  frameMulti: { alignItems: "flex-start", minHeight: 104 },
+  input: { flex: 1, paddingVertical: space.sm + 4, paddingRight: space.sm + 4 },
+  inputMulti: { minHeight: 96, textAlignVertical: "top" },
+  mono: { fontFamily: fonts.display, fontVariant: ["tabular-nums"] },
+  toggle: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
+  msgRow: { flexDirection: "row", alignItems: "center", gap: space.xs + 2 },
+  msg: { flex: 1 },
 });

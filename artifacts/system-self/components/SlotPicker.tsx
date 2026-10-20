@@ -1,8 +1,11 @@
 // Lock the Slot: pick an exact start (15-minute chips) and a length; the window stays on one day, at most 4 h.
 // Quiet-hour suggestions (from the user's own scout reports) render above the chips; none render when empty.
 import React, { useEffect, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+
+import { Sheet } from "@/components/quests/Sheet";
+import { Button } from "@/components/ui/Button";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { buildSlot, durationsFor, fromHHMM, slotStartOptions } from "@/lib/game/slots";
 
@@ -25,13 +28,30 @@ const START_OPTIONS = slotStartOptions();
 const DEFAULT_START = "17:00";
 
 function durationLabel(m: number): string {
-  if (m < 60) return `${m} MIN`;
-  return m % 60 === 0 ? `${m / 60} H` : `${Math.floor(m / 60)} H ${m % 60}`;
+  if (m < 60) return `${m} min`;
+  return m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60}`;
+}
+
+function Chip({ label, selected, onPress, a11y }: { label: string; selected: boolean; onPress: () => void; a11y?: string }) {
+  const colors = useColors();
+  return (
+    <View style={[s.chipClip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.muted : "transparent" }]}>
+      <Pressable
+        onPress={onPress}
+        android_ripple={{ color: "rgba(168,121,255,0.16)" }}
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        accessibilityLabel={a11y ?? label}
+        style={s.chip}
+      >
+        <Text style={[type.meta, { color: selected ? colors.primary : colors.foreground }]}>{label}</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 export function SlotPicker({ visible, questTitle, current, suggestions, hint, busy, onCancel, onConfirm, onClear }: Props) {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
   const [start, setStart] = useState(DEFAULT_START);
   const [duration, setDuration] = useState(60);
 
@@ -49,115 +69,81 @@ export function SlotPicker({ visible, questTitle, current, suggestions, hint, bu
   const allowed = durationsFor(start);
   const effective = allowed.includes(duration) ? duration : (allowed[allowed.length - 1] ?? 30);
   const slot = buildSlot(start, effective);
-  const chip = (selected: boolean) => ({
-    borderColor: selected ? colors.primary : colors.border,
-    backgroundColor: selected ? colors.accentFill + "20" : "transparent",
-  });
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
-      <View style={styles.fill}>
-        <Pressable style={styles.backdrop} onPress={busy ? undefined : onCancel} />
-        <View
-          style={[styles.sheet, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: insets.bottom + 16 }]}
-        >
-          <Text style={[styles.label, { color: colors.primary }]}>LOCK THE SLOT</Text>
-          <Text style={[styles.quest, { color: colors.foreground }]} numberOfLines={2}>
-            {questTitle}
-          </Text>
-          {suggestions && suggestions.length > 0 ? (
-            <View style={styles.chipWrap}>
-              <Text style={[styles.sub, { color: colors.mutedForeground }]}>QUIET HOURS</Text>
-              {suggestions.map((s) => (
-                <Pressable
-                  key={s.label}
-                  style={[styles.chip, chip(s.start === start)]}
-                  onPress={() => setStart(s.start)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Quiet hour ${s.label}`}
-                >
-                  <Text style={[styles.chipText, { color: colors.foreground }]}>{s.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : hint ? (
-            <Text style={[styles.note, { color: colors.mutedForeground }]}>{hint}</Text>
-          ) : null}
-          <Text style={[styles.sub, { color: colors.mutedForeground }]}>START</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {START_OPTIONS.map((t) => (
-              <Pressable
-                key={t}
-                style={[styles.chip, chip(t === start)]}
-                onPress={() => setStart(t)}
-                accessibilityRole="button"
-                accessibilityLabel={`Start ${t}`}
-              >
-                <Text style={[styles.chipText, { color: colors.foreground }]}>{t}</Text>
-              </Pressable>
+    <Sheet
+      visible={visible}
+      title="Lock the slot"
+      onClose={onCancel}
+      locked={busy}
+      footer={
+        <View style={s.row}>
+          {current ? (
+            <Button label="Clear" variant="text" onPress={onClear} disabled={busy} accessibilityLabel="Clear slot" />
+          ) : (
+            <Button label="Cancel" variant="text" onPress={onCancel} disabled={busy} />
+          )}
+          <Button
+            label="Lock it"
+            onPress={() => slot && onConfirm(slot)}
+            disabled={!slot}
+            loading={busy}
+            style={s.grow}
+            accessibilityLabel="Lock slot"
+          />
+        </View>
+      }
+    >
+      <Text style={[type.body, { color: colors.mutedForeground }]} numberOfLines={2}>
+        {questTitle}
+      </Text>
+
+      {suggestions && suggestions.length > 0 ? (
+        <View style={s.group}>
+          <Text style={[type.label, { color: colors.mutedForeground }]}>QUIET HOURS</Text>
+          <View style={s.wrap}>
+            {suggestions.map((x) => (
+              <Chip key={x.label} label={x.label} selected={x.start === start} onPress={() => setStart(x.start)} a11y={`Quiet hour ${x.label}`} />
             ))}
-          </ScrollView>
-          <Text style={[styles.sub, { color: colors.mutedForeground }]}>LENGTH</Text>
-          <View style={styles.chipWrap}>
-            {allowed.map((d) => (
-              <Pressable key={d} style={[styles.chip, chip(d === effective)]} onPress={() => setDuration(d)} accessibilityRole="button">
-                <Text style={[styles.chipText, { color: colors.foreground }]}>{durationLabel(d)}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Text style={[styles.window, { color: colors.foreground }]}>{slot ? `${slot.slotStart}–${slot.slotEnd}` : "--:--"}</Text>
-          <Text style={[styles.note, { color: colors.mutedForeground }]}>
-            Choosing a slot changes what the SYSTEM says to you. It does not change when the quest fails.
-          </Text>
-          <View style={styles.row}>
-            {current ? (
-              <Pressable
-                style={[styles.btn, { borderColor: colors.border, opacity: busy ? 0.5 : 1 }]}
-                onPress={onClear}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="Clear slot"
-              >
-                <Text style={[styles.btnText, { color: colors.mutedForeground }]}>CLEAR</Text>
-              </Pressable>
-            ) : (
-              <Pressable style={[styles.btn, { borderColor: colors.border }]} onPress={onCancel} disabled={busy} accessibilityRole="button">
-                <Text style={[styles.btnText, { color: colors.mutedForeground }]}>CANCEL</Text>
-              </Pressable>
-            )}
-            <Pressable
-              style={[
-                styles.btn,
-                { borderColor: colors.primary + "80", backgroundColor: colors.accentFill + "18", opacity: busy || !slot ? 0.5 : 1 },
-              ]}
-              onPress={() => slot && onConfirm(slot)}
-              disabled={busy || !slot}
-              accessibilityRole="button"
-              accessibilityLabel="Lock slot"
-            >
-              <Text style={[styles.btnText, { color: colors.primary }]}>LOCK IT</Text>
-            </Pressable>
           </View>
         </View>
+      ) : hint ? (
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>{hint}</Text>
+      ) : null}
+
+      <View style={s.group}>
+        <Text style={[type.label, { color: colors.mutedForeground }]}>START</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.line}>
+          {START_OPTIONS.map((t) => (
+            <Chip key={t} label={t} selected={t === start} onPress={() => setStart(t)} a11y={`Start ${t}`} />
+          ))}
+        </ScrollView>
       </View>
-    </Modal>
+
+      <View style={s.group}>
+        <Text style={[type.label, { color: colors.mutedForeground }]}>LENGTH</Text>
+        <View style={s.wrap}>
+          {allowed.map((d) => (
+            <Chip key={d} label={durationLabel(d)} selected={d === effective} onPress={() => setDuration(d)} />
+          ))}
+        </View>
+      </View>
+
+      <Text style={[type.number, s.window, { color: colors.foreground }]}>{slot ? `${slot.slotStart}–${slot.slotEnd}` : "--:--"}</Text>
+      <Text style={[type.meta, { color: colors.mutedForeground }]}>
+        A slot changes what THE SYSTEM says to you. It does not change when the quest fails.
+      </Text>
+    </Sheet>
   );
 }
 
-const styles = StyleSheet.create({
-  fill: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000A" },
-  sheet: { borderTopWidth: 1, padding: 20, gap: 10 },
-  label: { fontSize: 11, fontWeight: "800", letterSpacing: 3 },
-  quest: { fontSize: 14, fontWeight: "600" },
-  sub: { fontSize: 9, fontWeight: "700", letterSpacing: 2, marginTop: 4 },
-  chipRow: { gap: 6 },
-  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" },
-  chip: { borderWidth: 1, borderRadius: 2, paddingHorizontal: 10, paddingVertical: 7 },
-  chipText: { fontSize: 11, fontWeight: "600" },
-  window: { fontSize: 22, fontWeight: "800", letterSpacing: 2, textAlign: "center", marginTop: 6 },
-  note: { fontSize: 11, lineHeight: 16 },
-  row: { flexDirection: "row", gap: 8, marginTop: 4 },
-  btn: { flex: 1, borderWidth: 1, borderRadius: 2, paddingVertical: 13, alignItems: "center" },
-  btnText: { fontSize: 11, fontWeight: "700", letterSpacing: 2 },
+const s = StyleSheet.create({
+  group: { gap: space.sm, marginTop: space.sm },
+  wrap: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  line: { gap: space.sm },
+  chipClip: { borderWidth: 1, borderRadius: 4, overflow: "hidden" },
+  chip: { minHeight: 48, minWidth: 64, paddingHorizontal: space.md, alignItems: "center", justifyContent: "center" },
+  window: { textAlign: "center", marginTop: space.md },
+  row: { flexDirection: "row", gap: space.sm, alignItems: "center" },
+  grow: { flex: 1 },
 });

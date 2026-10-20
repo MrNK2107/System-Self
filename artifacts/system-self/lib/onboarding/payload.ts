@@ -26,6 +26,9 @@ export interface OnboardingDraft {
   homePath?: boolean;
   /** Chosen on the life step; the server defaults to student when absent. */
   lifeContext?: LifeContext;
+  /** Chosen on the schedule step (HH:MM); DEFAULT_MORNING_TIME / DEFAULT_NIGHTLY_TIME when absent. */
+  morningTime?: string;
+  nightlyTime?: string;
 }
 
 /** The request body (schema input shape: the server canonicalises the timezone). */
@@ -56,14 +59,17 @@ export function buildOnboardingPayload(draft: OnboardingDraft, clientId?: string
     biggestWeakness: draft.weakness,
     ...(stoppedBefore ? { stoppedBefore } : {}),
     identitySetting: draft.identity,
-    morningTime: DEFAULT_MORNING_TIME,
-    nightlyTime: DEFAULT_NIGHTLY_TIME,
+    morningTime: draft.morningTime && isHHMM(draft.morningTime) ? draft.morningTime : DEFAULT_MORNING_TIME,
+    nightlyTime: draft.nightlyTime && isHHMM(draft.nightlyTime) ? draft.nightlyTime : DEFAULT_NIGHTLY_TIME,
     timezone: draft.timezone,
     ...(draft.homePath ? { homePathActive: true } : {}),
     ...(draft.lifeContext ? { lifeContext: draft.lifeContext } : {}),
     ...(clientId ? { clientId } : {}),
   };
 }
+
+/** True for a 24-hour HH:MM time, the format the server stores. */
+export const isHHMM = (v: string): boolean => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 
 type Params = Record<string, string | string[] | undefined>;
 
@@ -99,6 +105,8 @@ export function draftFromParams(params: Params, timezone: string): OnboardingDra
   if (primaryGoal.length < MIN_GOAL_LENGTH || !isDomain(weakness)) return null;
   const identity = one(params.identity);
   const life = one(params.lifeContext);
+  const morning = one(params.morningTime);
+  const nightly = one(params.nightlyTime);
   return {
     ratings: parseRatings(params.ratings),
     primaryGoal,
@@ -108,5 +116,7 @@ export function draftFromParams(params: Params, timezone: string): OnboardingDra
     timezone,
     homePath: one(params.homePath) === "1",
     ...(isLifeContext(life) ? { lifeContext: life } : {}),
+    ...(isHHMM(morning) ? { morningTime: morning } : {}),
+    ...(isHHMM(nightly) ? { nightlyTime: nightly } : {}),
   };
 }

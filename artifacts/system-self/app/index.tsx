@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Redirect } from "expo-router";
 import React from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
+import { Button } from "@/components/ui/Button";
+import { space, type } from "@/constants/type";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { api } from "@/lib/api/client";
@@ -34,12 +36,10 @@ export default function Index() {
   if (onboarding.isError) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <Text style={[styles.message, { color: colors.mutedForeground }]}>
+        <Text style={[type.body, styles.message, { color: colors.foreground }]}>
           The System is out of reach. Check your connection.
         </Text>
-        <TouchableOpacity onPress={() => void onboarding.refetch()} accessibilityRole="button" style={styles.retry}>
-          <Text style={[styles.retryText, { color: colors.primary }]}>RETRY</Text>
-        </TouchableOpacity>
+        <Button label="Retry" variant="tonal" onPress={() => void onboarding.refetch()} />
       </View>
     );
   }
@@ -48,8 +48,6 @@ export default function Index() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
-  message: { fontSize: 13, lineHeight: 20, textAlign: "center" },
-  retry: { paddingVertical: 8, paddingHorizontal: 16 },
-  retryText: { fontSize: 11, fontWeight: "700", letterSpacing: 3 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: space.md, paddingHorizontal: space.xl },
+  message: { textAlign: "center" },
 });

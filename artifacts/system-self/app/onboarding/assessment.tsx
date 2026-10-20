@@ -1,143 +1,58 @@
-import React, { useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import React, { useEffect, useState } from "react";
+import { BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
+
+import { AuthField } from "@/components/AuthField";
+import { OnboardingFrame, OptionList, OptionRow } from "@/components/onboarding/OnboardingFrame";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import {
-  DEFAULT_RATING,
   MAX_GOAL_LENGTH,
   MAX_STOPPED_BEFORE_LENGTH,
-  MIN_GOAL_LENGTH,
   RANKED_DOMAINS,
   type RankedDomain as Domain,
 } from "@/lib/onboarding/payload";
+import {
+  completeRatings,
+  nextUnrated,
+  objectiveHint,
+  ratingsHint,
+  weaknessHint,
+  type OnboardingStep,
+  type PartialRatings,
+} from "@/lib/onboarding/steps";
 
-const DOMAINS: readonly Domain[] = RANKED_DOMAINS;
-
-const DOMAIN_CONFIG: Record<Domain, { desc: string; color: string; icon: string }> = {
-  BODY: { desc: "Physical fitness, sleep, nutrition, energy", color: "#E05555", icon: "activity" },
-  MIND: { desc: "Focus, deep work, learning, mental clarity", color: "#3A7BD5", icon: "zap" },
-  WEALTH: { desc: "Income, savings, investing, financial discipline", color: "#4B8B6F", icon: "trending-up" },
-  SOCIAL: { desc: "Relationships, presence, community, how you show up", color: "#B05CD6", icon: "users" },
-  DISCIPLINE: { desc: "Consistency, habit execution, follow-through", color: "#C4873A", icon: "target" },
+const DOMAIN_DESC: Record<Domain, string> = {
+  BODY: "Fitness, sleep, nutrition, energy",
+  MIND: "Focus, deep work, learning",
+  WEALTH: "Income, savings, money habits",
+  SOCIAL: "Relationships, how you show up",
+  DISCIPLINE: "Consistency, follow-through",
 };
 
-const PRESET_GOALS = [
-  { label: "Build a body worth respecting", domain: "BODY" as Domain },
-  { label: "Escape the 9-to-5", domain: "WEALTH" as Domain },
-  { label: "Become mentally elite", domain: "MIND" as Domain },
-  { label: "Build $10k emergency fund", domain: "WEALTH" as Domain },
-  { label: "Run 5km without stopping", domain: "BODY" as Domain },
-  { label: "Read 24 books this year", domain: "MIND" as Domain },
-  { label: "Build an unbreakable daily routine", domain: "DISCIPLINE" as Domain },
-  { label: "Launch a side income stream", domain: "WEALTH" as Domain },
-  { label: "Master a new skill completely", domain: "MIND" as Domain },
-  { label: "I don't know yet — help me find one", domain: "DISCIPLINE" as Domain },
+const PRESET_GOALS: { label: string; domain: Domain }[] = [
+  { label: "Build a body worth respecting", domain: "BODY" },
+  { label: "Escape the 9-to-5", domain: "WEALTH" },
+  { label: "Become mentally elite", domain: "MIND" },
+  { label: "Build $10k emergency fund", domain: "WEALTH" },
+  { label: "Run 5km without stopping", domain: "BODY" },
+  { label: "Read 24 books this year", domain: "MIND" },
+  { label: "Build an unbreakable daily routine", domain: "DISCIPLINE" },
+  { label: "Launch a side income stream", domain: "WEALTH" },
+  { label: "Master a new skill completely", domain: "MIND" },
+  { label: "I don't know yet — help me find one", domain: "DISCIPLINE" },
 ];
 
-const DOMAIN_LABELS: Record<Domain, string> = {
-  BODY: "Physical",
-  MIND: "Mental",
-  WEALTH: "Financial",
-  SOCIAL: "Social",
-  DISCIPLINE: "Discipline",
-};
-
-function StepBadge({ step, total }: { step: number; total: number }) {
-  return (
-    <View style={s.stepBadge}>
-      {Array.from({ length: total }).map((_, i) => (
-        <View
-          key={i}
-          style={[
-            s.stepDot,
-            { backgroundColor: i < step ? "#3A7BD5" : i === step ? "#3A7BD580" : "#1A1D24" },
-          ]}
-        />
-      ))}
-    </View>
-  );
-}
-
-function DomainRatingCard({
-  domain,
-  value,
-  onChange,
-}: {
-  domain: Domain;
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  const { color, desc, icon } = DOMAIN_CONFIG[domain];
-  const percentage = ((value - 1) / 9) * 100;
-
-  return (
-    <View style={[s.domainCard, { borderColor: `${color}30` }]}>
-      <LinearGradient
-        colors={[`${color}12`, "transparent"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={s.domainCardTop}>
-        <View style={[s.domainIconWrap, { backgroundColor: `${color}20`, borderColor: `${color}40` }]}>
-          <Feather name={icon as "activity"} size={16} color={color} />
-        </View>
-        <View style={s.domainCardInfo}>
-          <Text style={[s.domainName, { color }]}>{domain}</Text>
-          <Text style={s.domainDesc}>{desc}</Text>
-        </View>
-        <View style={[s.ratingPill, { borderColor: `${color}50`, backgroundColor: `${color}15` }]}>
-          <Text style={[s.ratingValue, { color }]}>{value}</Text>
-          <Text style={s.ratingMax}>/10</Text>
-        </View>
-      </View>
-
-      {/* Progress bar tap zones */}
-      <View style={s.tapRow}>
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
-          <TouchableOpacity
-            key={i}
-            style={[
-              s.tapSegment,
-              {
-                backgroundColor: value >= i ? color : `${color}20`,
-                opacity: value >= i ? (i <= 3 ? 0.4 + i * 0.12 : 1) : 0.25,
-              },
-            ]}
-            onPress={() => onChange(i)}
-            activeOpacity={0.8}
-          />
-        ))}
-      </View>
-
-      <View style={s.ratingScale}>
-        <Text style={s.scaleLabel}>Struggling</Text>
-        <Text style={s.scaleLabel}>Average</Text>
-        <Text style={s.scaleLabel}>Elite</Text>
-      </View>
-    </View>
-  );
-}
+/** The assessment runs as three steps on one route, so the answers survive moving back and forth. */
+const SUBSTEPS: OnboardingStep[] = ["rate", "objective", "weakness"];
 
 export default function AssessmentScreen() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
+  const [sub, setSub] = useState(0);
 
-  const [ratings, setRatings] = useState<Record<Domain, number>>({
-    BODY: DEFAULT_RATING, MIND: DEFAULT_RATING, WEALTH: DEFAULT_RATING, SOCIAL: DEFAULT_RATING, DISCIPLINE: DEFAULT_RATING,
-  });
+  // Every domain starts unset: nobody ships a default 5.
+  const [ratings, setRatings] = useState<PartialRatings>({});
+  const [active, setActive] = useState<Domain | null>(RANKED_DOMAINS[0] ?? null);
   const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
   const [customGoal, setCustomGoal] = useState("");
   const [showCustom, setShowCustom] = useState(false);
@@ -145,534 +60,239 @@ export default function AssessmentScreen() {
   const [stoppedBefore, setStoppedBefore] = useState("");
   const [homeFirst, setHomeFirst] = useState(false);
 
-  const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
-
   const primaryGoal = showCustom ? customGoal.trim() : (selectedGoal ?? "");
-  const canContinue = primaryGoal.length >= MIN_GOAL_LENGTH && weakness !== null;
+
+  const back = () => (sub > 0 ? setSub(sub - 1) : router.back());
+
+  // Android back walks the sub-steps before leaving the screen.
+  useEffect(() => {
+    if (sub === 0) return;
+    const h = BackHandler.addEventListener("hardwareBackPress", () => {
+      setSub((n) => Math.max(0, n - 1));
+      return true;
+    });
+    return () => h.remove();
+  }, [sub]);
+
+  const rate = (domain: Domain, value: number) => {
+    const next = { ...ratings, [domain]: value };
+    setRatings(next);
+    setActive(nextUnrated(next, domain));
+  };
 
   const handleSelectGoal = (goal: string) => {
     setSelectedGoal(goal);
     setShowCustom(false);
     if (!weakness) {
-      const match = PRESET_GOALS.find(g => g.label === goal);
+      const match = PRESET_GOALS.find((g) => g.label === goal);
       if (match) setWeakness(match.domain);
     }
   };
 
-  const handleNext = () => {
-    if (!canContinue) return;
+  const finish = () => {
+    const full = completeRatings(ratings);
+    if (!full || objectiveHint(primaryGoal) || !weakness) return;
     router.push({
       pathname: "/onboarding/identity",
       params: {
-        ratings: JSON.stringify(ratings),
+        ratings: JSON.stringify(full),
         primaryGoal,
-        weakness: weakness ?? "DISCIPLINE",
+        weakness,
         stoppedBefore: stoppedBefore.trim(),
         ...(homeFirst ? { homePath: "1" } : {}),
       },
     });
   };
 
-  return (
-    <KeyboardAvoidingView
-      style={[s.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
-      {/* Header */}
-      <View style={[s.header, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
-        </TouchableOpacity>
-        <View style={s.headerCenter}>
-          <Text style={s.headerLabel}>BASELINE ASSESSMENT</Text>
-          <StepBadge step={0} total={4} />
-        </View>
-        <View style={{ width: 32 }} />
-      </View>
-
-      <ScrollView
-        contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 100 }]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+  if (sub === 0) {
+    const hint = ratingsHint(ratings);
+    return (
+      <OnboardingFrame
+        key="rate"
+        step={SUBSTEPS[0]!}
+        onBack={back}
+        title="Where are you, actually?"
+        subtitle="Rate each domain from 1 to 10. Today, not on a good day."
+        hint={hint}
+        action={{ label: "Continue", onPress: () => setSub(1), disabled: hint !== null }}
       >
-        {/* Title */}
-        <View style={s.titleSection}>
-          <Text style={[s.title, { color: colors.foreground }]}>
-            Where are you,{"\n"}
-            <Text style={{ color: "#3A7BD5" }}>actually?</Text>
-          </Text>
-          <Text style={[s.subtitle, { color: colors.mutedForeground }]}>
-            Rate each domain honestly. THE SYSTEM uses this to calibrate your starting point.
-          </Text>
-        </View>
+        <OptionList>
+          {RANKED_DOMAINS.map((d) => {
+            const value = ratings[d];
+            const open = active === d;
+            return (
+              <View key={d} style={{ borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }}>
+                <Pressable
+                  onPress={() => setActive(open ? null : d)}
+                  android_ripple={{ color: "rgba(168,121,255,0.12)" }}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: open }}
+                  accessibilityLabel={`${d}, ${value ? `rated ${value} of 10` : "not rated"}`}
+                  style={s.domainRow}
+                >
+                  <View style={[s.dot, { backgroundColor: colors.domain[d] }]} />
+                  <View style={s.rowText}>
+                    <Text style={[type.bodyStrong, { color: colors.foreground }]}>{d}</Text>
+                    <Text style={[type.meta, { color: colors.mutedForeground }]}>{DOMAIN_DESC[d]}</Text>
+                  </View>
+                  <Text style={[type.number, { color: value ? colors.foreground : colors.subtle }]}>{value ?? "–"}</Text>
+                </Pressable>
+                {open ? <RatingGrid domain={d} value={value} onChange={(v) => rate(d, v)} /> : null}
+              </View>
+            );
+          })}
+        </OptionList>
+      </OnboardingFrame>
+    );
+  }
 
-        {/* Domain ratings */}
-        <View style={s.section}>
-          {DOMAINS.map(domain => (
-            <DomainRatingCard
-              key={domain}
-              domain={domain}
-              value={ratings[domain]}
-              onChange={v => setRatings(r => ({ ...r, [domain]: v }))}
+  if (sub === 1) {
+    const hint = objectiveHint(primaryGoal);
+    return (
+      <OnboardingFrame
+        key="objective"
+        step={SUBSTEPS[1]!}
+        onBack={back}
+        title="What are you here to change?"
+        subtitle="Pick one, or write your own."
+        hint={hint}
+        action={{ label: "Continue", onPress: () => setSub(2), disabled: hint !== null }}
+      >
+        <OptionList>
+          {PRESET_GOALS.map((g) => (
+            <OptionRow
+              key={g.label}
+              title={g.label}
+              dot={colors.domain[g.domain]}
+              selected={!showCustom && selectedGoal === g.label}
+              onPress={() => handleSelectGoal(g.label)}
             />
           ))}
-        </View>
-
-        {/* Goal selection */}
-        <View style={[s.goalSection, { borderColor: colors.border, backgroundColor: colors.card }]}>
-          <View style={s.goalHeader}>
-            <Feather name="flag" size={14} color="#3A7BD5" />
-            <Text style={s.goalHeaderText}>YOUR PRIMARY OBJECTIVE</Text>
-          </View>
-          <Text style={[s.goalSub, { color: colors.mutedForeground }]}>
-            Select one, or write your own.
-          </Text>
-
-          <View style={s.goalGrid}>
-            {PRESET_GOALS.map(goal => {
-              const color = DOMAIN_CONFIG[goal.domain].color;
-              const active = selectedGoal === goal.label && !showCustom;
-              return (
-                <TouchableOpacity
-                  key={goal.label}
-                  style={[
-                    s.goalChip,
-                    {
-                      borderColor: active ? color : colors.border,
-                      backgroundColor: active ? `${color}18` : colors.background,
-                    },
-                  ]}
-                  onPress={() => handleSelectGoal(goal.label)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.goalDomain, { backgroundColor: `${color}30` }]}>
-                    <Text style={[s.goalDomainText, { color }]}>
-                      {DOMAIN_LABELS[goal.domain]}
-                    </Text>
-                  </View>
-                  <Text style={[s.goalLabel, { color: active ? colors.foreground : colors.mutedForeground }]}>
-                    {goal.label}
-                  </Text>
-                  {active && (
-                    <Feather name="check" size={13} color={color} style={{ marginLeft: "auto" }} />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-
-            {/* Write your own */}
-            <TouchableOpacity
-              style={[
-                s.goalChip,
-                s.customChip,
-                {
-                  borderColor: showCustom ? "#3A7BD5" : colors.border,
-                  backgroundColor: showCustom ? "#3A7BD518" : colors.background,
-                },
-              ]}
-              onPress={() => {
-                setShowCustom(true);
-                setSelectedGoal(null);
-              }}
-              activeOpacity={0.75}
-            >
-              <Feather name="edit-3" size={13} color={showCustom ? "#3A7BD5" : colors.mutedForeground} />
-              <Text style={[s.goalLabel, { color: showCustom ? colors.foreground : colors.mutedForeground }]}>
-                Write my own goal
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {showCustom && (
-            <TextInput
-              style={[s.customInput, { color: colors.foreground, borderColor: "#3A7BD560", backgroundColor: "#3A7BD510" }]}
-              placeholder="Describe what you actually want to achieve..."
-              placeholderTextColor={colors.mutedForeground}
-              value={customGoal}
-              onChangeText={setCustomGoal}
-              multiline
-              numberOfLines={3}
-              maxLength={MAX_GOAL_LENGTH}
-              autoFocus
-            />
-          )}
-        </View>
-
-        {/* Biggest weakness */}
-        <View style={[s.weaknessSection, { borderColor: colors.border, backgroundColor: colors.card }]}>
-          <View style={s.goalHeader}>
-            <Feather name="alert-triangle" size={14} color="#C4873A" />
-            <Text style={s.goalHeaderText}>BIGGEST WEAKNESS</Text>
-          </View>
-          <Text style={[s.goalSub, { color: colors.mutedForeground }]}>
-            Which domain has held you back the most?
-          </Text>
-          <View style={s.weaknessGrid}>
-            {DOMAINS.map(d => {
-              const { color, icon } = DOMAIN_CONFIG[d];
-              const active = weakness === d;
-              return (
-                <TouchableOpacity
-                  key={d}
-                  style={[
-                    s.weaknessCard,
-                    {
-                      borderColor: active ? color : colors.border,
-                      backgroundColor: active ? `${color}18` : "transparent",
-                    },
-                  ]}
-                  onPress={() => setWeakness(d)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.weaknessIcon, { backgroundColor: `${color}20` }]}>
-                    <Feather name={icon as "activity"} size={16} color={color} />
-                  </View>
-                  <Text style={[s.weaknessName, { color: active ? color : colors.foreground }]}>
-                    {d}
-                  </Text>
-                  {active && <View style={[s.weaknessMark, { backgroundColor: color }]} />}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* What has stopped you before (optional) */}
-        <View style={[s.weaknessSection, { borderColor: colors.border, backgroundColor: colors.card }]}>
-          <View style={s.goalHeader}>
-            <Feather name="slash" size={14} color={colors.mutedForeground} />
-            <Text style={[s.goalHeaderText, { color: colors.mutedForeground }]}>WHAT HAS STOPPED YOU BEFORE?</Text>
-          </View>
-          <Text style={[s.goalSub, { color: colors.mutedForeground }]}>
-            Optional. Say it plainly. THE SYSTEM reads it.
-          </Text>
-          <TextInput
-            style={[s.customInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
-            placeholder="What broke the last time you tried..."
-            placeholderTextColor={colors.mutedForeground}
-            value={stoppedBefore}
-            onChangeText={setStoppedBefore}
-            multiline
-            numberOfLines={3}
-            maxLength={MAX_STOPPED_BEFORE_LENGTH}
-            accessibilityLabel="What has stopped you before"
+          <OptionRow
+            title="Write my own"
+            selected={showCustom}
+            onPress={() => {
+              setShowCustom(true);
+              setSelectedGoal(null);
+            }}
           />
-          <Text style={[s.charCount, { color: colors.subtle }]}>
-            {stoppedBefore.length}/{MAX_STOPPED_BEFORE_LENGTH}
-          </Text>
-        </View>
+        </OptionList>
+        {showCustom ? (
+          <AuthField
+            label="YOUR OBJECTIVE"
+            value={customGoal}
+            onChangeText={setCustomGoal}
+            placeholder="What do you actually want to achieve?"
+            autoCapitalize="sentences"
+            multiline
+            maxLength={MAX_GOAL_LENGTH}
+            hint={`${customGoal.length}/${MAX_GOAL_LENGTH}`}
+            autoFocus
+          />
+        ) : null}
+      </OnboardingFrame>
+    );
+  }
 
-        {/* Soft opt-in: BODY quests start as home sessions; the gym is never blocked. */}
-        <TouchableOpacity
-          style={[s.weaknessSection, { borderColor: homeFirst ? "#E05555" : colors.border, backgroundColor: homeFirst ? "#E0555510" : colors.card }]}
+  const hint = weaknessHint(weakness);
+  return (
+    <OnboardingFrame
+      key="weakness"
+      step={SUBSTEPS[2]!}
+      onBack={back}
+      title="What has held you back most?"
+      subtitle="Pick the one domain that has cost you the most."
+      hint={hint}
+      action={{ label: "Continue", onPress: finish, disabled: hint !== null }}
+    >
+      <OptionList>
+        {RANKED_DOMAINS.map((d) => (
+          <OptionRow
+            key={d}
+            title={d}
+            subtitle={DOMAIN_DESC[d]}
+            dot={colors.domain[d]}
+            selected={weakness === d}
+            onPress={() => setWeakness(d)}
+          />
+        ))}
+      </OptionList>
+      <AuthField
+        label="WHAT HAS STOPPED YOU BEFORE? (OPTIONAL)"
+        value={stoppedBefore}
+        onChangeText={setStoppedBefore}
+        placeholder="What broke the last time you tried"
+        autoCapitalize="sentences"
+        multiline
+        maxLength={MAX_STOPPED_BEFORE_LENGTH}
+        hint={`Say it plainly. THE SYSTEM reads it. ${stoppedBefore.length}/${MAX_STOPPED_BEFORE_LENGTH}`}
+      />
+      {/* Soft opt-in: BODY quests start as home sessions; the gym is never blocked. */}
+      <OptionList>
+        <OptionRow
+          kind="checkbox"
+          title="Haven't trained in a while? Start at home"
+          subtitle="BODY quests are home sessions until you finish six. The gym stays open."
+          selected={homeFirst}
           onPress={() => setHomeFirst((v) => !v)}
-          activeOpacity={0.8}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: homeFirst }}
-          accessibilityLabel="Haven't trained in a while? Start at home first"
-        >
-          <View style={s.goalHeader}>
-            <Feather name={homeFirst ? "check-square" : "square"} size={14} color={homeFirst ? "#E05555" : colors.mutedForeground} />
-            <Text style={[s.goalHeaderText, { color: homeFirst ? "#E05555" : colors.mutedForeground }]}>
-              Haven&apos;t trained in a while? START AT HOME FIRST
-            </Text>
-          </View>
-          <Text style={[s.goalSub, { color: colors.mutedForeground }]}>
-            Your BODY quests are home sessions until you finish six. The gym stays open to you anyway.
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
+        />
+      </OptionList>
+    </OnboardingFrame>
+  );
+}
 
-      {/* Footer CTA */}
-      <View style={[s.footer, { paddingBottom: insets.bottom + 16, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-        {!canContinue && (
-          <Text style={[s.missingHint, { color: colors.subtle }]}>
-            {!primaryGoal ? "Select or write your objective above" : "Select your biggest weakness"}
-          </Text>
-        )}
-        <TouchableOpacity
-          onPress={handleNext}
-          disabled={!canContinue}
-          activeOpacity={0.85}
-          style={{ borderRadius: 2, overflow: "hidden" }}
-        >
-          <LinearGradient
-            colors={canContinue ? ["#3A7BD5", "#2A5BA5"] : ["#252830", "#252830"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={s.nextBtn}
-          >
-            <Text style={[s.nextBtnText, { color: canContinue ? "#FFFFFF" : colors.subtle }]}>
-              CONTINUE
-            </Text>
-            {canContinue && <Feather name="arrow-right" size={16} color="#FFFFFF" />}
-          </LinearGradient>
-        </TouchableOpacity>
+/** 1–10 as two rows of five 48dp buttons, with the scale's ends named. */
+function RatingGrid({ domain, value, onChange }: { domain: Domain; value?: number; onChange: (v: number) => void }) {
+  const colors = useColors();
+  const rows = [
+    [1, 2, 3, 4, 5],
+    [6, 7, 8, 9, 10],
+  ];
+  return (
+    <View style={s.grid}>
+      {rows.map((row) => (
+        <View key={row[0]} style={s.gridRow}>
+          {row.map((n) => {
+            const on = value === n;
+            return (
+              <View key={n} style={[s.cellClip, { borderColor: on ? colors.primary : colors.border }]}>
+                <Pressable
+                  onPress={() => onChange(n)}
+                  android_ripple={{ color: "rgba(168,121,255,0.2)" }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={`${domain} ${n} of 10`}
+                  style={[s.cell, on && { backgroundColor: colors.accentFill }]}
+                >
+                  <Text style={[type.number, { color: on ? colors.primaryForeground : colors.foreground }]}>{n}</Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
+      ))}
+      <View style={s.scale}>
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>1 · Struggling</Text>
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>10 · Elite</Text>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  header: {
+  domainRow: {
+    minHeight: 64,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: space.md,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm + 4,
   },
-  backBtn: {
-    width: 32,
-    height: 32,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: "center",
-    gap: 8,
-  },
-  headerLabel: {
-    fontSize: 9,
-    letterSpacing: 3,
-    color: "#4A4D58",
-    fontWeight: "600" as const,
-  },
-  stepBadge: {
-    flexDirection: "row",
-    gap: 4,
-  },
-  stepDot: {
-    width: 16,
-    height: 2,
-    borderRadius: 1,
-  },
-  scroll: {
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    gap: 16,
-  },
-  titleSection: {
-    gap: 8,
-    paddingHorizontal: 4,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "800" as const,
-    lineHeight: 36,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  section: {
-    gap: 10,
-  },
-  domainCard: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 14,
-    gap: 12,
-    overflow: "hidden",
-  },
-  domainCardTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  domainIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  domainCardInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  domainName: {
-    fontSize: 12,
-    fontWeight: "800" as const,
-    letterSpacing: 2,
-  },
-  domainDesc: {
-    fontSize: 11,
-    color: "#4A4D58",
-    lineHeight: 15,
-  },
-  ratingPill: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    gap: 1,
-  },
-  ratingValue: {
-    fontSize: 18,
-    fontWeight: "800" as const,
-    lineHeight: 22,
-  },
-  ratingMax: {
-    fontSize: 10,
-    color: "#4A4D58",
-    fontWeight: "600" as const,
-  },
-  tapRow: {
-    flexDirection: "row",
-    gap: 3,
-    height: 20,
-  },
-  tapSegment: {
-    flex: 1,
-    borderRadius: 2,
-  },
-  ratingScale: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: -4,
-  },
-  scaleLabel: {
-    fontSize: 9,
-    color: "#2A2D38",
-    letterSpacing: 0.5,
-    fontWeight: "600" as const,
-  },
-  goalSection: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 16,
-    gap: 12,
-  },
-  goalHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-  },
-  goalHeaderText: {
-    fontSize: 10,
-    letterSpacing: 2.5,
-    color: "#3A7BD5",
-    fontWeight: "700" as const,
-  },
-  goalSub: {
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: -6,
-  },
-  goalGrid: {
-    gap: 7,
-  },
-  goalChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  customChip: {
-    marginTop: 2,
-  },
-  goalDomain: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  goalDomainText: {
-    fontSize: 8,
-    fontWeight: "700" as const,
-    letterSpacing: 1,
-  },
-  goalLabel: {
-    flex: 1,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "500" as const,
-  },
-  customInput: {
-    borderWidth: 1,
-    borderRadius: 6,
-    padding: 12,
-    fontSize: 13,
-    minHeight: 80,
-    textAlignVertical: "top",
-    lineHeight: 20,
-  },
-  weaknessSection: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 16,
-    gap: 12,
-  },
-  weaknessGrid: {
-    flexDirection: "row",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  weaknessCard: {
-    flex: 1,
-    minWidth: "44%",
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    alignItems: "center",
-    gap: 8,
-    position: "relative",
-  },
-  weaknessIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  weaknessName: {
-    fontSize: 10,
-    fontWeight: "700" as const,
-    letterSpacing: 2,
-  },
-  weaknessMark: {
-    position: "absolute",
-    top: 8,
-    right: 8,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  footer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: 8,
-  },
-  missingHint: {
-    textAlign: "center",
-    fontSize: 11,
-  },
-  charCount: {
-    alignSelf: "flex-end",
-    fontSize: 10,
-    marginTop: -6,
-    fontVariant: ["tabular-nums"],
-  },
-  nextBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-  },
-  nextBtnText: {
-    fontSize: 12,
-    fontWeight: "700" as const,
-    letterSpacing: 3,
-  },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  rowText: { flex: 1, gap: 2 },
+  grid: { paddingHorizontal: space.md, paddingBottom: space.md, gap: space.sm },
+  gridRow: { flexDirection: "row", gap: space.sm },
+  cellClip: { flex: 1, borderWidth: 1, borderRadius: 4, overflow: "hidden" },
+  cell: { minHeight: 48, alignItems: "center", justifyContent: "center" },
+  scale: { flexDirection: "row", justifyContent: "space-between" },
 });

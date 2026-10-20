@@ -18,3 +18,9 @@ test("verdict INSUFFICIENT otherwise", () => {
   assert.equal(debriefVerdict(d(2, -1), 1), "INSUFFICIENT");
   assert.equal(debriefVerdict(d(0.5), 0), "INSUFFICIENT");
 });
+
+test("no quest resolved (rate null) is never PATHETIC: nothing was there to fail; scores alone decide", () => {
+  assert.equal(debriefVerdict(d(0), null), "INSUFFICIENT");
+  assert.equal(debriefVerdict(d(-2), null), "INSUFFICIENT");
+  assert.equal(debriefVerdict(d(2.5), null), "ACCEPTABLE");
+});

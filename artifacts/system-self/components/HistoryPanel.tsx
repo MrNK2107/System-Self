@@ -1,7 +1,7 @@
 // Stats: score history (one line per domain, rank-change markers) and the Rank Freeze control.
-// Lines and marker labels use the readable accent text (colors.primary); accentFill is for the confirm button's fill only.
+// Lines use the domain colour; rank markers use the readable accent text (colors.primary).
 import React, { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
 import Svg, { Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "@/lib/api/client";
@@ -9,7 +9,10 @@ import { useColors } from "@/hooks/useColors";
 import { useGameUserId } from "@/hooks/useGameState";
 import { usePro } from "@/hooks/usePro";
 import { ProLock } from "@/components/ProLock";
-import { ALL_DOMAINS } from "@/constants/domains";
+import { Button } from "@/components/ui/Button";
+import { ALL_DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
+import { space, type } from "@/constants/type";
+import type { Domain } from "@/context/AppContext";
 import { newClientId } from "@/lib/game/actions";
 import {
   FREE_CHART_DAYS,
@@ -35,13 +38,24 @@ import {
   startRankFreeze,
 } from "@/lib/history/history";
 
-const CHART_W = 280;
-const CHART_H = 36;
+const CHART_H = 40;
+const LABEL_H = 16;
 
-export function HistoryPanel() {
+/** Width of the container, so charts fill the column on any phone. */
+function useWidth(initial = 280): [number, (e: LayoutChangeEvent) => void] {
+  const [w, setW] = useState(initial);
+  return [w, (e) => {
+    const next = Math.floor(e.nativeEvent.layout.width);
+    if (next > 0 && next !== w) setW(next);
+  }];
+}
+
+/** Score history for every domain, or one (`domain`) on its detail screen. Quest completion shows with all domains. */
+export function HistoryPanel({ domain }: { domain?: Domain } = {}) {
   const colors = useColors();
   const userId = useGameUserId();
   const pro = usePro();
+  const [chartW, onLayout] = useWidth();
   const days = pro ? PRO_CHART_DAYS : FREE_CHART_DAYS;
   const historyQ = useQuery({
     queryKey: scoreHistoryKey(userId, days),
@@ -54,38 +68,44 @@ export function HistoryPanel() {
   const span = historyQ.data?.days ?? 0;
   const xAt = (i: number) => {
     const o = dayOffset(from, items[i]!.date);
-    return span > 1 ? (o * CHART_W) / (span - 1) : 0;
+    return span > 1 ? (o * chartW) / (span - 1) : 0;
   };
   const trendQ = useQuery({
     queryKey: questTrendKey(userId, days),
     queryFn: () => fetchQuestTrend(api, days),
-    enabled: !!userId,
+    enabled: !!userId && !domain,
   });
-  const bars = trendQ.data ? barRects(trendQ.data.items, trendQ.data.from, trendQ.data.days, CHART_W, CHART_H) : [];
+  const bars = !domain && trendQ.data ? barRects(trendQ.data.items, trendQ.data.from, trendQ.data.days, chartW, CHART_H) : [];
+  const shown = domain ? [domain] : ALL_DOMAINS;
 
   return (
-    <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <View style={s.panel} onLayout={onLayout}>
       <View style={s.header}>
-        <Text style={[s.title, { color: colors.mutedForeground }]}>SCORE HISTORY</Text>
-        <Text style={[s.sub, { color: colors.mutedForeground }]}>{historyQ.data ? `${historyQ.data.days} DAYS` : ""}</Text>
+        <Text style={[type.label, { color: colors.mutedForeground }]}>SCORE HISTORY</Text>
+        <Text style={[type.meta, { color: colors.subtle }]}>{historyQ.data ? `${historyQ.data.days} days` : ""}</Text>
       </View>
       {historyQ.isLoading ? (
         <ActivityIndicator color={colors.primary} />
       ) : historyQ.isError && items.length === 0 ? (
-        <Text style={[s.note, { color: colors.mutedForeground }]}>History unavailable.</Text>
+        <Text style={[type.body, { color: colors.mutedForeground }]}>History is out of reach.</Text>
       ) : items.length === 0 ? (
-        <Text style={[s.note, { color: colors.mutedForeground }]}>No history yet. The first day closes at rollover.</Text>
+        <Text style={[type.body, { color: colors.mutedForeground }]}>No history yet. The first day closes at rollover.</Text>
       ) : (
-        ALL_DOMAINS.map((d) => (
+        shown.map((d) => (
           <View key={d} style={s.row} accessible accessibilityLabel={`${d} score history`}>
-            <Text style={[s.domain, { color: colors.foreground }]}>{d}</Text>
-            <Svg width={CHART_W} height={CHART_H + 12} viewBox={`0 -2 ${CHART_W} ${CHART_H + 12}`}>
+            {!domain && (
+              <View style={s.rowHead}>
+                <View style={[s.dot, { backgroundColor: DOMAIN_COLORS[d] }]} />
+                <Text style={[type.label, { color: colors.foreground }]}>{d}</Text>
+              </View>
+            )}
+            <Svg width={chartW} height={CHART_H + LABEL_H} viewBox={`0 -2 ${chartW} ${CHART_H + LABEL_H}`}>
               {changes.map((c) => (
-                <Line key={`l${c.index}`} x1={xAt(c.index)} x2={xAt(c.index)} y1={0} y2={CHART_H} stroke={colors.mutedForeground} strokeWidth={1} strokeDasharray="2 3" />
+                <Line key={`l${c.index}`} x1={xAt(c.index)} x2={xAt(c.index)} y1={0} y2={CHART_H} stroke={colors.subtle} strokeWidth={1} strokeDasharray="2 3" />
               ))}
-              <Path d={seriesPath(domainSeries(items, d), from, span, CHART_W, CHART_H)} stroke={colors.primary} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+              <Path d={seriesPath(domainSeries(items, d), from, span, chartW, CHART_H)} stroke={DOMAIN_COLORS[d]} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
               {changes.map((c) => (
-                <SvgText key={`t${c.index}`} x={Math.min(xAt(c.index) + 3, CHART_W - 8)} y={CHART_H + 10} fontSize={9} fontWeight="700" fill={colors.primary}>
+                <SvgText key={`t${c.index}`} x={Math.min(xAt(c.index) + 3, chartW - 10)} y={CHART_H + 12} fontSize={12} fontWeight="600" fill={colors.primary}>
                   {c.to}
                 </SvgText>
               ))}
@@ -95,9 +115,9 @@ export function HistoryPanel() {
       )}
       {bars.length > 0 && (
         <View style={s.row} accessible accessibilityLabel="Quest completion trend">
-          <Text style={[s.domain, { color: colors.foreground }]}>QUEST COMPLETION</Text>
-          <Svg width={CHART_W} height={CHART_H}>
-            <Line x1={0} x2={CHART_W} y1={CHART_H} y2={CHART_H} stroke={colors.border} strokeWidth={1} />
+          <Text style={[type.label, { color: colors.foreground }]}>QUEST COMPLETION</Text>
+          <Svg width={chartW} height={CHART_H}>
+            <Line x1={0} x2={chartW} y1={CHART_H} y2={CHART_H} stroke={colors.border} strokeWidth={1} />
             {bars.map((b, i) => (
               <Rect key={i} x={b.x} y={b.y} width={b.width} height={b.height} fill={colors.primary} />
             ))}
@@ -151,32 +171,27 @@ export function RankFreezeCard() {
     start.mutate();
   };
 
+  const note = (text: string) => <Text style={[type.body, { color: colors.mutedForeground }]}>{text}</Text>;
+
   return (
-    <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <Text style={[s.title, { color: colors.mutedForeground }]}>RANK FREEZE</Text>
+    <View style={s.panel}>
+      <Text style={[type.label, { color: colors.mutedForeground }]} accessibilityRole="header">RANK FREEZE</Text>
       {mode === "active" && view.kind === "active" ? (
         <>
-          <Text style={[s.line, { color: colors.primary }]}>{view.line}</Text>
-          <Text style={[s.note, { color: colors.mutedForeground }]}>Through {view.until}.</Text>
+          <Text style={[type.bodyStrong, { color: colors.primary }]}>{view.line}</Text>
+          {note(`Through ${view.until}.`)}
         </>
       ) : mode === "locked" ? (
         <>
-          <Text style={[s.note, { color: colors.mutedForeground }]}>{FREEZE_PITCH}</Text>
+          {note(FREEZE_PITCH)}
           <ProLock label="RANK FREEZE" />
         </>
-      ) : view.kind === "active" ? (
-        <>
-          <Text style={[s.line, { color: colors.primary }]}>{view.line}</Text>
-          <Text style={[s.note, { color: colors.mutedForeground }]}>Through {view.until}.</Text>
-        </>
       ) : view.kind === "wait" ? (
-        <Text style={[s.note, { color: colors.mutedForeground }]}>Available from {view.availableFrom}.</Text>
+        note(`Available from ${view.availableFrom}.`)
       ) : !open ? (
         <>
-          <Text style={[s.note, { color: colors.mutedForeground }]}>{FREEZE_PITCH_PRO}</Text>
-          <TouchableOpacity onPress={() => setOpen(true)} accessibilityRole="button" style={[s.outline, { borderColor: colors.primary }]}>
-            <Text style={[s.outlineText, { color: colors.primary }]}>FREEZE RANK</Text>
-          </TouchableOpacity>
+          {note(FREEZE_PITCH_PRO)}
+          <Button label="Freeze rank" variant="tonal" onPress={() => setOpen(true)} />
         </>
       ) : (
         <>
@@ -185,38 +200,27 @@ export function RankFreezeCard() {
             onChangeText={setReason}
             maxLength={REASON_MAX}
             placeholder="Reason"
-            placeholderTextColor={colors.mutedForeground}
+            placeholderTextColor={colors.subtle}
             accessibilityLabel="Rank Freeze reason"
-            style={[s.input, { color: colors.foreground, borderColor: colors.border }]}
+            style={[type.body, s.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
           />
           <View style={s.actions}>
-            <TouchableOpacity onPress={confirm} disabled={start.isPending} accessibilityRole="button" style={[s.fill, { backgroundColor: colors.accentFill }]}>
-              {start.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : <Text style={[s.fillText, { color: colors.primaryForeground }]}>CONFIRM 7 DAYS</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setOpen(false); setMessage(null); }} accessibilityRole="button" style={[s.outline, { borderColor: colors.border }]}>
-              <Text style={[s.outlineText, { color: colors.mutedForeground }]}>CANCEL</Text>
-            </TouchableOpacity>
+            <Button label="Confirm 7 days" onPress={confirm} loading={start.isPending} />
+            <Button label="Cancel" variant="text" onPress={() => { setOpen(false); setMessage(null); }} />
           </View>
         </>
       )}
-      {message && <Text style={[s.note, { color: colors.destructive ?? colors.mutedForeground }]}>{message}</Text>}
+      {message && <Text style={[type.body, { color: colors.destructive }]}>{message}</Text>}
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  card: { padding: 16, borderRadius: 4, borderWidth: 1, gap: 12 },
-  header: { flexDirection: "row", justifyContent: "space-between" },
-  title: { fontSize: 9, letterSpacing: 3, fontWeight: "600" },
-  sub: { fontSize: 9, letterSpacing: 2, fontWeight: "600" },
-  row: { gap: 2 },
-  domain: { fontSize: 10, letterSpacing: 2, fontWeight: "700" },
-  note: { fontSize: 12, lineHeight: 18 },
-  line: { fontSize: 13, fontWeight: "700", lineHeight: 20 },
-  input: { borderWidth: 1, borderRadius: 3, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13 },
-  actions: { flexDirection: "row", gap: 8, alignItems: "center" },
-  fill: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 3, minWidth: 120, alignItems: "center" },
-  fillText: { fontSize: 10, fontWeight: "800", letterSpacing: 2 },
-  outline: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 3, borderWidth: 1, alignSelf: "flex-start" },
-  outlineText: { fontSize: 10, fontWeight: "800", letterSpacing: 2 },
+  panel: { gap: space.sm + 4 },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  row: { gap: space.xs },
+  rowHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  input: { borderWidth: 1, borderRadius: 4, paddingHorizontal: space.sm + 4, minHeight: 48 },
+  actions: { flexDirection: "row", gap: space.sm, alignItems: "center" },
 });

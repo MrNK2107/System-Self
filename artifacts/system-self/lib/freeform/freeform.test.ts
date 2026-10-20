@@ -5,6 +5,9 @@ import {
   VOICE_CONTENT_TYPE,
   VOICE_MAX_MS,
   describeFreeformError,
+  gainsText,
+  logGains,
+  loggedLine,
   parseText,
   proposalSummary,
   proposalToFormValues,
@@ -82,4 +85,34 @@ test("error copy for limits, size, length and an unavailable AI; PRO is left to 
   assert.match(describeFreeformError(http(422, "audio_too_long")), /120/);
   assert.match(describeFreeformError(new ApiError({ kind: "network", message: "x" })), /connection/i);
   assert.match(describeFreeformError(new Error("boom")), /retry/i);
+});
+
+test("logGains: a log's preview per domain, with the streak bonus on bonus changes", () => {
+  const noStreak = () => 0;
+  assert.deepEqual(logGains([{ domain: "BODY", type: "sleep", data: { hours: 8, quality: 3 } }], noStreak), [{ label: "BODY", delta: 2.5 }]);
+  const withStreak = logGains([{ domain: "BODY", type: "sleep", data: { hours: 8, quality: 3 } }], () => 10);
+  assert.ok(withStreak[0]!.delta > 2.5, "a long streak boosts the preview");
+});
+
+test("logGains: several logs sum per domain; forbidden shows its DISCIPLINE cost", () => {
+  const g = logGains(
+    [
+      { domain: "BODY", type: "sleep", data: { hours: 8, quality: 3 } },
+      { domain: "MIND", type: "reading", data: { pages: 30 } },
+      { domain: "BODY", type: "sleep", data: { hours: 8, quality: 3 } },
+    ],
+    () => 0,
+  );
+  assert.deepEqual(g.map((x) => x.label), ["BODY", "MIND"]);
+  assert.equal(g[0]!.delta, 5);
+  const f = logGains([{ domain: "BODY", type: "workout", data: { minutes: 30, intensity: 3 }, forbidden: true }], () => 0);
+  assert.deepEqual(f.map((x) => x.label), ["BODY", "DISCIPLINE"]);
+  assert.ok(f[1]!.delta < 0);
+});
+
+test("loggedLine: THE SYSTEM's confirmation", () => {
+  assert.equal(loggedLine([{ label: "BODY", delta: 2.5 }]), "+2.5 BODY. Logged.");
+  assert.equal(loggedLine([{ label: "BODY", delta: 2.5 }, { label: "DISCIPLINE", delta: -2 }]), "+2.5 BODY · −2.0 DISCIPLINE. Logged.");
+  assert.equal(loggedLine([]), "Logged.");
+  assert.equal(gainsText([{ label: "MIND", delta: 1 }]), "+1.0 MIND");
 });

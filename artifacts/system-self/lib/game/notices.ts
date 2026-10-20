@@ -126,9 +126,48 @@ export type NoticeView =
   | { modal: "failure"; failures: FailureItem[] }
   | { modal: "comeback"; gapDays: number; line: string; offerHomePath: boolean }
   | { modal: "challenge_result"; result: ChallengeResultView }
-  | { modal: "system"; label: string; title: string; body: string; tone: "alert" | "info" };
+  | { modal: "system"; label: string; title: string; body: string; tone: "alert" | "info" }
+  /** Non-blocking: a slim window at the top that dismisses itself; tapping it opens `href`. */
+  | { modal: "banner"; label: string; title: string; body: string; href: "/quests" };
 
 const MILESTONE_TIER_VALUES: readonly number[] = [60, 70, 80, 90, 100];
+
+/** Hours after a quest is issued during which an expiry warning about it is not shown. */
+export const EXPIRY_QUIET_HOURS = 6;
+
+/** The quest fields the expiry rule reads (a subset of the /quests contract). */
+export interface ExpiryQuest {
+  status: string;
+  bonus: boolean;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/**
+ * True when a `quest_deadline_24h` notice should be marked seen without being shown:
+ * - on the user's first local day (onboarded today: the quests were just issued);
+ * - when it is for another local day than today (stale: those quests are already resolved);
+ * - when no active, non-bonus quest it could be about is still open;
+ * - when every such quest was issued less than EXPIRY_QUIET_HOURS before the warning was raised.
+ * `dayNumber`, `today` and `quests` may be null while unknown; that rule is then skipped.
+ */
+export function suppressExpiryNotice(input: {
+  notice: Notice;
+  dayNumber: number | null;
+  today: string | null;
+  quests: readonly ExpiryQuest[] | null;
+}): boolean {
+  const { notice, dayNumber, today, quests } = input;
+  if (notice.kind !== "quest_deadline_24h") return false;
+  if (dayNumber !== null && dayNumber <= 1) return true;
+  if (today !== null && notice.payload.localDate !== today) return true;
+  if (quests === null) return false;
+  const raisedAt = Date.parse(notice.createdAt);
+  const open = quests.filter((q) => q.status === "active" && !q.bonus && Date.parse(q.expiresAt) > raisedAt);
+  if (open.length === 0) return true;
+  const oldestIssued = Math.min(...open.map((q) => Date.parse(q.createdAt)));
+  return raisedAt - oldestIssued < EXPIRY_QUIET_HOURS * 3600_000;
+}
 
 /** Props for the modal that shows this group. */
 export function noticeView(group: NoticeGroup): NoticeView {
@@ -264,7 +303,8 @@ export function noticeView(group: NoticeGroup): NoticeView {
     }
     case "quest_deadline_24h": {
       const n = first.payload.count;
-      return { modal: "system", tone: "alert", label: "QUESTS EXPIRING", title: questsExpireLine(n), body: "Complete them before midnight. Logged." };
+      // A reminder, never an interruption: it shows as a banner (see suppressExpiryNotice for when it is skipped).
+      return { modal: "banner", label: "QUESTS EXPIRING", title: questsExpireLine(n), body: "Complete them before midnight.", href: "/quests" };
     }
     case "challenge_received": {
       const p = first.payload;

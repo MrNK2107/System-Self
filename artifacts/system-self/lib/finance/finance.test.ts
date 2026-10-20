@@ -5,6 +5,7 @@ import { ApiError, type ApiClient } from "../api/client";
 import {
   budgetBar,
   budgetDraft,
+  budgetOverview,
   budgetItemsFromDraft,
   categoryLabel,
   contributeToGoal,
@@ -18,6 +19,7 @@ import {
   parseSignedAmount,
   percent,
   putBudgets,
+  savingsStatus,
   savingsVerdict,
 } from "./finance";
 
@@ -165,4 +167,33 @@ test("contribute tolerates notice kinds this build does not know", async () => {
 test("errors read in the SYSTEM voice", () => {
   assert.equal(describeFinanceError(new ApiError({ kind: "http", status: 409, code: "goal_not_active", message: "x" })), "That goal is closed. Contributions are not accepted.");
   assert.equal(describeFinanceError(new Error("x")), "The request failed. Retry.");
+});
+
+test("savings status: no verdict without data; no rate without income; a rated month keeps the verdict", () => {
+  assert.deepEqual(savingsStatus({ income: 0, expenses: 0, savingsRate: 0, target: 0.2 }), { kind: "empty" });
+  const noIncome = savingsStatus({ income: 0, expenses: 120, savingsRate: 0, target: 0.2 });
+  assert.equal(noIncome.kind, "no_income");
+  assert.ok(!("tone" in noIncome));
+  assert.deepEqual(savingsStatus({ income: 1000, expenses: 1000, savingsRate: 0, target: 0.2 }), {
+    kind: "rated",
+    tone: "bad",
+    line: "Savings rate 0% against a 20% target. Failing.",
+  });
+  assert.deepEqual(savingsStatus({ income: 1000, expenses: 750, savingsRate: 0.25, target: 0.2 }), {
+    kind: "rated",
+    tone: "good",
+    line: "Savings rate 25% against a 20% target. Held.",
+  });
+});
+
+test("budget overview: counts limited categories and lists the ones over, with the excess", () => {
+  assert.deepEqual(
+    budgetOverview([
+      { category: "food", spent: 250.5, limit: 200 },
+      { category: "rent", spent: 900, limit: 1000 },
+      { category: "fun", spent: 40, limit: null },
+    ]),
+    { limited: 2, over: [{ category: "food", by: 50.5 }] },
+  );
+  assert.deepEqual(budgetOverview([{ category: "food", spent: 10, limit: null }]), { limited: 0, over: [] });
 });

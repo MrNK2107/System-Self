@@ -3,8 +3,11 @@ import React, { useCallback, useEffect, useState } from "react";
 import { AppState, StyleSheet, Switch, Text, View } from "react-native";
 import type { NotificationPrefs } from "@workspace/contracts";
 
-import { AuthButton, AuthNotice, AuthShell } from "@/components/AuthShell";
-import { Separator, SettingsCard, SettingsRow } from "@/components/SettingsParts";
+import { SettingsNote, SettingsSection } from "@/components/SettingsParts";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { space, type } from "@/constants/type";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { useNotificationPrefsQuery } from "@/hooks/useNotifications";
@@ -66,59 +69,54 @@ export default function NotificationSettingsScreen() {
   };
 
   return (
-    <AuthShell tag="SETTINGS" title="Notifications" back>
+    <Screen title="Notifications" back>
       {permission?.status === "granted" ? null : permission?.status === "undetermined" ? (
-        <SettingsCard>
+        <SettingsSection label="THIS DEVICE">
           <View style={s.panel}>
-            <Text style={[s.line, { color: colors.foreground }]}>{PERMISSION_EXPLANATION}</Text>
-            <AuthButton label="ALLOW" loading={asking} onPress={() => void allow()} />
+            <Text style={[type.body, { color: colors.foreground }]}>{PERMISSION_EXPLANATION}</Text>
+            <Button label="Allow" block loading={asking} onPress={() => void allow()} />
           </View>
-        </SettingsCard>
+        </SettingsSection>
       ) : permission ? (
-        <SettingsCard>
-          <SettingsRow icon="settings" label="Notifications are off for this device" value="OPEN SETTINGS" onPress={() => void openOsSettings()} />
-        </SettingsCard>
+        <SettingsSection label="THIS DEVICE">
+          <ListRow title="Notifications are off for this device" subtitle="Open the system settings to turn them on" chevron onPress={() => void openOsSettings()} />
+        </SettingsSection>
       ) : null}
 
       {prefsQ.data ? (
-        <SettingsCard>
-          {ROWS.map((row, i) => (
-            <React.Fragment key={row.key}>
-              {i > 0 ? <Separator /> : null}
-              <View style={s.toggleRow}>
-                <View style={s.toggleText}>
-                  <Text style={[s.label, { color: colors.foreground }]}>{row.label}</Text>
-                  <Text style={[s.detail, { color: colors.mutedForeground }]}>{row.detail}</Text>
-                </View>
+        <SettingsSection label="WHAT THE SYSTEM SENDS" footer="At most three per day, reminders included.">
+          {ROWS.map((row) => (
+            <ListRow
+              key={row.key}
+              title={row.label}
+              subtitle={row.detail}
+              onPress={() => void toggle(row.key, !prefsQ.data![row.key])}
+              accessibilityLabel={`${row.label}, ${prefsQ.data![row.key] ? "on" : "off"}`}
+              trailing={
                 <Switch
-                  value={prefsQ.data[row.key]}
+                  value={prefsQ.data![row.key]}
                   onValueChange={(v) => void toggle(row.key, v)}
                   accessibilityLabel={row.label}
                   trackColor={{ true: colors.accentFill, false: colors.muted }}
+                  thumbColor={colors.foreground}
                 />
-              </View>
-            </React.Fragment>
+              }
+            />
           ))}
-        </SettingsCard>
+        </SettingsSection>
       ) : (
-        <AuthNotice
+        <SettingsNote
           tone={prefsQ.isError ? "error" : "info"}
           message={prefsQ.isError ? "The system is out of reach." : "Loading."}
           onRetry={prefsQ.isError ? () => void prefsQ.refetch() : undefined}
         />
       )}
 
-      {error ? <AuthNotice message={error} /> : null}
-      <Text style={[s.detail, { color: colors.mutedForeground }]}>At most three per day, reminders included.</Text>
-    </AuthShell>
+      {error ? <SettingsNote message={error} /> : null}
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  panel: { paddingVertical: 16, gap: 14 },
-  line: { fontSize: 15, lineHeight: 22, fontWeight: "600" },
-  toggleRow: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 64, paddingVertical: 10 },
-  toggleText: { flex: 1, gap: 2 },
-  label: { fontSize: 13 },
-  detail: { fontSize: 11, lineHeight: 16 },
+  panel: { padding: space.md, gap: space.md },
 });

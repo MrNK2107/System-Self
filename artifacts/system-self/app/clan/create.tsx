@@ -1,10 +1,15 @@
-// Found a clan (PRO + verified email). A 402 shows the PRO lock; a 403 email_unverified sends to email verification.
+// Create a clan (PRO + verified email). A 402 shows the PRO lock; a 403 email_unverified sends to email verification.
 import React, { useState } from "react";
+import { StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { CLAN_DESCRIPTION_MAX } from "@workspace/contracts";
 import { AuthField } from "@/components/AuthField";
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
+import { Notice } from "@/components/arena/parts";
 import { ProLock } from "@/components/ProLock";
+import { Button } from "@/components/ui/Button";
+import { Screen } from "@/components/ui/Screen";
+import { space, type } from "@/constants/type";
+import { useColors } from "@/hooks/useColors";
 import { useClanActions } from "@/hooks/useClan";
 import {
   SYNC_PENDING_MESSAGE,
@@ -16,6 +21,7 @@ import {
 } from "@/lib/clan/clan";
 
 export default function CreateClanScreen() {
+  const colors = useColors();
   const actions = useClanActions();
   const [name, setName] = useState("");
   const [tag, setTag] = useState("");
@@ -42,26 +48,35 @@ export default function CreateClanScreen() {
   };
 
   return (
-    <AuthShell tag="CLAN" title="Found a clan" subtitle="Clans hold 8 to 30 operators. Below 8 the clan is forming: no raids, no rank. Founding requires PRO and a verified email." back>
-      <AuthField label="NAME" value={name} onChangeText={setName} placeholder="3–24 characters" autoCapitalize="words" maxLength={24} />
-      <AuthField label="TAG" value={tag} onChangeText={(t) => setTag(normalizeTag(t))} placeholder="2–5 letters" autoCapitalize="characters" mono />
-      <AuthField
-        label="DESCRIPTION (OPTIONAL)"
-        value={description}
-        onChangeText={setDescription}
-        placeholder={`Up to ${CLAN_DESCRIPTION_MAX} characters`}
-        maxLength={CLAN_DESCRIPTION_MAX}
-        multiline
-      />
-      {outcome?.kind === "pro" ? <ProLock label="FOUND A CLAN" /> : null}
+    <Screen title="Create a clan" back>
+      <Text style={[type.body, { color: colors.mutedForeground }]}>
+        Name it and recruit. At 8 operators it starts raiding and ranking. Creating a clan needs PRO and a verified email.
+      </Text>
+      <View style={s.form}>
+        <AuthField label="NAME" value={name} onChangeText={setName} placeholder="3–24 characters" autoCapitalize="words" maxLength={24} />
+        <AuthField label="TAG" value={tag} onChangeText={(t) => setTag(normalizeTag(t))} placeholder="2–5 letters" autoCapitalize="characters" />
+        <AuthField
+          label="DESCRIPTION (OPTIONAL)"
+          value={description}
+          onChangeText={setDescription}
+          placeholder={`Up to ${CLAN_DESCRIPTION_MAX} characters`}
+          maxLength={CLAN_DESCRIPTION_MAX}
+          multiline
+        />
+      </View>
+      {outcome?.kind === "pro" ? <ProLock label="CREATE A CLAN" /> : null}
       {outcome?.kind === "verify_email" ? (
         <>
-          <AuthNotice message="Verify your email to found a clan." />
-          <AuthLink label="VERIFY EMAIL" onPress={() => router.push(VERIFY_EMAIL_ROUTE)} />
+          <Notice message="Verify your email to create a clan." />
+          <Button label="Verify email" variant="tonal" onPress={() => router.push(VERIFY_EMAIL_ROUTE)} />
         </>
       ) : null}
-      {outcome?.kind === "error" ? <AuthNotice message={outcome.message} /> : null}
-      <AuthButton label="FOUND CLAN" onPress={() => void submit()} loading={busy} />
-    </AuthShell>
+      {outcome?.kind === "error" ? <Notice message={outcome.message} /> : null}
+      <Button label="Create clan" block loading={busy} onPress={() => void submit()} />
+    </Screen>
   );
 }
+
+const s = StyleSheet.create({
+  form: { gap: space.md },
+});

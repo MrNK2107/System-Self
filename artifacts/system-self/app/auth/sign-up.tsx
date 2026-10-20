@@ -1,11 +1,12 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useRef, useState } from "react";
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { AuthField } from "@/components/AuthField";
 import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { deviceTimezone, useAuth } from "@/context/AuthContext";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { MAX_EMAIL_LENGTH, describeAuthError, isRetryable, validateSignUp, type SignUpField } from "@/lib/auth/actions";
 
@@ -126,29 +127,23 @@ export default function SignUpScreen() {
       />
 
       <View style={styles.termsWrap}>
-        <TouchableOpacity
+        <Pressable
           style={styles.termsRow}
           onPress={() => {
             setAcceptTerms((a) => !a);
             clear("acceptTerms");
           }}
-          activeOpacity={0.8}
+          android_ripple={{ color: "rgba(168,121,255,0.12)" }}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: acceptTerms }}
           accessibilityLabel="I accept the Terms and Privacy Policy"
         >
-          <View
-            style={[
-              styles.box,
-              {
-                borderColor: fieldErrors.acceptTerms ? colors.destructive : acceptTerms ? colors.primary : colors.border,
-                backgroundColor: acceptTerms ? colors.accentFill : "transparent",
-              },
-            ]}
-          >
-            {acceptTerms ? <Feather name="check" size={12} color={colors.primaryForeground} /> : null}
-          </View>
-          <Text style={[styles.termsText, { color: colors.mutedForeground }]}>
+          <Feather
+            name={acceptTerms ? "check-square" : "square"}
+            size={22}
+            color={fieldErrors.acceptTerms ? colors.destructive : acceptTerms ? colors.primary : colors.mutedForeground}
+          />
+          <Text style={[type.body, styles.termsText, { color: colors.mutedForeground }]}>
             I accept the{" "}
             <Text style={{ color: colors.primary }} onPress={() => router.push("/legal/terms")}>
               Terms
@@ -158,9 +153,12 @@ export default function SignUpScreen() {
               Privacy Policy
             </Text>
           </Text>
-        </TouchableOpacity>
+        </Pressable>
         {fieldErrors.acceptTerms ? (
-          <Text style={[styles.termsError, { color: colors.destructive }]}>{fieldErrors.acceptTerms}</Text>
+          <View style={styles.termsErrorRow}>
+            <Feather name="alert-circle" size={14} color={colors.destructive} />
+            <Text style={[type.meta, styles.termsText, { color: colors.destructive }]}>{fieldErrors.acceptTerms}</Text>
+          </View>
         ) : null}
       </View>
 
@@ -172,9 +170,8 @@ export default function SignUpScreen() {
 }
 
 const styles = StyleSheet.create({
-  termsWrap: { gap: 6 },
-  termsRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  box: { width: 20, height: 20, borderWidth: 1, borderRadius: 2, alignItems: "center", justifyContent: "center" },
-  termsText: { flex: 1, fontSize: 12, lineHeight: 18 },
-  termsError: { fontSize: 12, lineHeight: 17 },
+  termsWrap: { gap: space.xs },
+  termsRow: { flexDirection: "row", alignItems: "center", gap: space.sm + 4, minHeight: 48, paddingVertical: space.xs },
+  termsText: { flex: 1 },
+  termsErrorRow: { flexDirection: "row", alignItems: "center", gap: space.xs + 2 },
 });

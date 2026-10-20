@@ -51,8 +51,8 @@ test("header names the weekday of the briefing date", () => {
 });
 
 test("fallback line joins names with ' / ' and is absent without fallbacks", () => {
-  assert.equal(fallbackLine(block), "If taken: Dumbbell Bench Press / Push-up");
-  assert.equal(fallbackLine({ ...block, fallbacks: [{ exerciseId: "ex_pushup", name: "Push-up" }] }), "If taken: Push-up");
+  assert.equal(fallbackLine(block), "Equipment taken? Do: Dumbbell Bench Press / Push-up");
+  assert.equal(fallbackLine({ ...block, fallbacks: [{ exerciseId: "ex_pushup", name: "Push-up" }] }), "Equipment taken? Do: Push-up");
   assert.equal(fallbackLine({ ...block, fallbacks: [] }), null);
 });
 

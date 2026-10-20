@@ -1,8 +1,12 @@
+// Players the user follows. Rank, trajectory and shadow only; nothing else is shared.
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Text } from "react-native";
 import { router } from "expo-router";
-import { AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
 import { PlayerRow } from "@/components/PlayerRow";
+import { Group, Notice } from "@/components/arena/parts";
+import { Button } from "@/components/ui/Button";
+import { Screen } from "@/components/ui/Screen";
+import { type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { useFollowersCountQuery, useFollowingQuery } from "@/hooks/useSocial";
 import { describeSocialError } from "@/lib/social/social";
@@ -14,33 +18,27 @@ export default function FollowingScreen() {
   const list = following.data ?? [];
 
   return (
-    <AuthShell tag="FOLLOWING" title="Following" subtitle="Rank, trajectory and shadow. Nothing else is shared." back>
-      <Text style={[s.count, { color: colors.mutedForeground }]}>
-        {followers.data === undefined ? "" : `${followers.data} FOLLOWING YOU`}
+    <Screen title="Following" back>
+      <Text style={[type.meta, { color: colors.mutedForeground }]}>
+        Rank, trajectory and shadow. Nothing else is shared.
+        {followers.data === undefined ? "" : ` ${followers.data} following you.`}
       </Text>
       {following.isError ? (
-        <AuthNotice message={describeSocialError(following.error)} onRetry={() => void following.refetch()} />
+        <Notice message={describeSocialError(following.error)} onRetry={() => void following.refetch()} />
       ) : following.isPending ? (
-        <AuthNotice tone="info" message="Loading." />
+        <ActivityIndicator color={colors.primary} />
       ) : list.length === 0 ? (
-        <AuthNotice tone="info" message="You follow no one. Search for players to follow." />
+        <>
+          <Text style={[type.body, { color: colors.mutedForeground }]}>You follow no one yet.</Text>
+          <Button label="Find players" block onPress={() => router.push("/social/search")} />
+        </>
       ) : (
-        <View style={s.list}>
+        <Group>
           {list.map((p) => (
-            <PlayerRow
-              key={p.handle}
-              player={p}
-              onPress={() => router.push({ pathname: "/social/profile/[handle]", params: { handle: p.handle } })}
-            />
+            <PlayerRow key={p.handle} player={p} onPress={() => router.push({ pathname: "/social/profile/[handle]", params: { handle: p.handle } })} />
           ))}
-        </View>
+        </Group>
       )}
-      <AuthLink label="FIND PLAYERS" onPress={() => router.push("/social/search")} />
-    </AuthShell>
+    </Screen>
   );
 }
-
-const s = StyleSheet.create({
-  count: { fontSize: 10, letterSpacing: 2, fontWeight: "700" as const, paddingHorizontal: 4 },
-  list: { gap: 8 },
-});

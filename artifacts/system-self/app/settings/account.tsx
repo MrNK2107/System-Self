@@ -1,24 +1,31 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { Linking, Platform, StyleSheet, Text, View } from "react-native";
+import { Linking, Platform, StyleSheet, Text } from "react-native";
 
 import { AuthField } from "@/components/AuthField";
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
-import { SettingsCard } from "@/components/SettingsParts";
+import { shareCodename } from "@/components/CodenameCard";
+import { ExpandTrailing, SettingsNote, SettingsPanel, SettingsSection } from "@/components/SettingsParts";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { type } from "@/constants/type";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { useGameStateQuery } from "@/hooks/useGameState";
+import { DELETE_KEEPS_SUBSCRIPTION_LINE, MANAGE_SUBSCRIPTION_LABEL, manageSubscriptionUrl } from "@/lib/billing/core";
 import { describeSettingsError, validatePasswordChange } from "@/lib/settings/actions";
 import { settingsActions } from "@/lib/settings/instance";
-import { DELETE_KEEPS_SUBSCRIPTION_LINE, MANAGE_SUBSCRIPTION_LABEL, manageSubscriptionUrl } from "@/lib/billing/core";
+import { codenameShareOptions } from "@/lib/social/social";
 
 const DELETE_WARNING = "This erases every log, score and rank. It cannot be undone.";
 
-type Panel = "password" | "delete" | null;
+type Panel = "verify" | "password" | "delete" | null;
 
 export default function AccountScreen() {
   const colors = useColors();
   const { user, verifyEmail, changePassword, deleteAccount } = useAuth();
+  const profile = useGameStateQuery().data?.profile ?? null;
   const verified = !!user?.emailVerified;
 
   const [panel, setPanel] = useState<Panel>(null);
@@ -67,6 +74,7 @@ export default function AccountScreen() {
       await verifyEmail(code);
       setCodeSent(false);
       setCode("");
+      setPanel(null);
     } catch (e) {
       setVerifyMsg({ text: describeSettingsError(e, "verify").message, tone: "error" });
     } finally {
@@ -114,54 +122,82 @@ export default function AccountScreen() {
 
   const manageUrl = manageSubscriptionUrl(Platform.OS);
   const toggle = (p: Exclude<Panel, null>) => setPanel((cur) => (cur === p ? null : p));
+  const share = profile ? codenameShareOptions(profile.identitySetting) : null;
 
   return (
-    <AuthShell tag="ACCOUNT" title="Account" back>
-      <SettingsCard>
-        <View style={s.emailRow}>
-          <View style={s.emailText}>
-            <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>EMAIL</Text>
-            <Text style={[s.email, { color: colors.foreground }]} numberOfLines={1}>
-              {user?.email}
-            </Text>
-          </View>
-          <View style={[s.badge, { borderColor: verified ? colors.primary : colors.border }]}>
-            <Feather name={verified ? "check" : "alert-circle"} size={10} color={verified ? colors.primary : colors.mutedForeground} />
-            <Text style={[s.badgeText, { color: verified ? colors.primary : colors.mutedForeground }]}>
-              {verified ? "VERIFIED" : "UNVERIFIED"}
-            </Text>
-          </View>
-        </View>
-      </SettingsCard>
-
-      {!verified ? (
-        <View style={s.group}>
-          {codeSent ? (
-            <>
-              <AuthField
-                label="VERIFICATION CODE"
-                value={code}
-                onChangeText={setCode}
-                keyboardType="number-pad"
-                autoComplete="one-time-code"
-                maxLength={12}
-                mono
-                editable={!verifyBusy}
-              />
-              <AuthButton label="VERIFY" loading={verifyBusy} onPress={() => void submitCode()} />
-              <AuthLink label="Send a new code" onPress={() => void sendCode()} />
-            </>
-          ) : (
-            <AuthButton label="VERIFY EMAIL" loading={verifyBusy} onPress={() => void sendCode()} />
-          )}
-          {verifyMsg ? <AuthNotice message={verifyMsg.text} tone={verifyMsg.tone} /> : null}
-        </View>
-      ) : null}
-
-      <View style={s.group}>
-        <AuthLink label={panel === "password" ? "Close" : "Change password"} onPress={() => toggle("password")} />
-        {panel === "password" ? (
+    <Screen title="Account" back>
+      <SettingsSection
+        label="IDENTITY"
+        footer={
+          profile
+            ? [
+                profile.codename !== profile.username ? "Rival codename: what rivals see. It changes with your rank." : null,
+                share?.note ?? "Search codename: how other players find you. Tap it to share.",
+              ]
+                .filter(Boolean)
+                .join(" ")
+            : undefined
+        }
+      >
+        <ListRow
+          title="Email"
+          subtitle={user?.email ?? undefined}
+          trailing={
+            <Text style={[type.label, { color: verified ? colors.success : colors.warn }]}>{verified ? "VERIFIED" : "UNVERIFIED"}</Text>
+          }
+        />
+        {!verified ? (
           <>
+            <ListRow
+              title="Verify email"
+              subtitle="A code is sent to the address above"
+              trailing={<ExpandTrailing open={panel === "verify"} />}
+              onPress={() => toggle("verify")}
+            />
+            {panel === "verify" ? (
+              <SettingsPanel>
+                {codeSent ? (
+                  <>
+                    <AuthField
+                      label="VERIFICATION CODE"
+                      value={code}
+                      onChangeText={setCode}
+                      keyboardType="number-pad"
+                      autoComplete="one-time-code"
+                      maxLength={12}
+                      mono
+                      editable={!verifyBusy}
+                    />
+                    <Button label="Verify" block loading={verifyBusy} onPress={() => void submitCode()} />
+                    <Button label="Send a new code" variant="text" block disabled={verifyBusy} onPress={() => void sendCode()} />
+                  </>
+                ) : (
+                  <Button label="Send code" block loading={verifyBusy} onPress={() => void sendCode()} />
+                )}
+                {verifyMsg ? <SettingsNote message={verifyMsg.text} tone={verifyMsg.tone} /> : null}
+              </SettingsPanel>
+            ) : null}
+          </>
+        ) : null}
+        <ListRow title="Username" subtitle={profile ? profile.username : "Loading."} />
+        {profile && profile.codename !== profile.username ? (
+          <ListRow title="Rival codename" subtitle={profile.codename} />
+        ) : null}
+        {profile ? (
+          <ListRow
+            title="Search codename"
+            subtitle={profile.publicCodename}
+            trailing={share?.canShare ? <Feather name="share-2" size={20} color={colors.primary} /> : null}
+            onPress={share?.canShare ? () => void shareCodename(profile.publicCodename) : undefined}
+            accessibilityLabel={`Search codename, ${profile.publicCodename}${share?.canShare ? ". Share" : ""}`}
+          />
+        ) : null}
+      </SettingsSection>
+
+      <SettingsSection label="SECURITY">
+        <ListRow title="Change password" trailing={<ExpandTrailing open={panel === "password"} />} onPress={() => toggle("password")} />
+        {panel === "password" ? (
+          <SettingsPanel>
             <AuthField
               label="CURRENT PASSWORD"
               value={currentPw}
@@ -179,19 +215,31 @@ export default function AccountScreen() {
               hint="At least 10 characters."
               editable={!pwBusy}
             />
-            <AuthButton label="CHANGE PASSWORD" loading={pwBusy} onPress={() => void submitPassword()} />
-            {pwMsg ? <AuthNotice message={pwMsg.text} tone={pwMsg.tone} /> : null}
-          </>
+            <Button label="Change password" block loading={pwBusy} onPress={() => void submitPassword()} />
+            {pwMsg ? <SettingsNote message={pwMsg.text} tone={pwMsg.tone} /> : null}
+          </SettingsPanel>
         ) : null}
-      </View>
+      </SettingsSection>
 
-      <View style={[s.danger, { borderColor: colors.destructive }]}>
-        <AuthLink label={panel === "delete" ? "Close" : "Delete account"} onPress={() => toggle("delete")} />
+      <SettingsSection label="DELETE ACCOUNT">
+        <ListRow
+          title="Delete account"
+          subtitle="Erases everything. Cannot be undone."
+          trailing={<ExpandTrailing open={panel === "delete"} />}
+          onPress={() => toggle("delete")}
+        />
         {panel === "delete" ? (
-          <>
-            <Text style={[s.warning, { color: colors.foreground }]}>{DELETE_WARNING}</Text>
-            <Text style={[s.warning, { color: colors.foreground }]}>{DELETE_KEEPS_SUBSCRIPTION_LINE}</Text>
-            {manageUrl ? <AuthLink label={MANAGE_SUBSCRIPTION_LABEL} onPress={() => void Linking.openURL(manageUrl).catch(() => undefined)} /> : null}
+          <SettingsPanel>
+            <Text style={[type.body, { color: colors.foreground }]}>{DELETE_WARNING}</Text>
+            <Text style={[type.body, { color: colors.mutedForeground }]}>{DELETE_KEEPS_SUBSCRIPTION_LINE}</Text>
+            {manageUrl ? (
+              <Button
+                label={MANAGE_SUBSCRIPTION_LABEL}
+                variant="text"
+                onPress={() => void Linking.openURL(manageUrl).catch(() => undefined)}
+                style={s.start}
+              />
+            ) : null}
             <AuthField
               label="PASSWORD"
               value={deletePw}
@@ -200,23 +248,15 @@ export default function AccountScreen() {
               autoComplete="current-password"
               editable={!deleteBusy}
             />
-            <AuthButton label="DELETE MY ACCOUNT" destructive loading={deleteBusy} onPress={() => void submitDelete()} />
-            {deleteError ? <AuthNotice message={deleteError} /> : null}
-          </>
+            <Button label="Delete my account" variant="destructive" block loading={deleteBusy} onPress={() => void submitDelete()} />
+            {deleteError ? <SettingsNote message={deleteError} /> : null}
+          </SettingsPanel>
         ) : null}
-      </View>
-    </AuthShell>
+      </SettingsSection>
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  emailRow: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 64 },
-  emailText: { flex: 1, gap: 4 },
-  fieldLabel: { fontSize: 9, letterSpacing: 2.5, fontWeight: "700" as const },
-  email: { fontSize: 14 },
-  badge: { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderRadius: 2, paddingHorizontal: 6, paddingVertical: 3 },
-  badgeText: { fontSize: 8, fontWeight: "700" as const, letterSpacing: 2 },
-  group: { gap: 12 },
-  danger: { borderWidth: 1, borderRadius: 4, padding: 12, gap: 12 },
-  warning: { fontSize: 13, lineHeight: 20 },
+  start: { alignSelf: "flex-start" },
 });

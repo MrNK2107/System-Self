@@ -1,11 +1,14 @@
 import React, { useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { LifeContext, SeasonKind } from "@workspace/contracts";
 import { lifeContext as lifeContextDef } from "@workspace/engine";
 
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
-import { SettingsCard } from "@/components/SettingsParts";
+import { ChoiceChips, SettingsNote, SettingsSection } from "@/components/SettingsParts";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { IconButton, Screen } from "@/components/ui/Screen";
+import { space, type } from "@/constants/type";
 import { useApp } from "@/context/AppContext";
 import { deviceTimezone, useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
@@ -29,21 +32,6 @@ import { describeSettingsError } from "@/lib/settings/actions";
 import { settingsActions } from "@/lib/settings/instance";
 
 const SYNC_PENDING = "Queued entries have not reached the System yet. Retry shortly.";
-
-function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  const colors = useColors();
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.75}
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      style={[s.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? `${colors.accentFill}20` : "transparent" }]}
-    >
-      <Text style={[s.chipText, { color: active ? colors.primary : colors.mutedForeground }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
 
 export default function LifeSettingsScreen() {
   const colors = useColors();
@@ -109,92 +97,81 @@ export default function LifeSettingsScreen() {
   };
 
   return (
-    <AuthShell tag="LIFE" title="Life context" subtitle="Shapes the quests, never the score." back>
+    <Screen title="Life context" back>
+      <Text style={[type.body, { color: colors.mutedForeground }]}>Shapes the quests, never the score.</Text>
       {!profile ? (
-        <AuthNotice tone="info" message="Loading." />
+        <SettingsNote tone="info" message="Loading." />
       ) : (
         <>
-          <SettingsCard>
+          <SettingsSection label="CONTEXT" footer={lifeContextDef(profile.lifeContext).blurb}>
             <View style={s.panel}>
-              <Text style={[s.label, { color: colors.mutedForeground }]}>CONTEXT</Text>
-              <View style={s.chips}>
-                {lifeContextOptions().map((o) => (
-                  <Chip key={o.key} label={o.label} active={profile.lifeContext === o.key} onPress={() => void changeContext(o.key)} />
-                ))}
-              </View>
-              <Text style={[s.hint, { color: colors.mutedForeground }]}>{lifeContextDef(profile.lifeContext).blurb}</Text>
+              <ChoiceChips
+                options={lifeContextOptions().map((o) => ({ key: o.key, label: o.label }))}
+                value={profile.lifeContext}
+                disabled={busy}
+                onChange={(k) => void changeContext(k)}
+              />
             </View>
-          </SettingsCard>
+          </SettingsSection>
 
-          <SettingsCard>
-            <View style={s.panel}>
-              <Text style={[s.label, { color: colors.mutedForeground }]}>SEASON</Text>
-              {seasons?.active ? (
-                <View accessibilityLabel="Active season">
-                  <Text style={[s.line, { color: colors.foreground }]}>{seasonChipLine(seasons.active).title}</Text>
-                  <Text style={[s.hint, { color: colors.mutedForeground }]}>{seasonChipLine(seasons.active).meta}. It runs its course.</Text>
+          <SettingsSection label="SEASON">
+            {seasons?.active ? (
+              <ListRow title={seasonChipLine(seasons.active).title} subtitle={`${seasonChipLine(seasons.active).meta}. It runs its course.`} />
+            ) : null}
+            {seasons?.scheduled ? (
+              <>
+                <ListRow title={seasons.scheduled.line} subtitle={`Scheduled ${seasons.scheduled.startsOn} to ${seasons.scheduled.endsOn}.`} />
+                <View style={s.panel}>
+                  <Button label="Cancel season" variant="text" disabled={busy} onPress={() => void cancel(seasons.scheduled!.id)} />
                 </View>
-              ) : null}
-              {seasons?.scheduled ? (
-                <View style={s.gap} accessibilityLabel="Scheduled season">
-                  <Text style={[s.line, { color: colors.foreground }]}>{seasons.scheduled.line}</Text>
-                  <Text style={[s.hint, { color: colors.mutedForeground }]}>
-                    Scheduled {seasons.scheduled.startsOn} to {seasons.scheduled.endsOn}.
+              </>
+            ) : null}
+            {!taken && seasonsQ.isSuccess ? (
+              <View style={s.panel}>
+                <Text style={[type.body, { color: colors.mutedForeground }]}>
+                  Seasons are planned ahead. Quests shrink. The count and the scoring do not change.
+                </Text>
+                <ChoiceChips options={kinds.map((k) => ({ key: k, label: SEASON_LABELS[k] }))} value={chosenKind} onChange={setKind} />
+                <Text style={[type.label, s.above, { color: colors.mutedForeground }]}>STARTS</Text>
+                {coolingDown ? (
+                  <Text style={[type.meta, { color: colors.mutedForeground }]}>Earliest start {earliest}. Seven days between seasons.</Text>
+                ) : null}
+                <ChoiceChips options={dates.map((d) => ({ key: d.date, label: d.label }))} value={chosenStart} onChange={setStartsOn} />
+                <Text style={[type.label, s.above, { color: colors.mutedForeground }]}>LENGTH</Text>
+                <View style={s.stepper}>
+                  <IconButton icon="minus" label="One day shorter" onPress={() => setLength((n) => clampSeasonLength(n - 1))} />
+                  <Text style={[type.number, s.count, { color: colors.foreground }]} accessibilityLiveRegion="polite">
+                    {length} {length === 1 ? "day" : "days"}
                   </Text>
-                  <AuthLink label="CANCEL SEASON" onPress={() => void cancel(seasons.scheduled!.id)} />
+                  <IconButton icon="plus" label="One day longer" onPress={() => setLength((n) => clampSeasonLength(n + 1))} />
+                  <Text style={[type.meta, { color: colors.subtle }]}>
+                    {MIN_SEASON_DAYS} to {MAX_SEASON_DAYS}
+                  </Text>
                 </View>
-              ) : null}
-              {!taken && seasonsQ.isSuccess ? (
-                <>
-                  <Text style={[s.hint, { color: colors.mutedForeground }]}>
-                    Seasons are planned ahead. Quests shrink. The count and the scoring do not change.
-                  </Text>
-                  <View style={s.chips}>
-                    {kinds.map((k) => (
-                      <Chip key={k} label={SEASON_LABELS[k]} active={chosenKind === k} onPress={() => setKind(k)} />
-                    ))}
-                  </View>
-                  <Text style={[s.label, { color: colors.mutedForeground }]}>STARTS</Text>
-                  {coolingDown ? (
-                    <Text style={[s.hint, { color: colors.mutedForeground }]}>Earliest start {earliest}. Seven days between seasons.</Text>
-                  ) : null}
-                  <View style={s.chips}>
-                    {dates.map((d) => (
-                      <Chip key={d.date} label={d.label} active={chosenStart === d.date} onPress={() => setStartsOn(d.date)} />
-                    ))}
-                  </View>
-                  <Text style={[s.label, { color: colors.mutedForeground }]}>LENGTH</Text>
-                  <View style={s.stepper}>
-                    <Chip label="-" active={false} onPress={() => setLength((n) => clampSeasonLength(n - 1))} />
-                    <Text style={[s.line, { color: colors.foreground }]} accessibilityLiveRegion="polite">
-                      {length} {length === 1 ? "day" : "days"}
-                    </Text>
-                    <Chip label="+" active={false} onPress={() => setLength((n) => clampSeasonLength(n + 1))} />
-                    <Text style={[s.hint, { color: colors.mutedForeground }]}>
-                      {MIN_SEASON_DAYS} to {MAX_SEASON_DAYS}
-                    </Text>
-                  </View>
-                  <AuthButton label="SCHEDULE SEASON" loading={busy} disabled={!chosenKind} onPress={() => void schedule()} />
-                </>
-              ) : null}
-              {seasonsQ.isError ? <AuthNotice message="The system is out of reach." onRetry={() => void seasonsQ.refetch()} /> : null}
-            </View>
-          </SettingsCard>
+                <Button label="Schedule season" block loading={busy} disabled={!chosenKind} onPress={() => void schedule()} />
+              </View>
+            ) : null}
+            {seasonsQ.isError ? (
+              <View style={s.panel}>
+                <SettingsNote message="The system is out of reach." onRetry={() => void seasonsQ.refetch()} />
+              </View>
+            ) : null}
+            {seasonsQ.isLoading ? (
+              <View style={s.panel}>
+                <SettingsNote tone="info" message="Loading." />
+              </View>
+            ) : null}
+          </SettingsSection>
         </>
       )}
-      {error ? <AuthNotice message={error} /> : null}
-    </AuthShell>
+      {error ? <SettingsNote message={error} /> : null}
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  panel: { paddingVertical: 14, gap: 12 },
-  gap: { gap: 8 },
-  label: { fontSize: 9, letterSpacing: 2.5, fontWeight: "700" as const },
-  hint: { fontSize: 11, lineHeight: 16 },
-  line: { fontSize: 13, fontWeight: "700" as const, letterSpacing: 0.5 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  stepper: { flexDirection: "row", alignItems: "center", gap: 12 },
-  chip: { paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderRadius: 4 },
-  chipText: { fontSize: 12, fontWeight: "600" as const, fontFamily: "monospace", letterSpacing: 0.5 },
+  panel: { padding: space.md, gap: space.md },
+  above: { marginTop: space.sm },
+  stepper: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  count: { minWidth: 88, textAlign: "center" },
 });

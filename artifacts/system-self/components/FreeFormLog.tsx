@@ -1,13 +1,16 @@
-// Free-form logging section of the log modal: type (or, with PRO, hold the mic and say) what you did, PARSE it into up
-// to 3 proposals, then CONFIRM (queued in the outbox with the original text as freeText), EDIT (opens the structured
-// form prefilled) or DROP each one. Nothing is logged until a proposal is confirmed.
+// "Say it": the log sheet's first job. Type (or, with PRO, hold the mic and say) what you did, Parse it into up to
+// 3 proposals, then Confirm (queued in the outbox with the original text as freeText), Edit (opens the manual form
+// prefilled) or Drop each one, or Confirm all. Nothing is logged until a proposal is confirmed.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import type { LogProposalDto } from "@workspace/contracts";
 import { ProLock } from "@/components/ProLock";
+import { Button } from "@/components/ui/Button";
+import { DOMAIN_COLORS } from "@/constants/domains";
+import { space, type } from "@/constants/type";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { useBillingStatusQuery } from "@/hooks/usePro";
@@ -19,25 +22,36 @@ import {
   VOICE_MIN_MS,
   describeFreeformError,
   isProRequired,
+  logGains,
   parseText,
+  proposalDetail,
   proposalSummary,
   proposalToLogInput,
   sendVoice,
+  signedScore,
+  type Gain,
+  type GainEntry,
 } from "@/lib/freeform/freeform";
 
 type Phase = "idle" | "parsing" | "recording" | "sending";
 
+const toEntry = (p: LogProposalDto): GainEntry => ({ domain: p.domain, type: p.logType, data: p.data });
+
 export function FreeFormLog({
   onLogged,
   onEdit,
+  onOpenChange,
 }: {
-  /** Every proposal has been confirmed, edited or dropped and at least one was confirmed. */
-  onLogged: () => void;
-  /** Opens the structured form prefilled with a proposal; `text` is the original text to attach as the note. */
+  /** Every proposal is settled and at least one was confirmed: the preview gains of the confirmed ones. */
+  onLogged: (gains: Gain[]) => void;
+  /** Opens the manual form prefilled with a proposal; `text` is the original text to attach as the note. */
   onEdit: (proposal: LogProposalDto, text: string) => void;
+  /** How many proposals are still open (the sheet returns here after an Edit is logged while others wait). */
+  onOpenChange?: (open: number) => void;
 }) {
   const colors = useColors();
-  const { addLog } = useApp();
+  const { addLog, domainScores } = useApp();
+  const streakOf = (d: string) => domainScores.find((s) => s.domain === d)?.streak ?? 0;
   // PRO as the server last reported it (GET /api/billing/status); unknown until that loads, and then the server decides.
   const billing = useBillingStatusQuery().data;
   const knownPro = billing ? isProStatus(billing) : undefined;
@@ -51,12 +65,16 @@ export function FreeFormLog({
   const openProposals = useRef<LogProposalDto[]>([]);
   useEffect(() => {
     openProposals.current = proposals;
-  }, [proposals]);
+    onOpenChange?.(proposals.length);
+  }, [proposals, onOpenChange]);
+  /** The confirmed proposals of this parse, for THE SYSTEM's line once all are settled. */
+  const confirmedRef = useRef<GainEntry[]>([]);
   /** The text the proposals came from (typed, or the voice transcript): what a confirmed proposal carries as freeText. */
   const [source, setSource] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [needsPro, setNeedsPro] = useState(false);
   const [confirmed, setConfirmed] = useState(0);
+  const [confirmingAll, setConfirmingAll] = useState(false);
 
   const holding = useRef(false);
   const startedAt = useRef(0);
@@ -67,7 +85,8 @@ export function FreeFormLog({
     setProposals(list);
     setSource(from);
     setConfirmed(0);
-    setMessage(list.length === 0 ? "Nothing loggable found. Rephrase it, or use the form below." : null);
+    confirmedRef.current = [];
+    setMessage(list.length === 0 ? "Nothing loggable found. Rephrase it, or log it manually." : null);
   };
 
   const handleError = (err: unknown) => {
@@ -186,9 +205,10 @@ export function FreeFormLog({
     return rest;
   };
 
-  const confirm = async (p: LogProposalDto) => {
+  /** Queues one proposal; true when it was recorded. The last one settled hands THE SYSTEM's line to the sheet. */
+  const confirm = async (p: LogProposalDto): Promise<boolean> => {
     // A second tap while the first is still queueing would log it twice.
-    if (confirming.current.has(p)) return;
+    if (confirming.current.has(p)) return false;
     confirming.current.add(p);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -196,15 +216,26 @@ export function FreeFormLog({
     } catch {
       confirming.current.delete(p);
       setMessage("The entry could not be recorded on this device. Sign in again, then retry.");
-      return;
+      return false;
     }
     confirming.current.delete(p);
+    confirmedRef.current = [...confirmedRef.current, toEntry(p)];
     const rest = settle(p);
     setConfirmed((n) => n + 1);
     if (rest.length === 0) {
       setText("");
-      onLogged();
+      onLogged(logGains(confirmedRef.current, streakOf));
     }
+    return true;
+  };
+
+  const confirmAll = async () => {
+    if (confirmingAll) return;
+    setConfirmingAll(true);
+    for (const p of [...openProposals.current]) {
+      if (!(await confirm(p))) break;
+    }
+    setConfirmingAll(false);
   };
 
   const edit = (p: LogProposalDto) => {
@@ -212,114 +243,123 @@ export function FreeFormLog({
     onEdit(p, source);
   };
 
+  const drop = (p: LogProposalDto) => {
+    Haptics.selectionAsync();
+    const rest = settle(p);
+    // Dropping the last open proposal after confirming others still closes the loop with THE SYSTEM's line.
+    if (rest.length === 0 && confirmedRef.current.length > 0) {
+      setText("");
+      onLogged(logGains(confirmedRef.current, streakOf));
+    }
+  };
+
   const recordingNow = phase === "recording";
   const busy = phase === "parsing" || phase === "sending";
+  const canParse = !busy && !recordingNow && text.trim() !== "";
 
   return (
-    <View style={s.section}>
-      <Text style={[s.label, { color: colors.mutedForeground }]}>SAY IT</Text>
+    <View style={s.root}>
+      <TextInput
+        style={[type.body, s.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
+        placeholder="slept 7 hours and ran 5km"
+        placeholderTextColor={colors.subtle}
+        value={text}
+        onChangeText={(t) => {
+          setText(t);
+          setMessage(null);
+        }}
+        maxLength={FREEFORM_MAX_CHARS}
+        accessibilityLabel="What did you do"
+        returnKeyType="go"
+        onSubmitEditing={() => void runParse()}
+        editable={phase === "idle"}
+        autoFocus
+      />
       <View style={s.row}>
-        <TextInput
-          style={[s.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
-          placeholder="slept 6 hours and read 30 pages"
-          placeholderTextColor={colors.mutedForeground}
-          value={text}
-          onChangeText={(t) => {
-            setText(t);
-            setMessage(null);
-          }}
-          maxLength={FREEFORM_MAX_CHARS}
-          accessibilityLabel="Free-form log text"
-          returnKeyType="go"
-          onSubmitEditing={() => void runParse()}
-          editable={phase === "idle"}
-        />
-        <Pressable
-          onPressIn={() => void startRecording()}
-          onPressOut={stopRecording}
-          disabled={busy}
-          accessibilityRole="button"
-          accessibilityLabel="Hold to record a voice log"
-          style={[
-            s.mic,
-            { borderColor: recordingNow ? "#E05555" : colors.border, backgroundColor: recordingNow ? "#E0555530" : colors.card, opacity: busy ? 0.5 : 1 },
-          ]}
-        >
-          <Feather name="mic" size={16} color={recordingNow ? "#E05555" : colors.mutedForeground} />
-        </Pressable>
-        <TouchableOpacity
+        <View style={[s.micClip, { borderColor: recordingNow ? colors.destructive : colors.border }]}>
+          <Pressable
+            onPressIn={() => void startRecording()}
+            onPressOut={stopRecording}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel="Hold to record a voice log"
+            accessibilityState={{ disabled: busy, busy: recordingNow }}
+            android_ripple={{ color: "rgba(168,121,255,0.2)" }}
+            style={[s.mic, { backgroundColor: recordingNow ? colors.muted : colors.card, opacity: busy ? 0.45 : 1 }]}
+          >
+            <Feather name="mic" size={22} color={recordingNow ? colors.destructive : colors.foreground} />
+          </Pressable>
+        </View>
+        <Button
+          label={phase === "parsing" ? "Parsing" : "Parse"}
           onPress={() => void runParse()}
-          disabled={busy || recordingNow || text.trim() === ""}
-          activeOpacity={0.8}
-          accessibilityRole="button"
+          disabled={!canParse}
+          loading={phase === "parsing"}
+          style={s.parse}
           accessibilityLabel="Parse the text into log entries"
-          style={[s.parse, { backgroundColor: colors.accentFill, opacity: busy || recordingNow || text.trim() === "" ? 0.5 : 1 }]}
-        >
-          <Text style={[s.parseText, { color: colors.primaryForeground }]}>{phase === "parsing" ? "…" : "PARSE"}</Text>
-        </TouchableOpacity>
+        />
       </View>
-      <Text style={[s.hint, { color: colors.mutedForeground }]}>
-        {recordingNow ? "LISTENING. Release to send." : phase === "sending" ? "TRANSCRIBING…" : "Hold the mic to speak (PRO). Nothing is logged until you confirm."}
+      <Text style={[type.meta, { color: recordingNow ? colors.destructive : colors.subtle }]}>
+        {recordingNow
+          ? "Listening. Release to send."
+          : phase === "sending"
+            ? "Transcribing."
+            : "Hold the mic to speak (PRO). Nothing is logged until you confirm."}
       </Text>
       {needsPro ? <ProLock label="Voice log" /> : null}
-      {message ? <Text style={[s.message, { color: colors.mutedForeground }]}>{message}</Text> : null}
+      {message ? <Text style={[type.body, { color: colors.mutedForeground }]}>{message}</Text> : null}
 
-      {proposals.map((p, i) => (
-        <View key={`${p.domain}.${p.logType}.${i}`} style={[s.card, { borderColor: colors.border, backgroundColor: colors.card }]}>
-          <Text style={[s.cardTitle, { color: colors.foreground }]}>{proposalSummary(p)}</Text>
-          <Text style={[s.cardSub, { color: colors.mutedForeground }]}>{`${Math.round(p.confidence * 100)}% sure`}</Text>
-          <View style={s.actions}>
-            <TouchableOpacity
-              onPress={() => void confirm(p)}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel={`Confirm ${proposalSummary(p)}`}
-              style={[s.action, { backgroundColor: colors.accentFill, borderColor: colors.accentFill }]}
-            >
-              <Text style={[s.actionText, { color: colors.primaryForeground }]}>CONFIRM</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => edit(p)}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`Edit ${proposalSummary(p)}`}
-              style={[s.action, { borderColor: colors.border }]}
-            >
-              <Text style={[s.actionText, { color: colors.foreground }]}>EDIT</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => settle(p)}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`Drop ${proposalSummary(p)}`}
-              style={[s.action, { borderColor: colors.border }]}
-            >
-              <Text style={[s.actionText, { color: colors.mutedForeground }]}>DROP</Text>
-            </TouchableOpacity>
-          </View>
+      {proposals.length > 0 ? (
+        <View style={s.list}>
+          {proposals.map((p, i) => {
+            const tone = DOMAIN_COLORS[p.domain];
+            const gain = logGains([toEntry(p)], streakOf).find((g) => g.label === p.domain);
+            return (
+              <View key={`${p.domain}.${p.logType}.${i}`} style={[s.card, { borderColor: colors.border, backgroundColor: colors.card }]}>
+                <View style={s.cardHead}>
+                  <View style={[s.chip, { borderColor: tone }]}>
+                    <Text style={[type.label, { color: tone }]}>{p.domain}</Text>
+                  </View>
+                  <Text style={[type.meta, s.flex, { color: colors.subtle }]}>{`${Math.round(p.confidence * 100)}% sure`}</Text>
+                  {gain ? <Text style={[type.number, { color: colors.foreground }]}>{signedScore(gain.delta)}</Text> : null}
+                </View>
+                <Text style={[type.bodyStrong, { color: colors.foreground }]}>{proposalDetail(p)}</Text>
+                <View style={s.actions}>
+                  <Button label="Confirm" onPress={() => void confirm(p)} disabled={confirmingAll} accessibilityLabel={`Confirm ${proposalSummary(p)}`} />
+                  <Button label="Edit" variant="text" onPress={() => edit(p)} disabled={confirmingAll} accessibilityLabel={`Edit ${proposalSummary(p)}`} />
+                  <Button label="Drop" variant="text" onPress={() => drop(p)} disabled={confirmingAll} accessibilityLabel={`Drop ${proposalSummary(p)}`} />
+                </View>
+              </View>
+            );
+          })}
+          {proposals.length > 1 ? (
+            <Button
+              label={`Confirm all ${proposals.length}`}
+              onPress={() => void confirmAll()}
+              loading={confirmingAll}
+              block
+            />
+          ) : null}
+          {confirmed > 0 ? (
+            <Text style={[type.meta, { color: colors.mutedForeground }]}>{`${confirmed} logged. Confirm or drop the rest.`}</Text>
+          ) : null}
         </View>
-      ))}
-      {confirmed > 0 && proposals.length > 0 ? (
-        <Text style={[s.hint, { color: colors.mutedForeground }]}>{`${confirmed} queued. Confirm or drop the rest.`}</Text>
       ) : null}
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  section: { marginBottom: 24, gap: 8 },
-  label: { fontSize: 9, fontWeight: "600", letterSpacing: 2 },
-  row: { flexDirection: "row", gap: 8, alignItems: "center" },
-  input: { flex: 1, borderWidth: 1, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
-  mic: { width: 40, height: 40, borderWidth: 1, borderRadius: 4, alignItems: "center", justifyContent: "center" },
-  parse: { height: 40, paddingHorizontal: 14, borderRadius: 2, alignItems: "center", justifyContent: "center" },
-  parseText: { fontSize: 11, fontWeight: "700", letterSpacing: 2 },
-  hint: { fontSize: 10, letterSpacing: 0.6, lineHeight: 15 },
-  message: { fontSize: 11, lineHeight: 16 },
-  card: { borderWidth: 1, borderRadius: 4, padding: 12, gap: 6 },
-  cardTitle: { fontSize: 13, fontWeight: "600" },
-  cardSub: { fontSize: 10, letterSpacing: 1 },
-  actions: { flexDirection: "row", gap: 8, marginTop: 4 },
-  action: { flex: 1, borderWidth: 1, borderRadius: 2, paddingVertical: 9, alignItems: "center" },
-  actionText: { fontSize: 10, fontWeight: "700", letterSpacing: 2 },
+  root: { gap: space.sm },
+  flex: { flex: 1 },
+  input: { minHeight: 56, borderWidth: 1, borderRadius: 4, paddingHorizontal: space.md, paddingVertical: space.sm + 4 },
+  row: { flexDirection: "row", gap: space.sm, alignItems: "center" },
+  micClip: { borderWidth: 1, borderRadius: 4, overflow: "hidden" },
+  mic: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
+  parse: { flex: 1, alignSelf: "stretch" },
+  list: { gap: space.md, marginTop: space.md },
+  card: { borderWidth: 1, borderRadius: 4, padding: space.md, gap: space.sm },
+  cardHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  chip: { borderWidth: 1, borderRadius: 2, paddingHorizontal: space.sm, paddingVertical: 2 },
+  actions: { flexDirection: "row", gap: space.sm, alignItems: "center", marginTop: space.xs },
 });

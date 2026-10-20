@@ -1,17 +1,23 @@
+// A player as the server projects them: rank, trajectory, shadow and (where allowed) domain scores. Follow is the
+// main action; challenge and the Party of Two invite follow it; block and report sit at the bottom.
 import React, { useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
-import { RankBadge } from "@/components/RankBadge";
 import { ChallengeComposer } from "@/components/ChallengeComposer";
 import { DuoInvite } from "@/components/DuoInvite";
 import { ReportSheet } from "@/components/ReportSheet";
-import { SettingsCard } from "@/components/SettingsParts";
+import { Group, Notice, Section, Sheet } from "@/components/arena/parts";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { ALL_DOMAINS, DOMAIN_COLORS } from "@/constants/domains";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { useSocialActions, useSocialProfileQuery } from "@/hooks/useSocial";
-import { describeSocialError, profileSummary } from "@/lib/social/social";
+import { describeSocialError } from "@/lib/social/social";
 
 const SYNC_PENDING = "Queued entries have not reached the System yet. Retry shortly.";
+const TRAJECTORY_WORDS: Record<string, string> = { up: "Rising", stable: "Steady", down: "Falling" };
 
 type Sent = { ok: true } | { ok: false; reason: "sync_pending" };
 
@@ -25,12 +31,13 @@ export default function SocialProfileScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmBlock, setConfirmBlock] = useState(false);
+  const [challenging, setChallenging] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reported, setReported] = useState(false);
 
   const view = q.data ?? null;
-  const summary = view ? profileSummary(view.profile) : null;
+  const p = view?.profile;
 
   const run = async (fn: () => Promise<Sent>, after?: () => void) => {
     if (busy) return;
@@ -66,103 +73,113 @@ export default function SocialProfileScreen() {
   };
 
   return (
-    <AuthShell tag="PLAYER" title={view?.profile.handle ?? "Player"} subtitle={view?.profile.isCodename ? "Public codename." : undefined} back>
+    <Screen title={p?.handle ?? "Player"} back>
       {q.isError ? (
-        <AuthNotice message={describeSocialError(q.error)} onRetry={() => void q.refetch()} />
-      ) : !view || !summary ? (
-        <AuthNotice tone="info" message="Loading." />
+        <Notice message={describeSocialError(q.error)} onRetry={() => void q.refetch()} />
+      ) : !view || !p ? (
+        <ActivityIndicator color={colors.primary} />
       ) : (
         <>
-          <SettingsCard>
-            <View style={s.panel}>
-              <View style={s.rankRow}>
-                <RankBadge rank={view.profile.rank} size="md" />
-                <View style={s.rankText}>
-                  <Text style={[s.line, { color: colors.foreground }]}>{summary.rankLine}</Text>
-                  <Text style={[s.hint, { color: colors.mutedForeground }]}>{summary.trajectoryLine}</Text>
-                  {summary.shadowLine ? <Text style={[s.hint, { color: colors.mutedForeground }]}>{summary.shadowLine}</Text> : null}
-                </View>
-              </View>
-              {summary.scores ? (
-                <View style={s.scores}>
-                  {summary.scores.map((x) => (
-                    <View key={x.domain} style={s.scoreRow}>
-                      <Text style={[s.hint, { color: colors.mutedForeground }]}>{x.domain}</Text>
-                      <Text style={[s.line, { color: colors.foreground }]}>{x.value}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
+          <View style={s.head}>
+            <View style={s.flex}>
+              <Text style={[type.bodyStrong, { color: colors.foreground }]}>Rank {p.rank}</Text>
+              <Text style={[type.meta, { color: colors.mutedForeground }]}>
+                {[TRAJECTORY_WORDS[p.trajectory] ?? p.trajectory, p.shadowActive ? "Shadow active" : null, p.isCodename ? "Public codename" : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </Text>
             </View>
-          </SettingsCard>
+          </View>
 
-          {error ? <AuthNotice message={error} /> : null}
-          {reported ? <AuthNotice tone="info" message="Report received. It will be reviewed." /> : null}
+          {p.scores ? (
+            <Group>
+              {ALL_DOMAINS.map((d) => (
+                <ListRow
+                  key={d}
+                  title={d}
+                  dot={DOMAIN_COLORS[d]}
+                  trailing={<Text style={[type.number, { color: colors.foreground }]}>{(p.scores![d] ?? 0).toFixed(1)}</Text>}
+                />
+              ))}
+            </Group>
+          ) : null}
+
+          {error ? <Notice message={error} /> : null}
+          {reported ? <Notice tone="info" message="Report received. It will be reviewed." /> : null}
 
           {view.isSelf ? (
-            <AuthNotice tone="info" message="This is you." />
+            <Notice tone="info" message="This is you." />
           ) : (
             <>
-            {view.following ? (
-              <AuthButton label="UNFOLLOW" loading={busy} onPress={() => void run(() => actions.unfollow(handle))} />
-            ) : (
-              <AuthButton label="FOLLOW" loading={busy} onPress={() => void run(() => actions.follow(handle))} />
-            )}
-
-            {view.following ? <ChallengeComposer opponent={view.profile.handle} /> : null}
-
-            <DuoInvite handle={view.profile.handle} />
-
-            {confirmBlock ? (
-              <View style={s.confirm}>
-                <Text style={[s.hint, { color: colors.mutedForeground }]}>
-                  Blocking removes follows both ways. They will not find you, follow you or be matched with you.
-                </Text>
-                <AuthButton
-                  label="CONFIRM BLOCK"
-                  loading={busy}
-                  onPress={() =>
-                    void run(
-                      () => actions.block(handle),
-                      () => router.back(),
-                    )
-                  }
-                />
-                <AuthLink label="CANCEL" onPress={() => setConfirmBlock(false)} />
+              <View style={s.actions}>
+                {view.following ? (
+                  <Button label="Unfollow" variant="tonal" block loading={busy} onPress={() => void run(() => actions.unfollow(handle))} />
+                ) : (
+                  <Button label="Follow" block loading={busy} onPress={() => void run(() => actions.follow(handle))} />
+                )}
+                {view.following ? <Button label="Challenge" block onPress={() => setChallenging(true)} /> : null}
+                <DuoInvite handle={p.handle} />
               </View>
-            ) : (
-              <AuthLink label="BLOCK" onPress={() => setConfirmBlock(true)} />
-            )}
-            <AuthLink
-              label="REPORT"
-              onPress={() => {
-                setReportError(null);
-                setReporting(true);
-              }}
-            />
+
+              <Section label="Safety">
+                {confirmBlock ? (
+                  <View style={s.actions}>
+                    <Text style={[type.body, { color: colors.mutedForeground }]}>
+                      Blocking removes follows both ways. They will not find you, follow you or be matched with you.
+                    </Text>
+                    <Button
+                      label="Confirm block"
+                      variant="destructive"
+                      block
+                      loading={busy}
+                      onPress={() =>
+                        void run(
+                          () => actions.block(handle),
+                          () => router.back(),
+                        )
+                      }
+                    />
+                    <Button label="Cancel" variant="text" block onPress={() => setConfirmBlock(false)} />
+                  </View>
+                ) : (
+                  <Group>
+                    <ListRow title="Block" subtitle="Remove follows both ways and stop matching" onPress={() => setConfirmBlock(true)} />
+                    <ListRow
+                      title="Report"
+                      subtitle="Sent to review"
+                      onPress={() => {
+                        setReportError(null);
+                        setReporting(true);
+                      }}
+                    />
+                  </Group>
+                )}
+              </Section>
             </>
           )}
         </>
       )}
+
+      {p && view?.following ? (
+        <Sheet visible={challenging} title={`Challenge ${p.handle}`} onClose={() => setChallenging(false)}>
+          <ChallengeComposer opponent={p.handle} />
+        </Sheet>
+      ) : null}
+
       <ReportSheet
         visible={reporting}
-        handle={view?.profile.handle ?? handle}
+        handle={p?.handle ?? handle}
         busy={busy}
         error={reportError}
         onCancel={() => setReporting(false)}
         onConfirm={(reason) => void sendReport(reason)}
       />
-    </AuthShell>
+    </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  panel: { paddingVertical: 14, gap: 14 },
-  rankRow: { flexDirection: "row", alignItems: "center", gap: 14 },
-  rankText: { gap: 3, flex: 1 },
-  line: { fontSize: 13, fontWeight: "700" as const, letterSpacing: 0.5 },
-  hint: { fontSize: 10, letterSpacing: 1.5, fontWeight: "600" as const },
-  scores: { gap: 8 },
-  scoreRow: { flexDirection: "row", justifyContent: "space-between" },
-  confirm: { gap: 8 },
+  flex: { flex: 1, gap: 2 },
+  head: { flexDirection: "row", alignItems: "center", gap: space.md },
+  actions: { gap: space.sm },
 });

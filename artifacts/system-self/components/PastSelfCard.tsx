@@ -2,33 +2,37 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import type { PastSelfResponse } from "@workspace/contracts";
+import { DOMAIN_COLORS } from "@/constants/domains";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { gymLine, pastSelfLine, pastSelfRows, pastSelfTitle } from "@/lib/game/progress";
 
 export function PastSelfCard({ data }: { data: PastSelfResponse }) {
   const colors = useColors();
-  const tone = { up: colors.primary, down: colors.destructive, flat: colors.mutedForeground } as const;
+  const tone = { up: colors.success, down: colors.destructive, flat: colors.mutedForeground } as const;
   return (
-    <View style={[styles.card, { borderColor: colors.primary + "60", backgroundColor: colors.card }]} accessibilityLabel={pastSelfTitle(data.label)}>
-      <Text style={[styles.header, { color: colors.primary }]}>{pastSelfTitle(data.label)}</Text>
+    <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.card }]} accessibilityLabel={pastSelfTitle(data.label)}>
+      <Text style={[type.label, { color: colors.primary }]} accessibilityRole="header">
+        {pastSelfTitle(data.label)}
+      </Text>
       {pastSelfRows(data).map((r) => (
-        <View key={r.domain} style={styles.row} accessibilityLabel={`${r.domain}: ${pastSelfLine(r)}`}>
-          <Text style={[styles.domain, { color: colors.mutedForeground }]}>{r.domain}</Text>
-          <Text style={[styles.nums, { color: colors.foreground }]}>
-            {r.baseline} → {r.current} <Text style={{ color: tone[r.direction] }}>({r.delta})</Text>
+        <View key={r.domain} style={styles.row} accessible accessibilityLabel={`${r.domain}: ${pastSelfLine(r)}`}>
+          <View style={[styles.dot, { backgroundColor: DOMAIN_COLORS[r.domain as keyof typeof DOMAIN_COLORS] ?? colors.subtle }]} />
+          <Text style={[type.label, styles.domain, { color: colors.mutedForeground }]}>{r.domain}</Text>
+          <Text style={[type.body, { color: colors.foreground, fontVariant: ["tabular-nums"] }]}>
+            {`${r.baseline} to ${r.current} `}
+            <Text style={{ color: tone[r.direction] }}>({r.delta})</Text>
           </Text>
         </View>
       ))}
-      <Text style={[styles.gym, { color: colors.mutedForeground }]}>GYM {gymLine(data.gym)}</Text>
+      <Text style={[type.meta, { color: colors.mutedForeground }]}>{`Gym: ${gymLine(data.gym)}`}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 4, padding: 16, gap: 8, marginBottom: 16 },
-  header: { fontSize: 11, fontWeight: "800", letterSpacing: 2 },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  domain: { fontSize: 10, fontWeight: "700", letterSpacing: 1.5 },
-  nums: { fontSize: 13, fontWeight: "700", fontFamily: "monospace" },
-  gym: { fontSize: 10, letterSpacing: 1, marginTop: 4 },
+  card: { borderWidth: 1, borderRadius: 4, padding: space.md, gap: space.sm },
+  row: { flexDirection: "row", alignItems: "center", gap: space.sm, minHeight: 28 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  domain: { flex: 1 },
 });

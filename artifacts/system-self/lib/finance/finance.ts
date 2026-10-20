@@ -38,6 +38,33 @@ export function savingsVerdict(rate: number, target: number): { tone: "good" | "
   return { tone: "bad", line: `${head} Failing.` };
 }
 
+/**
+ * What the finance screen may honestly say about the month. Nothing logged is "empty" (no rate, no verdict); spend
+ * without income has no meaningful rate yet ("no_income"); only a month with income gets a rate and a verdict.
+ */
+export type SavingsStatus =
+  | { kind: "empty" }
+  | { kind: "no_income"; line: string }
+  | { kind: "rated"; tone: "good" | "warn" | "bad"; line: string };
+
+export function savingsStatus(s: Pick<FinanceSummary, "income" | "expenses" | "savingsRate" | "target">): SavingsStatus {
+  if (s.income <= 0 && s.expenses <= 0) return { kind: "empty" };
+  if (s.income <= 0) return { kind: "no_income", line: "Spend logged, no income yet. The savings rate waits for income." };
+  return { kind: "rated", ...savingsVerdict(s.savingsRate, s.target) };
+}
+
+/** The budgets row's one-line summary: how many categories have a limit and which are over it (by how much). */
+export function budgetOverview(byCategory: readonly { category: string; spent: number; limit: number | null }[]): {
+  limited: number;
+  over: { category: string; by: number }[];
+} {
+  const limited = byCategory.filter((c) => c.limit !== null && c.limit > 0);
+  const over = limited
+    .filter((c) => c.spent > (c.limit as number))
+    .map((c) => ({ category: c.category, by: Math.round((c.spent - (c.limit as number)) * 100) / 100 }));
+  return { limited: limited.length, over };
+}
+
 /** A category's spent/limit bar; null without a limit. */
 export function budgetBar(spent: number, limit: number | null): { fraction: number; over: boolean } | null {
   if (limit === null || limit <= 0) return null;

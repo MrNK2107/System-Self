@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NOTICE_KINDS } from "@workspace/contracts";
-import { NOTICE_KINDS_PARAM, NOTICE_ORDER, mergeNotices, nextNoticeGroup, noticeView, parseNotices } from "./notices";
+import {
+  EXPIRY_QUIET_HOURS,
+  NOTICE_KINDS_PARAM,
+  NOTICE_ORDER,
+  mergeNotices,
+  nextNoticeGroup,
+  noticeView,
+  parseNotices,
+  suppressExpiryNotice,
+} from "./notices";
 
 let seq = 0;
 const at = () => new Date(Date.UTC(2026, 9, 19, 10, 0, seq++)).toISOString();
@@ -404,23 +413,75 @@ test("a duo check-in renders as a SYSTEM modal naming the partner", () => {
   assert.equal(parseNotices([n("bogus")]).skipped, 1);
 });
 
-test("the 18:00 deadline notice renders as a SYSTEM alert with the count", () => {
+test("the 18:00 deadline notice renders as a non-blocking banner with the count", () => {
   const parsed = parseNotices([
     { id: id(90), kind: "quest_deadline_24h", payload: { count: 2, localDate: "2026-10-19" }, createdAt: at() },
   ]).notices;
   const group = nextNoticeGroup(parsed, new Set())!;
   assert.equal(group.kind, "quest_deadline_24h");
+  // A non-blocking banner that opens Quests, never a modal; no "Logged." tail.
   assert.deepEqual(noticeView(group), {
-    modal: "system",
-    tone: "alert",
+    modal: "banner",
     label: "QUESTS EXPIRING",
     title: "2 quests expire tonight.",
-    body: "Complete them before midnight. Logged.",
+    body: "Complete them before midnight.",
+    href: "/quests",
   });
 });
 
 test("the deadline notice title is singular for one quest", () => {
   const parsed = parseNotices([{ id: id(91), kind: "quest_deadline_24h", payload: { count: 1, localDate: "2026-10-19" }, createdAt: at() }]).notices;
   const view = noticeView(nextNoticeGroup(parsed, new Set())!);
-  assert.equal(view.modal === "system" && view.title, "1 quest expires tonight.");
+  assert.equal(view.modal === "banner" && view.title, "1 quest expires tonight.");
+});
+
+// --- Expiry warning suppression -------------------------------------------------------------------------------
+
+const deadline = (createdAt: string, localDate = "2026-10-19") =>
+  parseNotices([{ id: id(95), kind: "quest_deadline_24h", payload: { count: 3, localDate }, createdAt }]).notices[0]!;
+const RAISED = "2026-10-19T12:30:00.000Z"; // 18:00 in Asia/Kolkata
+const quest = (createdAt: string, over: Partial<{ status: string; bonus: boolean; expiresAt: string }> = {}) => ({
+  status: "active",
+  bonus: false,
+  createdAt,
+  expiresAt: "2026-10-19T18:29:59.000Z",
+  ...over,
+});
+const hoursBefore = (iso: string, h: number) => new Date(Date.parse(iso) - h * 3600_000).toISOString();
+
+test("the expiry warning is never shown on the first local day", () => {
+  const notice = deadline(RAISED);
+  const old = [quest(hoursBefore(RAISED, 18))];
+  assert.equal(suppressExpiryNotice({ notice, dayNumber: 1, today: "2026-10-19", quests: old }), true);
+  assert.equal(suppressExpiryNotice({ notice, dayNumber: 0, today: null, quests: null }), true);
+  assert.equal(suppressExpiryNotice({ notice, dayNumber: 2, today: "2026-10-19", quests: old }), false);
+});
+
+test(`the expiry warning is skipped within ${EXPIRY_QUIET_HOURS} hours of the quests being issued`, () => {
+  const notice = deadline(RAISED);
+  const base = { notice, dayNumber: 5, today: "2026-10-19" };
+  assert.equal(suppressExpiryNotice({ ...base, quests: [quest(hoursBefore(RAISED, 3))] }), true);
+  assert.equal(suppressExpiryNotice({ ...base, quests: [quest(hoursBefore(RAISED, EXPIRY_QUIET_HOURS - 0.01))] }), true);
+  assert.equal(suppressExpiryNotice({ ...base, quests: [quest(hoursBefore(RAISED, EXPIRY_QUIET_HOURS))] }), false);
+  // One open quest issued long ago is enough to warn.
+  assert.equal(suppressExpiryNotice({ ...base, quests: [quest(hoursBefore(RAISED, 2)), quest(hoursBefore(RAISED, 18))] }), false);
+});
+
+test("the expiry warning is skipped when nothing it could be about is still open, or when it is stale", () => {
+  const notice = deadline(RAISED);
+  const base = { notice, dayNumber: 5, today: "2026-10-19" };
+  const longAgo = hoursBefore(RAISED, 18);
+  assert.equal(suppressExpiryNotice({ ...base, quests: [] }), true);
+  assert.equal(suppressExpiryNotice({ ...base, quests: [quest(longAgo, { status: "complete" })] }), true);
+  assert.equal(suppressExpiryNotice({ ...base, quests: [quest(longAgo, { bonus: true })] }), true);
+  assert.equal(suppressExpiryNotice({ ...base, quests: [quest(longAgo, { expiresAt: hoursBefore(RAISED, 1) })] }), true);
+  // Another local day: the quests it warned about are already resolved.
+  assert.equal(suppressExpiryNotice({ ...base, today: "2026-10-20", quests: [quest(longAgo)] }), true);
+  // Unknown day number, date and quests: nothing to decide on, so it shows.
+  assert.equal(suppressExpiryNotice({ notice, dayNumber: null, today: null, quests: null }), false);
+});
+
+test("suppressExpiryNotice only applies to the deadline notice", () => {
+  const notice = parseNotices([rank(96)]).notices[0]!;
+  assert.equal(suppressExpiryNotice({ notice, dayNumber: 1, today: null, quests: [] }), false);
 });

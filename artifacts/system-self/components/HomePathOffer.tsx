@@ -2,7 +2,10 @@
 // the home path. Soft by design: it only changes which BODY quests are generated, the gym stays open.
 // Onboarding offers the same choice as the START AT HOME FIRST toggle on the assessment screen.
 import React, { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, StyleSheet, Text, View } from "react-native";
+import { Button } from "@/components/ui/Button";
+import { SystemWindow } from "@/components/ui/SystemWindow";
+import { space, type } from "@/constants/type";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -31,50 +34,31 @@ export function HomePathOffer({ gapDays, line, onDone }: Props) {
 
   return (
     <Modal transparent animationType="fade" visible statusBarTranslucent onRequestClose={onDone}>
-      <View style={[styles.overlay, { backgroundColor: "#070809F2" }]}>
-        <View style={[styles.card, { borderColor: colors.primary + "50", backgroundColor: colors.card }]}>
-          <Text style={[styles.label, { color: colors.primary }]}>YOU RETURNED</Text>
-          <Text style={[styles.title, { color: colors.foreground }]}>{line}</Text>
-          <Text style={[styles.body, { color: colors.mutedForeground }]}>
+      <View style={[styles.overlay, { backgroundColor: colors.background + "F2" }]}>
+        <SystemWindow title="YOU RETURNED" style={styles.window} solid>
+          <Text style={[type.title, { color: colors.foreground }]}>{line}</Text>
+          <Text style={[type.body, { color: colors.mutedForeground }]}>
             {gapDays} empty days. Start at home: your BODY quests become home sessions, no equipment. Six of them clear
             Tier I. The gym stays open to you the whole time, and every session you log there still counts.
           </Text>
           {failed ? (
-            <Text style={[styles.body, { color: colors.destructive }]}>Not sent. Queued logs have to land first. Try again.</Text>
+            <Text style={[type.body, { color: colors.destructive }]} accessibilityLiveRegion="polite">
+              Not sent. Queued logs have to land first. Try again.
+            </Text>
           ) : null}
-          <View style={styles.row}>
-            <Pressable
-              style={[styles.btn, { borderColor: colors.border }]}
-              onPress={onDone}
-              disabled={busy}
-              accessibilityRole="button"
-              accessibilityLabel="Not now"
-            >
-              <Text style={[styles.btnText, { color: colors.mutedForeground }]}>NOT NOW</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.btn, { borderColor: colors.primary + "80", backgroundColor: colors.accentFill + "18", opacity: busy ? 0.5 : 1 }]}
-              onPress={() => void accept()}
-              disabled={busy}
-              accessibilityRole="button"
-              accessibilityLabel="Start at home"
-            >
-              <Text style={[styles.btnText, { color: colors.primary }]}>START AT HOME</Text>
-            </Pressable>
+          <View style={styles.actions}>
+            <Button label="Start at home" onPress={() => void accept()} loading={busy} block />
+            <Button label="Not now" variant="text" onPress={onDone} disabled={busy} style={styles.center} />
           </View>
-        </View>
+        </SystemWindow>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 },
-  card: { width: "100%", borderWidth: 1, borderRadius: 4, padding: 20, gap: 14 },
-  label: { fontSize: 9, fontWeight: "800", letterSpacing: 3 },
-  title: { fontSize: 18, fontWeight: "800", letterSpacing: 1.5 },
-  body: { fontSize: 13, lineHeight: 20 },
-  row: { flexDirection: "row", gap: 8, marginTop: 4 },
-  btn: { flex: 1, borderWidth: 1, borderRadius: 2, paddingVertical: 12, alignItems: "center" },
-  btnText: { fontSize: 10, fontWeight: "800", letterSpacing: 2 },
+  overlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: space.md },
+  window: { width: "100%", gap: space.md },
+  actions: { gap: space.xs, marginTop: space.sm },
+  center: { alignSelf: "center" },
 });

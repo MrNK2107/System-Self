@@ -1,18 +1,12 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { type ReactNode } from "react";
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Button } from "@/components/ui/Button";
+import { IconButton } from "@/components/ui/Screen";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { useOnline } from "@/lib/api/query";
 
@@ -20,12 +14,12 @@ interface AuthShellProps {
   tag: string;
   title: string;
   subtitle?: string;
-  /** Show a back chevron in the header. */
+  /** Show a back button in the app bar. */
   back?: boolean;
   children: ReactNode;
 }
 
-/** Shared frame for the accounts screens: header tag, title, offline bar, keyboard-safe scroll. */
+/** Shared frame for form screens: app bar (back + tag), offline bar, title, keyboard-safe scroll. */
 export function AuthShell({ tag, title, subtitle, back, children }: AuthShellProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -36,35 +30,31 @@ export function AuthShell({ tag, title, subtitle, back, children }: AuthShellPro
       style={[s.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <View style={[s.header, { paddingTop: insets.top + 16, borderBottomColor: colors.border }]}>
-        <View style={s.side}>
-          {back ? (
-            <TouchableOpacity
-              onPress={() => router.back()}
-              style={s.back}
-              accessibilityRole="button"
-              accessibilityLabel="Back"
-            >
-              <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
-            </TouchableOpacity>
-          ) : null}
+      <View style={{ paddingTop: insets.top, backgroundColor: colors.background }}>
+        <View style={s.bar}>
+          {back ? <IconButton icon="arrow-left" label="Back" onPress={() => router.back()} /> : <View style={s.side} />}
+          <Text style={[type.label, s.tag, { color: colors.mutedForeground }]} numberOfLines={1}>
+            {tag}
+          </Text>
+          <View style={s.side} />
         </View>
-        <Text style={[s.tag, { color: colors.subtle }]}>{tag}</Text>
-        <View style={s.side} />
       </View>
       {!online ? (
-        <View style={[s.offline, { backgroundColor: colors.muted }]}>
-          <Text style={[s.offlineText, { color: colors.mutedForeground }]}>OFFLINE — CONNECTION REQUIRED</Text>
+        <View style={[s.offline, { backgroundColor: colors.muted }]} accessibilityLiveRegion="polite">
+          <Feather name="wifi-off" size={16} color={colors.foreground} />
+          <Text style={[type.meta, { color: colors.foreground }]}>Offline. A connection is required.</Text>
         </View>
       ) : null}
       <ScrollView
-        contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 32 }]}
+        contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + space.xl }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
         <View style={s.titleBlock}>
-          <Text style={[s.title, { color: colors.foreground }]}>{title}</Text>
-          {subtitle ? <Text style={[s.subtitle, { color: colors.mutedForeground }]}>{subtitle}</Text> : null}
+          <Text style={[type.title, { color: colors.foreground }]} accessibilityRole="header">
+            {title}
+          </Text>
+          {subtitle ? <Text style={[type.body, { color: colors.mutedForeground }]}>{subtitle}</Text> : null}
         </View>
         {children}
       </ScrollView>
@@ -81,28 +71,12 @@ interface AuthButtonProps {
   destructive?: boolean;
 }
 
+/** The form's primary action: the kit's full-width 48dp button. */
 export function AuthButton({ label, onPress, loading, disabled, destructive }: AuthButtonProps) {
-  const colors = useColors();
-  const inactive = disabled || loading;
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      disabled={inactive}
-      activeOpacity={0.85}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: !!inactive, busy: !!loading }}
-      style={[s.button, { backgroundColor: inactive ? colors.muted : destructive ? colors.destructive : colors.accentFill }]}
-    >
-      {loading ? (
-        <ActivityIndicator color={destructive ? colors.destructiveForeground : colors.primaryForeground} />
-      ) : (
-        <Text style={[s.buttonText, { color: inactive ? colors.subtle : destructive ? colors.destructiveForeground : colors.primaryForeground }]}>{label}</Text>
-      )}
-    </TouchableOpacity>
-  );
+  return <Button label={label} onPress={onPress} loading={loading} disabled={disabled} variant={destructive ? "destructive" : "filled"} block />;
 }
 
-/** One line of error in SYSTEM voice with an optional RETRY. */
+/** One line in SYSTEM voice: an error (destructive frame and icon, with RETRY when a retry can work) or info. */
 export function AuthNotice({
   message,
   tone = "error",
@@ -113,66 +87,56 @@ export function AuthNotice({
   onRetry?: () => void;
 }) {
   const colors = useColors();
-  const color = tone === "error" ? colors.destructive : colors.mutedForeground;
+  const error = tone === "error";
   return (
-    <View style={[s.notice, { borderColor: color }]}>
-      <Text style={[s.noticeText, { color: tone === "error" ? colors.foreground : colors.mutedForeground }]}>
-        {message}
-      </Text>
-      {onRetry ? (
-        <TouchableOpacity onPress={onRetry} accessibilityRole="button" hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={[s.retry, { color: colors.primary }]}>RETRY</Text>
-        </TouchableOpacity>
-      ) : null}
+    <View
+      style={[s.notice, { borderColor: error ? colors.destructive : colors.border, backgroundColor: colors.card }]}
+      accessibilityLiveRegion="polite"
+    >
+      <Feather name={error ? "alert-circle" : "info"} size={18} color={error ? colors.destructive : colors.mutedForeground} />
+      <Text style={[type.body, s.noticeText, { color: error ? colors.foreground : colors.mutedForeground }]}>{message}</Text>
+      {onRetry ? <Button label="Retry" variant="text" onPress={onRetry} /> : null}
     </View>
   );
 }
 
+/** A secondary route out of the form (forgot password, create account): 48dp, ripple, accent label. */
 export function AuthLink({ label, onPress }: { label: string; onPress: () => void }) {
   const colors = useColors();
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      accessibilityRole="link"
-      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      style={s.link}
-    >
-      <Text style={[s.linkText, { color: colors.primary }]}>{label}</Text>
-    </TouchableOpacity>
+    <View style={s.linkClip}>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="link"
+        android_ripple={{ color: "rgba(168,121,255,0.16)" }}
+        style={s.link}
+      >
+        <Text style={[type.label, { color: colors.primary }]}>{label}</Text>
+      </Pressable>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  side: { width: 36 },
-  back: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  tag: { flex: 1, textAlign: "center", fontSize: 9, letterSpacing: 3, fontWeight: "700" as const },
-  offline: { paddingVertical: 4, alignItems: "center" },
-  offlineText: { fontSize: 9, letterSpacing: 2, fontWeight: "700" as const },
-  scroll: { paddingHorizontal: 16, paddingTop: 24, gap: 16 },
-  titleBlock: { gap: 8, paddingHorizontal: 4, marginBottom: 4 },
-  title: { fontSize: 28, fontWeight: "800" as const, lineHeight: 36, letterSpacing: -0.5 },
-  subtitle: { fontSize: 13, lineHeight: 20 },
-  button: { borderRadius: 2, paddingVertical: 16, alignItems: "center", justifyContent: "center", minHeight: 50 },
-  buttonText: { fontSize: 12, fontWeight: "700" as const, letterSpacing: 3 },
+  bar: { height: 56, flexDirection: "row", alignItems: "center", paddingHorizontal: space.xs },
+  side: { width: 48 },
+  tag: { flex: 1, textAlign: "center" },
+  offline: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: space.sm, minHeight: 32, paddingHorizontal: space.md },
+  scroll: { paddingHorizontal: space.md, paddingTop: space.lg, gap: space.md },
+  titleBlock: { gap: space.sm, marginBottom: space.sm },
   notice: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: space.sm + 4,
     borderWidth: 1,
     borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingLeft: space.md,
+    paddingRight: space.xs,
+    paddingVertical: space.xs,
+    minHeight: 56,
   },
-  noticeText: { flex: 1, fontSize: 12, lineHeight: 17 },
-  retry: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 2 },
-  link: { alignItems: "center", paddingVertical: 6 },
-  linkText: { fontSize: 12, letterSpacing: 1, fontWeight: "600" as const },
+  noticeText: { flex: 1, paddingVertical: space.sm },
+  linkClip: { borderRadius: 4, overflow: "hidden", alignSelf: "center" },
+  link: { minHeight: 48, paddingHorizontal: space.md, alignItems: "center", justifyContent: "center" },
 });

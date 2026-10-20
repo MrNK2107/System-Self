@@ -1,6 +1,7 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { space, type } from "@/constants/type";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -14,15 +15,15 @@ export function OfflineBar() {
   // Held back while offline: reconnecting clears it. Held back while online: a queued log is stuck (5xx and
   // the like) and the outbox keeps retrying it.
   const syncLine = syncBlocked ? (offline ? "Sync pending. Reconnect to continue." : "Sync stalled. Retrying.") : null;
-  const parts = [offline ? "OFFLINE — CACHED" : null, syncLine].filter(Boolean);
+  const parts = [offline ? "Offline. Showing saved data." : null, syncLine].filter(Boolean);
 
   return (
     <View
       pointerEvents="none"
-      style={[styles.bar, { top: insets.top, backgroundColor: colors.muted, borderColor: colors.border }]}
+      style={[styles.bar, { top: insets.top, backgroundColor: colors.surface, borderColor: colors.border }]}
       accessibilityRole="alert"
     >
-      <Text style={[styles.text, { color: colors.mutedForeground }]} numberOfLines={1}>
+      <Text style={[type.meta, { color: colors.mutedForeground }]} numberOfLines={1}>
         {parts.join("  ·  ")}
       </Text>
     </View>
@@ -34,11 +35,11 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    height: 16,
+    minHeight: 24,
+    paddingHorizontal: space.md,
     alignItems: "center",
     justifyContent: "center",
     borderBottomWidth: StyleSheet.hairlineWidth,
     zIndex: 10,
   },
-  text: { fontSize: 8, fontWeight: "700", letterSpacing: 2 },
 });

@@ -58,8 +58,12 @@ function categoryOf(word: string | undefined): string {
 
 const WORKOUT_KINDS: Record<string, string> = {
   "worked out": "Workout", workout: "Workout", gym: "Strength", lifted: "Strength", trained: "Workout",
-  ran: "Run", run: "Run", jogged: "Run", swam: "Swim", cycled: "Cycle", yoga: "Yoga",
+  ran: "Run", run: "Run", jogged: "Run", swam: "Swim", cycled: "Cycle", biked: "Cycle", walked: "Walk", yoga: "Yoga",
 };
+
+/** Minutes per kilometre used to estimate a workout's length when only a distance is given ("ran 5km"). */
+const PACE_MIN_PER_KM: Record<string, number> = { Run: 6, Walk: 12, Cycle: 3, Swim: 30 };
+const DISTANCE = String.raw`(km|kms|k|kilometers?|kilometres?|mi|miles?)`;
 
 interface Hit extends LogProposal {
   at: number;
@@ -104,11 +108,20 @@ const RULES: Rule[] = [
     return { at: m.index, domain: "MIND", logType: "learning", data: { minutes }, confidence: 0.8 };
   },
   (t) => {
-    const m = new RegExp(String.raw`\b(worked out|workout|gym|lifted|trained|ran|run|jogged|swam|cycled|yoga)\b[^.,;]*?\b${NUM}\s*${UNIT}\b`, "i").exec(t);
-    if (!m) return null;
-    const minutes = toMinutes(toNumber(m[2]!), m[3]!);
+    const m = new RegExp(String.raw`\b(worked out|workout|gym|lifted|trained|ran|run|jogged|swam|cycled|biked|walked|yoga)\b[^.,;]*?\b${NUM}\s*${UNIT}\b`, "i").exec(t);
+    if (m) {
+      const minutes = toMinutes(toNumber(m[2]!), m[3]!);
+      if (!inRange(minutes, 1, 600)) return null;
+      return { at: m.index, domain: "BODY", logType: "workout", data: { kind: WORKOUT_KINDS[m[1]!.toLowerCase()] ?? "Workout", minutes, intensity: 3 }, confidence: 0.75 };
+    }
+    // Distance only ("ran 5km"): the minutes are estimated at a steady pace, so the proposal is less sure.
+    const d = new RegExp(String.raw`\b(ran|run|jogged|swam|cycled|biked|walked)\s+(?:for\s+)?(?:about\s+|around\s+)?${NUM}\s*${DISTANCE}\b`, "i").exec(t);
+    if (!d) return null;
+    const kind = WORKOUT_KINDS[d[1]!.toLowerCase()] ?? "Run";
+    const km = toNumber(d[2]!) * (/^mi/i.test(d[3]!) ? 1.609 : 1);
+    const minutes = Math.round(km * (PACE_MIN_PER_KM[kind] ?? 6));
     if (!inRange(minutes, 1, 600)) return null;
-    return { at: m.index, domain: "BODY", logType: "workout", data: { kind: WORKOUT_KINDS[m[1]!.toLowerCase()] ?? "Workout", minutes, intensity: 3 }, confidence: 0.75 };
+    return { at: d.index, domain: "BODY", logType: "workout", data: { kind, minutes, intensity: 3 }, confidence: 0.6 };
   },
   (t) => {
     const m = /\b(?:called|phoned|talked to|spoke (?:to|with)|met (?:up )?with|texted|caught up with)\s+(?:my\s+)?(?!(?:a|an|the|it|off|in|out|about|up)\b)[a-z]+/i.exec(t);
@@ -117,9 +130,50 @@ const RULES: Rule[] = [
   },
 ];
 
-/** Keyword-parses free text into up to 3 proposals, in the order they appear in the text. Never throws. */
+/** One clause of a free-form entry and where it starts in the original text. */
+export interface Clause {
+  text: string;
+  at: number;
+}
+
+/** Clause separators: ";", new lines, a comma or full stop that is not inside a number ("1,200", "7.5"), "and", "then". */
+const CLAUSE_SEP = /\s*(?:;|\n|,(?!\d)|(?<!\d),|\.(?!\d)|(?<!\d)\.)\s*(?:(?:and\s+then|and|then)\s+)?|\s+(?:and\s+then|and|then)\s+/gi;
+
+/** Splits an entry into clauses, so "slept 7 hours and ran 5km" is two: "slept 7 hours", "ran 5km". */
+export function splitClauses(text: string): Clause[] {
+  const out: Clause[] = [];
+  const push = (from: number, to: number) => {
+    const part = text.slice(from, to);
+    const lead = part.length - part.trimStart().length;
+    if (part.trim()) out.push({ text: part.trim(), at: from + lead });
+  };
+  let from = 0;
+  for (const m of text.matchAll(CLAUSE_SEP)) {
+    push(from, m.index);
+    from = m.index + m[0].length;
+  }
+  push(from, text.length);
+  return out;
+}
+
+/**
+ * Keyword-parses free text into up to 3 proposals, one per thing it says, in the order they appear in the text.
+ * Every rule runs on each clause, so two clauses give two proposals; each rule also runs on the whole text, so a
+ * phrase the splitter cut ("gym, 40 min") still counts when no clause produced that type. Never throws.
+ */
 export function parseFreeText(text: string): LogProposal[] {
-  const hits = RULES.map((rule) => rule(text)).filter((h): h is Hit => h !== null);
+  const hits: Hit[] = [];
+  for (const clause of splitClauses(text)) {
+    for (const rule of RULES) {
+      const h = rule(clause.text);
+      if (h) hits.push({ ...h, at: clause.at + h.at });
+    }
+  }
+  const found = new Set(hits.map((h) => `${h.domain}:${h.logType}`));
+  for (const rule of RULES) {
+    const h = rule(text);
+    if (h && !found.has(`${h.domain}:${h.logType}`)) hits.push(h);
+  }
   hits.sort((a, b) => a.at - b.at);
   return hits.slice(0, PARSE_MAX_PROPOSALS).map(({ at: _at, ...proposal }) => proposal);
 }

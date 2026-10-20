@@ -1,8 +1,10 @@
 // Offered right after a BODY quest is refused: a short bodyweight routine to do now. Not a quest; the session
 // is logged as an ordinary BODY log from the floor screen.
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import type { FloorRoutineDto } from "@workspace/contracts";
+import { Button } from "@/components/ui/Button";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { floorHeader } from "@/lib/game/adherence";
 
@@ -16,43 +18,24 @@ interface Props {
 
 export function FloorQuestCard({ routine, shadowLine, onStart, onDismiss }: Props) {
   const colors = useColors();
+  const moves = routine.steps.filter((s) => s.name !== "Rest").length;
   return (
-    <View style={[styles.card, { borderColor: colors.primary + "60", backgroundColor: colors.card }]}>
-      <Text style={[styles.header, { color: colors.primary }]}>{floorHeader(routine.minutes)}</Text>
-      <Text style={[styles.title, { color: colors.foreground }]}>{routine.title}</Text>
-      <Text style={[styles.meta, { color: colors.mutedForeground }]}>
-        {routine.steps.filter((s) => s.name !== "Rest").length} moves. No equipment.
-      </Text>
-      {shadowLine ? <Text style={[styles.shadow, { color: colors.destructive }]}>{shadowLine}</Text> : null}
-      <View style={styles.row}>
-        <Pressable
-          style={[styles.btn, { borderColor: colors.border }]}
-          onPress={onDismiss}
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss"
-        >
-          <Text style={[styles.btnText, { color: colors.mutedForeground }]}>NOT NOW</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, { borderColor: colors.primary + "80", backgroundColor: colors.accentFill + "18" }]}
-          onPress={onStart}
-          accessibilityRole="button"
-          accessibilityLabel="Start floor session"
-        >
-          <Text style={[styles.btnText, { color: colors.primary }]}>START</Text>
-        </Pressable>
+    <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.card }]}>
+      <View style={styles.head}>
+        <Text style={[type.bodyStrong, { color: colors.foreground }]}>{floorHeader(routine.minutes)}</Text>
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>
+          {routine.title} · {moves} moves · no equipment
+        </Text>
       </View>
+      {shadowLine ? <Text style={[type.meta, { color: colors.destructive }]}>{shadowLine}</Text> : null}
+      <Button label="Start" onPress={onStart} block accessibilityLabel="Start floor session" />
+      <Button label="Not now" variant="text" onPress={onDismiss} style={styles.center} accessibilityLabel="Dismiss" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 4, padding: 16, gap: 8 },
-  header: { fontSize: 11, fontWeight: "800", letterSpacing: 2 },
-  title: { fontSize: 15, fontWeight: "700", letterSpacing: 1 },
-  meta: { fontSize: 11 },
-  shadow: { fontSize: 11, fontWeight: "600", lineHeight: 16 },
-  row: { flexDirection: "row", gap: 8, marginTop: 4 },
-  btn: { flex: 1, borderWidth: 1, borderRadius: 2, paddingVertical: 11, alignItems: "center" },
-  btnText: { fontSize: 10, fontWeight: "700", letterSpacing: 2 },
+  card: { borderWidth: 1, borderRadius: 4, padding: space.md, gap: space.sm },
+  head: { gap: 2, marginBottom: space.xs },
+  center: { alignSelf: "center" },
 });

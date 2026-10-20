@@ -1,184 +1,146 @@
-// Finance (PRD 19): the month's savings rate against the stated target, spend per category against its budget, goals
-// with contributions, and the net worth record. Private: none of this is ever shown to another player.
+// Finance (PRD 19), reached from Status -> WEALTH. One job: is my money on track. The month's savings rate is the hero
+// figure, and only once income is logged (no verdict without data). Budgets, goals, net worth, recurring income and the
+// savings target each sit behind a row. Private: none of this is ever shown to another player.
 import React, { useState } from "react";
 import { router } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
-import type { FinancialGoal } from "@workspace/contracts";
-import { AuthField } from "@/components/AuthField";
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
-import { SettingsCard } from "@/components/SettingsParts";
+
+import { LogModal } from "@/components/LogModal";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { SystemWindow } from "@/components/ui/SystemWindow";
+import { space, type } from "@/constants/type";
+import { LoadState } from "@/features/finance/components";
 import { useColors } from "@/hooks/useColors";
-import { useFinanceActions, useFinanceQuery } from "@/hooks/useFinance";
-import {
-  budgetBar,
-  categoryLabel,
-  describeFinanceError,
-  goalProgress,
-  money,
-  netWorthRows,
-  parseAmount,
-  parseSignedAmount,
-  percent,
-  savingsVerdict,
-} from "@/lib/finance/finance";
-import type { MutationResult } from "@/lib/game/actions";
-
-const SYNC_PENDING = "Queued entries have not reached the System yet. Retry shortly.";
-
-function Bar({ fraction, color }: { fraction: number; color: string }) {
-  const colors = useColors();
-  return (
-    <View style={[s.track, { backgroundColor: colors.border }]}>
-      <View style={[s.fill, { width: `${Math.round(fraction * 100)}%`, backgroundColor: color }]} />
-    </View>
-  );
-}
-
-function GoalCard({ goal, currency, busy, onContribute }: { goal: FinancialGoal; currency: string; busy: boolean; onContribute: (amount: number) => Promise<boolean> }) {
-  const colors = useColors();
-  const [text, setText] = useState("");
-  const [invalid, setInvalid] = useState(false);
-  const submit = async () => {
-    const amount = parseAmount(text);
-    if (amount === null) return setInvalid(true);
-    setInvalid(false);
-    if (await onContribute(amount)) setText("");
-  };
-  return (
-    <SettingsCard>
-      <View style={s.panel}>
-        <Text style={[s.title, { color: colors.foreground }]}>{goal.title}</Text>
-        <Text style={[s.hint, { color: colors.mutedForeground }]}>
-          {money(goal.savedAmount, currency)} OF {money(goal.targetAmount, currency)}
-          {goal.deadline ? ` // BY ${goal.deadline}` : ""} // {goal.status.toUpperCase()}
-        </Text>
-        <Bar fraction={goalProgress(goal)} color={colors.domain.WEALTH} />
-        {goal.status === "active" ? (
-          <>
-            <AuthField label="CONTRIBUTE" value={text} onChangeText={setText} keyboardType="decimal-pad" error={invalid ? "Enter a positive amount." : null} />
-            <AuthButton label="ADD TO GOAL" loading={busy} onPress={() => void submit()} />
-          </>
-        ) : null}
-        <AuthLink label="EDIT" onPress={() => router.push({ pathname: "/finance/goal", params: { id: goal.id } })} />
-      </View>
-    </SettingsCard>
-  );
-}
+import { useFinanceQuery } from "@/hooks/useFinance";
+import { budgetOverview, categoryLabel, money, netWorthRows, percent, savingsStatus } from "@/lib/finance/finance";
 
 export default function FinanceScreen() {
   const colors = useColors();
   const q = useFinanceQuery();
-  const actions = useFinanceActions();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [netWorth, setNetWorth] = useState("");
-
-  const attempt = async (send: () => Promise<MutationResult<unknown>>): Promise<boolean> => {
-    if (busy) return false;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await send();
-      if (!r.ok) setError(SYNC_PENDING);
-      return r.ok;
-    } catch (e) {
-      setError(describeFinanceError(e));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const [logOpen, setLogOpen] = useState(false);
   const f = q.data;
-  const label = (text: string) => <Text style={[s.section, { color: colors.mutedForeground }]}>{text}</Text>;
-  const verdict = f ? savingsVerdict(f.savingsRate, f.target) : null;
-  const toneColor = verdict?.tone === "good" ? colors.domain.WEALTH : verdict?.tone === "bad" ? colors.destructive : colors.foreground;
 
-  const saveNetWorth = async () => {
-    const amount = parseSignedAmount(netWorth);
-    if (amount === null || !f) return setError("Enter your net worth as a number. Negative is allowed.");
-    if (await attempt(() => actions.setNetWorth(f.month, amount))) setNetWorth("");
+  const closeLog = () => {
+    setLogOpen(false);
+    void q.refetch();
   };
+
+  if (!f) {
+    return (
+      <Screen title="Finance" back>
+        <LoadState error={q.isError ? q.error : null} onRetry={() => void q.refetch()} />
+      </Screen>
+    );
+  }
+
+  const status = savingsStatus(f);
+  const wealth = colors.domain.WEALTH;
+  const toneColor = status.kind === "rated" ? (status.tone === "good" ? wealth : status.tone === "warn" ? colors.warn : colors.destructive) : colors.foreground;
+  const budgets = budgetOverview(f.byCategory);
+  const activeGoals = f.goals.filter((g) => g.status === "active");
+  const latestNet = netWorthRows(f.netWorth)[0];
+  const activeRecurring = f.recurring.filter((r) => r.active);
+  const recurringTotal = activeRecurring.reduce((sum, r) => sum + r.amount, 0);
+
+  const budgetsSubtitle =
+    budgets.over.length > 0
+      ? `Over: ${budgets.over.map((o) => `${categoryLabel(o.category)} by ${money(o.by, f.currency)}`).join(", ")}`
+      : budgets.limited > 0
+        ? `${budgets.limited} ${budgets.limited === 1 ? "limit" : "limits"} set · all within`
+        : "No limits set";
 
   return (
-    <AuthShell tag="WEALTH" title="Finance" subtitle="THE SYSTEM does not advise. It keeps the record and delivers the verdict every Sunday." back>
-      {error ? <AuthNotice message={error} /> : null}
-      {q.isError && !f ? (
-        <AuthNotice message={describeFinanceError(q.error)} onRetry={() => void q.refetch()} />
-      ) : !f ? (
-        <AuthNotice tone="info" message="Loading." />
+    <Screen title="Finance" back refreshing={q.isRefetching} onRefresh={() => void q.refetch()}>
+      {status.kind === "empty" ? (
+        <SystemWindow>
+          <Text style={[type.title, { color: colors.foreground }]}>No money logged this month.</Text>
+          <Text style={[type.body, { color: colors.mutedForeground }]}>Log income and spending. THE SYSTEM measures the savings rate from them.</Text>
+          <View style={s.actions}>
+            <Button label="Add income" onPress={() => setLogOpen(true)} />
+            <Button label="Log an expense" variant="tonal" onPress={() => setLogOpen(true)} />
+          </View>
+        </SystemWindow>
       ) : (
-        <>
-          {label(`SAVINGS RATE // ${f.month}`)}
-          <SettingsCard>
-            <View style={s.panel}>
-              <Text style={[s.big, { color: toneColor }]}>{percent(f.savingsRate)}</Text>
-              <Text style={[s.hint, { color: colors.mutedForeground }]}>{verdict!.line}</Text>
-              <Text style={[s.line, { color: colors.foreground }]}>
-                IN {money(f.income, f.currency)} // OUT {money(f.expenses, f.currency)}
+        <View style={s.hero}>
+          {status.kind === "rated" ? (
+            <>
+              <Text style={[type.display, { color: toneColor }]} accessibilityLabel={`Savings rate ${percent(f.savingsRate)}`}>
+                {percent(f.savingsRate)}
               </Text>
-            </View>
-          </SettingsCard>
-
-          {label("SPEND BY CATEGORY")}
-          <SettingsCard>
-            <View style={s.panel}>
-              {f.byCategory.map((c) => {
-                const bar = budgetBar(c.spent, c.limit);
-                if (!bar && c.spent === 0) return null;
-                return (
-                  <View key={c.category} style={s.category}>
-                    <Text style={[s.line, { color: bar?.over ? colors.destructive : colors.foreground }]}>
-                      {categoryLabel(c.category).toUpperCase()} // {money(c.spent, f.currency)}
-                      {c.limit !== null ? ` OF ${money(c.limit, f.currency)}` : ""}
-                      {bar?.over ? " // OVER" : ""}
-                    </Text>
-                    {bar ? <Bar fraction={bar.fraction} color={bar.over ? colors.destructive : colors.domain.WEALTH} /> : null}
-                  </View>
-                );
-              })}
-              {f.byCategory.every((c) => c.limit === null && c.spent === 0) ? (
-                <Text style={[s.hint, { color: colors.mutedForeground }]}>No spend and no budgets this month.</Text>
-              ) : null}
-            </View>
-          </SettingsCard>
-          <AuthLink label="BUDGETS, TARGET AND RECURRING INCOME" onPress={() => router.push("/finance/budget")} />
-
-          {label("GOALS")}
-          {f.goals.length === 0 ? <Text style={[s.hint, { color: colors.mutedForeground }]}>No goals set. Name one.</Text> : null}
-          {f.goals.map((g) => (
-            <GoalCard key={g.id} goal={g} currency={f.currency} busy={busy} onContribute={(amount) => attempt(() => actions.contribute(g.id, amount))} />
-          ))}
-          <AuthLink label="NEW GOAL" onPress={() => router.push("/finance/goal")} />
-
-          {label("NET WORTH // LAST 12 MONTHS")}
-          <SettingsCard>
-            <View style={s.panel}>
-              {netWorthRows(f.netWorth).map((p) => (
-                <Text key={p.month} style={[s.line, { color: colors.foreground }]}>
-                  {p.month} // {money(p.amount, f.currency)}
-                  {p.change !== null ? ` (${p.change >= 0 ? "+" : ""}${money(p.change, f.currency)})` : ""}
-                </Text>
-              ))}
-              {f.netWorth.length === 0 ? <Text style={[s.hint, { color: colors.mutedForeground }]}>No snapshots yet. Record one a month.</Text> : null}
-              <AuthField label={`NET WORTH FOR ${f.month}`} value={netWorth} onChangeText={setNetWorth} keyboardType="numbers-and-punctuation" />
-              <AuthButton label="RECORD" loading={busy} onPress={() => void saveNetWorth()} />
-            </View>
-          </SettingsCard>
-        </>
+              <Text style={[type.body, { color: colors.mutedForeground }]}>{status.line}</Text>
+            </>
+          ) : (
+            <SystemWindow>
+              <Text style={[type.title, { color: colors.foreground }]}>{status.line}</Text>
+              <Button label="Add income" onPress={() => setLogOpen(true)} />
+            </SystemWindow>
+          )}
+          <View style={s.inOut}>
+            <Figure label="IN" value={money(f.income, f.currency)} />
+            <Figure label="OUT" value={money(f.expenses, f.currency)} />
+          </View>
+          <Text style={[type.meta, { color: colors.subtle }]}>{f.month} · THE SYSTEM delivers the verdict every Sunday.</Text>
+          <Button label="Log income or expense" variant="tonal" block onPress={() => setLogOpen(true)} />
+        </View>
       )}
-    </AuthShell>
+
+      <View>
+        <ListRow
+          title="Budgets"
+          subtitle={budgetsSubtitle}
+          dot={budgets.over.length > 0 ? colors.destructive : wealth}
+          chevron
+          onPress={() => router.push("/finance/budget")}
+        />
+        <ListRow
+          title="Goals"
+          subtitle={activeGoals.length ? `${activeGoals.length} active` : f.goals.length ? "None active" : "No goals set"}
+          dot={wealth}
+          chevron
+          onPress={() => router.push("/finance/goals")}
+        />
+        <ListRow
+          title="Net worth"
+          subtitle={latestNet ? `${latestNet.month}: ${money(latestNet.amount, f.currency)}` : "No snapshots yet"}
+          dot={wealth}
+          chevron
+          onPress={() => router.push("/finance/net-worth")}
+        />
+        <ListRow
+          title="Recurring income"
+          subtitle={activeRecurring.length ? `${activeRecurring.length} active · ${money(recurringTotal, f.currency)} a month` : "None set"}
+          dot={wealth}
+          chevron
+          onPress={() => router.push("/finance/recurring")}
+        />
+        <ListRow
+          title="Savings target"
+          subtitle={`${percent(f.target)} of income · ${f.currency}`}
+          dot={wealth}
+          chevron
+          onPress={() => router.push("/finance/target")}
+        />
+      </View>
+      <LogModal visible={logOpen} onClose={closeLog} />
+    </Screen>
+  );
+}
+
+function Figure({ label, value }: { label: string; value: string }) {
+  const colors = useColors();
+  return (
+    <View style={s.figure}>
+      <Text style={[type.label, { color: colors.mutedForeground }]}>{label}</Text>
+      <Text style={[type.number, { color: colors.foreground }]}>{value}</Text>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  section: { fontSize: 10, letterSpacing: 2, fontWeight: "800" as const, marginTop: 6 },
-  panel: { paddingVertical: 14, gap: 10 },
-  title: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 0.5 },
-  big: { fontSize: 32, fontWeight: "800" as const, letterSpacing: 1 },
-  line: { fontSize: 11, letterSpacing: 1, fontWeight: "700" as const },
-  hint: { fontSize: 10, letterSpacing: 1.5, fontWeight: "600" as const },
-  category: { gap: 6 },
-  track: { height: 4, borderRadius: 2, overflow: "hidden" },
-  fill: { height: 4, borderRadius: 2 },
+  hero: { gap: space.md },
+  inOut: { flexDirection: "row", gap: space.lg },
+  figure: { flex: 1, gap: space.xs },
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: space.sm, marginTop: space.sm },
 });

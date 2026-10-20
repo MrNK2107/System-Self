@@ -1,10 +1,15 @@
 // A simple plan editor: a name, then per weekday the exercises to train with sets x reps.
 import { Feather } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { useColors } from "@/hooks/useColors";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { space, type } from "@/constants/type";
+import { NumberStepper, TextField } from "@/features/gym/components/Fields";
 import { WEEKDAYS } from "@/features/gym/model/constants";
 import type { Exercise, Weekday } from "@/features/gym/model/types";
+import { useColors } from "@/hooks/useColors";
 import {
   MAX_BLOCKS_PER_DAY,
   MAX_PLAN_DAYS,
@@ -20,30 +25,6 @@ interface Props {
   error: string | null;
   onSave: (draft: PlanDraft) => void;
   onCancel: () => void;
-}
-
-function Stepper({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (n: number) => void }) {
-  const colors = useColors();
-  return (
-    <View style={s.stepper}>
-      <Text style={[s.stepLabel, { color: colors.mutedForeground }]}>{label}</Text>
-      <TouchableOpacity
-        accessibilityLabel={`${label} down`}
-        style={[s.stepBtn, { borderColor: colors.border }]}
-        onPress={() => onChange(Math.max(min, value - 1))}
-      >
-        <Feather name="minus" size={12} color={colors.mutedForeground} />
-      </TouchableOpacity>
-      <Text style={[s.stepValue, { color: colors.foreground }]}>{value}</Text>
-      <TouchableOpacity
-        accessibilityLabel={`${label} up`}
-        style={[s.stepBtn, { borderColor: colors.border }]}
-        onPress={() => onChange(Math.min(max, value + 1))}
-      >
-        <Feather name="plus" size={12} color={colors.mutedForeground} />
-      </TouchableOpacity>
-    </View>
-  );
 }
 
 export function PlanEditor({ exercises, saving, error, onSave, onCancel }: Props) {
@@ -81,121 +62,111 @@ export function PlanEditor({ exercises, saving, error, onSave, onCancel }: Props
   const patchBlock = (i: number, patch: Partial<PlanDraftBlock>) =>
     setBlocks(blocks.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
 
-  return (
-    <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <Text style={[s.title, { color: colors.foreground }]}>NEW PLAN</Text>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        maxLength={80}
-        placeholder="Plan name"
-        placeholderTextColor={colors.mutedForeground}
-        style={[s.input, { borderColor: colors.border, color: colors.foreground }]}
-      />
+  const shownError = error ?? (name.trim() || enabledDays.length ? problem : null);
 
-      <Text style={[s.hint, { color: colors.mutedForeground }]}>
-        Tap a weekday to train on it. Tap the selected day again to remove it.
-      </Text>
-      <View style={s.chips}>
-        {WEEKDAYS.map((d) => {
-          const on = days[d] !== undefined;
-          const active = on && selected === d;
-          return (
-            <TouchableOpacity
-              key={d}
-              onPress={() => toggleDay(d)}
-              style={[
-                s.chip,
-                {
-                  borderColor: active ? colors.primary : colors.border,
-                  backgroundColor: on ? colors.accentFill + (active ? "30" : "14") : colors.card,
-                },
-              ]}
-            >
-              <Text style={{ color: on ? colors.primary : colors.mutedForeground, fontSize: 11 }}>{d}</Text>
-            </TouchableOpacity>
-          );
-        })}
+  return (
+    <View style={s.root}>
+      <TextField label="PLAN NAME" value={name} onChangeText={setName} maxLength={80} placeholder="Upper / lower" autoCapitalize="words" />
+
+      <View style={s.group}>
+        <Text style={[type.label, { color: colors.mutedForeground }]}>TRAINING DAYS</Text>
+        <View style={s.days}>
+          {WEEKDAYS.map((d) => {
+            const on = days[d] !== undefined;
+            const active = on && selected === d;
+            return (
+              <View
+                key={d}
+                style={[
+                  s.dayClip,
+                  { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.accentFill : on ? colors.muted : "transparent" },
+                ]}
+              >
+                <Pressable
+                  onPress={() => toggleDay(d)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={`${d}${on ? ", training day" : ""}`}
+                  android_ripple={{ color: "rgba(168,121,255,0.16)" }}
+                  style={s.day}
+                >
+                  <Text style={[type.label, { color: active ? colors.primaryForeground : on ? colors.primary : colors.mutedForeground }]}>{d}</Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>Tap a day to train on it. Tap the selected day again to remove it.</Text>
       </View>
 
       {days[selected] !== undefined && (
-        <View style={{ gap: 8 }}>
-          <Text style={[s.sub, { color: colors.foreground }]}>{selected}</Text>
+        <View style={s.group}>
+          <Text style={[type.title, { color: colors.foreground }]}>{selected}</Text>
+          {blocks.length === 0 ? <Text style={[type.body, { color: colors.mutedForeground }]}>No exercises on this day yet.</Text> : null}
           {blocks.map((b, i) => (
-            <View key={`${b.exerciseId}-${i}`} style={[s.block, { borderColor: colors.border }]}>
-              <View style={s.row}>
-                <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }}>
-                  {exById.get(b.exerciseId)?.name ?? b.exerciseId}
-                </Text>
-                <TouchableOpacity accessibilityLabel="Remove exercise" onPress={() => setBlocks(blocks.filter((_, idx) => idx !== i))}>
-                  <Feather name="x" size={14} color={colors.mutedForeground} />
-                </TouchableOpacity>
+            <View key={`${b.exerciseId}-${i}`} style={[s.block, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              <View style={s.blockHead}>
+                <Text style={[type.bodyStrong, s.flex, { color: colors.foreground }]}>{exById.get(b.exerciseId)?.name ?? b.exerciseId}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove exercise"
+                  onPress={() => setBlocks(blocks.filter((_, idx) => idx !== i))}
+                  android_ripple={{ color: "rgba(168,121,255,0.2)", borderless: true, radius: 24 }}
+                  style={s.remove}
+                >
+                  <Feather name="x" size={20} color={colors.mutedForeground} />
+                </Pressable>
               </View>
-              <View style={s.row}>
-                <Stepper label="SETS" value={b.sets} min={1} max={20} onChange={(n) => patchBlock(i, { sets: n })} />
-                <Stepper label="REPS" value={b.reps} min={1} max={50} onChange={(n) => patchBlock(i, { reps: n })} />
+              <View style={s.steppers}>
+                <NumberStepper label="SETS" value={b.sets} min={1} max={20} onChange={(n) => patchBlock(i, { sets: n })} />
+                <NumberStepper label="REPS" value={b.reps} min={1} max={50} onChange={(n) => patchBlock(i, { reps: n })} />
               </View>
             </View>
           ))}
 
           {blocks.length < MAX_BLOCKS_PER_DAY &&
             (picking ? (
-              <View style={s.chips}>
+              <View style={[s.picker, { borderColor: colors.border }]}>
                 {exercises.map((e) => (
-                  <TouchableOpacity
+                  <ListRow
                     key={e.id}
-                    style={[s.chip, { borderColor: colors.border, backgroundColor: colors.card }]}
+                    title={e.name}
+                    subtitle={e.primaryBodyPart}
                     onPress={() => {
                       setBlocks([...blocks, { exerciseId: e.id, sets: 3, reps: 8 }]);
                       setPicking(false);
                     }}
-                  >
-                    <Text style={{ color: colors.foreground, fontSize: 11 }}>{e.name}</Text>
-                  </TouchableOpacity>
+                  />
                 ))}
+                <Button label="Close" variant="text" onPress={() => setPicking(false)} />
               </View>
             ) : (
-              <TouchableOpacity style={[s.action, { borderColor: colors.border }]} onPress={() => setPicking(true)}>
-                <Feather name="plus" size={14} color={colors.mutedForeground} />
-                <Text style={{ color: colors.mutedForeground }}>Add exercise</Text>
-              </TouchableOpacity>
+              <Button label="Add exercise" variant="tonal" block onPress={() => setPicking(true)} />
             ))}
         </View>
       )}
 
-      {(error ?? (name.trim() || enabledDays.length ? problem : null)) ? (
-        <Text style={{ color: "#E05555", fontSize: 12 }}>{error ?? problem}</Text>
-      ) : null}
+      {shownError ? <Text style={[type.body, { color: colors.destructive }]}>{shownError}</Text> : null}
 
-      <View style={s.row}>
-        <TouchableOpacity style={[s.action, { borderColor: colors.border }]} onPress={onCancel} disabled={saving}>
-          <Text style={{ color: colors.mutedForeground }}>CANCEL</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.action, { borderColor: colors.primary, opacity: problem || saving ? 0.5 : 1 }]}
-          onPress={() => onSave(draft)}
-          disabled={!!problem || saving}
-        >
-          <Text style={{ color: colors.primary }}>{saving ? "SAVING" : "SAVE PLAN"}</Text>
-        </TouchableOpacity>
+      <View style={s.actions}>
+        <Button label="Cancel" variant="text" onPress={onCancel} disabled={saving} />
+        <Button label="Save plan" onPress={() => onSave(draft)} disabled={!!problem} loading={saving} />
       </View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 4, padding: 14, gap: 10 },
-  title: { fontSize: 13, fontWeight: "700", letterSpacing: 1 },
-  sub: { fontSize: 12, fontWeight: "700", letterSpacing: 1 },
-  hint: { fontSize: 11 },
-  input: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 8 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  chip: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 7 },
-  block: { borderWidth: 1, borderRadius: 4, padding: 10, gap: 8 },
-  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  action: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", gap: 8, alignItems: "center" },
-  stepper: { flexDirection: "row", alignItems: "center", gap: 8 },
-  stepLabel: { fontSize: 10, letterSpacing: 1 },
-  stepBtn: { borderWidth: 1, borderRadius: 4, padding: 6 },
-  stepValue: { fontFamily: "SpaceMono", minWidth: 24, textAlign: "center" },
+  root: { gap: space.lg },
+  group: { gap: space.sm },
+  flex: { flex: 1 },
+  days: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  dayClip: { borderWidth: 1, borderRadius: 4, overflow: "hidden" },
+  day: { minWidth: 48, minHeight: 48, paddingHorizontal: space.sm, alignItems: "center", justifyContent: "center" },
+  block: { borderWidth: 1, borderRadius: 4, padding: space.md, gap: space.md },
+  blockHead: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  remove: { width: 48, height: 48, alignItems: "center", justifyContent: "center", marginRight: -space.sm, marginVertical: -space.sm },
+  steppers: { flexDirection: "row", gap: space.md },
+  picker: { borderWidth: 1, borderRadius: 4, overflow: "hidden" },
+  actions: { flexDirection: "row", justifyContent: "flex-end", gap: space.sm },
 });

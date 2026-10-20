@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { type } from "@/constants/type";
 import { useTheme } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
 import { TYPEWRITER_MS } from "@/lib/theme/theme";
@@ -7,9 +8,13 @@ import { TYPEWRITER_MS } from "@/lib/theme/theme";
 interface SystemMessageProps {
   message: string;
   animate?: boolean;
+  /**
+   * Optional caption. Inside a SystemWindow leave it out: the window's bracketed title already names the message.
+   */
   label?: string;
 }
 
+/** THE SYSTEM's line, typed out at the theme's speed. The block cursor shows only while typing. */
 export function SystemMessage({ message, animate = true, label }: SystemMessageProps) {
   const colors = useColors();
   const { uiState } = useTheme();
@@ -34,33 +39,19 @@ export function SystemMessage({ message, animate = true, label }: SystemMessageP
     return () => clearInterval(interval);
   }, [message, animate, speed]);
 
+  const typing = animate && displayed.length < message.length;
+
   return (
-    <View style={[styles.container, { borderLeftColor: colors.primary, borderLeftWidth: 1, paddingLeft: 12 }]}>
-      {label && (
-        <Text style={[styles.label, { color: colors.mutedForeground }]}>{label}</Text>
-      )}
-      <Text style={[styles.message, { color: colors.foreground }]}>
+    <View style={styles.container} accessible accessibilityLabel={message} accessibilityLiveRegion="polite">
+      {label ? <Text style={[type.label, { color: colors.mutedForeground }]}>{label}</Text> : null}
+      <Text style={[type.title, { color: colors.foreground }]}>
         {displayed}
-        {animate && displayed.length < message.length && (
-          <Text style={{ color: colors.primary }}>▊</Text>
-        )}
+        {typing ? <Text style={{ color: colors.primary }}>{"▊"}</Text> : null}
       </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    gap: 4,
-  },
-  label: {
-    fontSize: 9,
-    letterSpacing: 2,
-    fontWeight: "600" as const,
-  },
-  message: {
-    fontSize: 13,
-    lineHeight: 20,
-    fontStyle: "italic",
-  },
+  container: { gap: 4 },
 });

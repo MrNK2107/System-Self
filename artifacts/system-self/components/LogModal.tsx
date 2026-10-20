@@ -1,36 +1,47 @@
-import React, { useEffect, useRef, useState } from "react";
+// The log sheet, one job at a time. It opens on "Say it" (text or voice to proposals, each confirmed on its own card).
+// "Log manually" swaps in the structured form: choose a domain (or one of your own stats), its type and fields, and
+// submit with that form's own button. The two submit paths are never on screen together. A successful log shows
+// THE SYSTEM's line ("+2.5 BODY. Logged.") for a moment, then the sheet closes.
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Animated,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CustomLogSection } from "@/components/CustomLogSection";
-import { ProLock } from "@/components/ProLock";
-import { usePro } from "@/hooks/usePro";
-import { deviceTimezone, useAuth } from "@/context/AuthContext";
-import { FREE_DAYS_BACK, dayOptions } from "@/lib/game/log-date";
-import { FreeFormLog } from "@/components/FreeFormLog";
 import type { LogProposalDto } from "@workspace/contracts";
-import { proposalToFormValues } from "@/lib/freeform/freeform";
-import { useColors } from "@/hooks/useColors";
-import { useApp, getStreakMultiplier, getStreakTier, type Domain } from "@/context/AppContext";
-import { ALL_DOMAINS, DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
 import { FORBIDDEN_DISCIPLINE_DELTA, FORBIDDEN_DOMAIN_DELTA, logChanges } from "@workspace/engine";
+import { CustomLogSection } from "@/components/CustomLogSection";
+import { FreeFormLog } from "@/components/FreeFormLog";
+import { ProLock } from "@/components/ProLock";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { IconButton } from "@/components/ui/Screen";
+import { SystemWindow } from "@/components/ui/SystemWindow";
+import { ALL_DOMAINS, DOMAIN_COLORS, DOMAIN_ICONS } from "@/constants/domains";
+import { space, type } from "@/constants/type";
+import { deviceTimezone, useAuth } from "@/context/AuthContext";
+import { getStreakMultiplier, useApp, type Domain } from "@/context/AppContext";
+import { useColors } from "@/hooks/useColors";
+import { usePro } from "@/hooks/usePro";
+import { gainsText, logGains, loggedLine, proposalToFormValues, type Gain } from "@/lib/freeform/freeform";
+import { FREE_DAYS_BACK, dayOptions } from "@/lib/game/log-date";
 import {
   checkLogForm,
   defaultTypeFor,
   initialValues,
   LOG_FIELDS,
-  previewDelta,
   typesFor,
   type FieldSpec,
   type FormValues,
@@ -41,100 +52,107 @@ interface LogModalProps {
   onClose: () => void;
 }
 
-type LogDomain = Domain;
+type Mode = "say" | "manual";
 
-interface LogConfig {
-  domain: LogDomain;
-  icon: string;
-  color: string;
-  types: { type: string; label: string }[];
+/** How long THE SYSTEM's confirmation stays before the sheet closes. */
+const DONE_MS = 1200;
+
+// Display copy for the forbidden-log trade (the server applies it).
+const FORBIDDEN_GAIN = `+${FORBIDDEN_DOMAIN_DELTA.toFixed(1)}`;
+const FORBIDDEN_PENALTY = `−${Math.abs(FORBIDDEN_DISCIPLINE_DELTA).toFixed(1)}`;
+
+/** A selectable chip: 48dp, ripple, a 1px outline in `tone` with a tinted fill when selected. */
+function Chip({
+  label,
+  selected,
+  tone,
+  onPress,
+  icon,
+  meta,
+  accessibilityLabel,
+}: {
+  label: string;
+  selected: boolean;
+  /** Selected outline and text colour (a domain colour, or the accent). */
+  tone: string;
+  onPress: () => void;
+  icon?: keyof typeof Feather.glyphMap;
+  meta?: string;
+  accessibilityLabel?: string;
+}) {
+  const colors = useColors();
+  // Domain colours are #RRGGBB, so an alpha pair makes the tint; the accent falls back to the muted fill.
+  const fill = selected ? (/^#[0-9a-f]{6}$/i.test(tone) ? `${tone}1F` : colors.muted) : "transparent";
+  return (
+    <View style={[s.chipClip, { borderColor: selected ? tone : colors.border, backgroundColor: fill }]}>
+      <Pressable
+        onPress={onPress}
+        android_ripple={{ color: "rgba(168,121,255,0.16)" }}
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        accessibilityLabel={accessibilityLabel ?? label}
+        style={s.chip}
+      >
+        {icon ? <Feather name={icon} size={16} color={selected ? tone : colors.mutedForeground} /> : null}
+        <Text style={[type.label, { color: selected ? tone : colors.mutedForeground }]}>{label.toUpperCase()}</Text>
+        {meta ? <Text style={[type.meta, { color: colors.subtle }]}>{meta}</Text> : null}
+      </Pressable>
+    </View>
+  );
 }
 
-const LOG_CONFIGS: LogConfig[] = ALL_DOMAINS.map((domain) => ({
-  domain,
-  icon: DOMAIN_ICONS[domain],
-  color: DOMAIN_COLORS[domain],
-  types: typesFor(domain),
-}));
-
-const signed = (n: number) => (n < 0 ? `−${Math.abs(n).toFixed(1)}` : `+${n.toFixed(1)}`);
-// Display copy for the forbidden-log trade (the server applies it).
-const FORBIDDEN_GAIN = `+${FORBIDDEN_DOMAIN_DELTA}`;
-const FORBIDDEN_PENALTY = `−${Math.abs(FORBIDDEN_DISCIPLINE_DELTA)}`;
-
-const TIER_LABELS: Record<string, string> = {
-  none: "NO STREAK", low: "BUILDING", mid: "ON STREAK",
-  high: "HIGH STREAK", max: "MAX STREAK",
-};
-
-const TIER_COLORS: Record<string, string | null> = {
-  none: null, low: "#6B7280", mid: null, high: null, max: "#D4B483",
-};
-
-function FieldInput({ field, value, color, forbidden, onChange }: {
+function FieldInput({ field, value, tone, onChange }: {
   field: FieldSpec;
   value: string | number | undefined;
-  color: string;
-  forbidden: boolean;
+  tone: string;
   onChange: (v: string | number) => void;
 }) {
   const colors = useColors();
-  const label = field.kind === "number" && field.suffix ? `${field.label} (${field.suffix.toUpperCase()})` : field.label;
+  const label = field.kind === "number" && field.suffix ? `${field.label} (${field.suffix})` : field.label;
   return (
-    <View style={styles.section}>
-      <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{label}</Text>
+    <View style={s.field}>
+      <Text style={[type.label, { color: colors.mutedForeground }]}>{label.toUpperCase()}</Text>
       {field.kind === "scale" && (
-        <View style={styles.intensityRow}>
-          {Array.from({ length: field.max - field.min + 1 }, (_, i) => field.min + i).map(i => (
-            <TouchableOpacity
-              key={i}
-              accessibilityRole="button"
-              accessibilityLabel={`${field.label} ${i}`}
-              style={[styles.intensityBtn, { backgroundColor: typeof value === "number" && value >= i ? color : colors.muted }]}
-              onPress={() => onChange(i)}
-              activeOpacity={0.7}
-            />
-          ))}
-          <Text style={[styles.intensityLabel, { color: colors.mutedForeground }]}>
-            {typeof value === "number" ? `${value}/${field.max}${value === field.min ? `  ${field.lowLabel}` : value === field.max ? `  ${field.highLabel}` : ""}` : ""}
+        <View style={s.scaleRow}>
+          {Array.from({ length: field.max - field.min + 1 }, (_, i) => field.min + i).map((i) => {
+            const on = typeof value === "number" && value >= i;
+            return (
+              <Pressable
+                key={i}
+                onPress={() => onChange(i)}
+                accessibilityRole="button"
+                accessibilityLabel={`${field.label} ${i}`}
+                accessibilityState={{ selected: value === i }}
+                android_ripple={{ color: "rgba(168,121,255,0.16)" }}
+                style={s.scaleHit}
+              >
+                <View style={[s.scaleBar, { backgroundColor: on ? tone : colors.muted }]} />
+              </Pressable>
+            );
+          })}
+          <Text style={[type.meta, s.scaleText, { color: colors.mutedForeground }]}>
+            {typeof value === "number"
+              ? `${value}/${field.max}${value === field.min ? ` ${field.lowLabel}` : value === field.max ? ` ${field.highLabel}` : ""}`
+              : ""}
           </Text>
         </View>
       )}
       {field.kind === "choice" && (
-        <View style={styles.typeRow}>
-          {field.options.map(o => (
-            <TouchableOpacity
-              key={o.value}
-              style={[
-                styles.typeBtn,
-                {
-                  borderColor: value === o.value ? color : colors.border,
-                  backgroundColor: value === o.value ? color + "20" : "transparent",
-                },
-              ]}
-              onPress={() => onChange(o.value)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.typeLabel, { color: value === o.value ? color : colors.mutedForeground }]}>{o.label}</Text>
-            </TouchableOpacity>
+        <View style={s.wrapRow}>
+          {field.options.map((o) => (
+            <Chip key={o.value} label={o.label} selected={value === o.value} tone={tone} onPress={() => onChange(o.value)} />
           ))}
         </View>
       )}
       {(field.kind === "text" || field.kind === "number") && (
         <TextInput
-          style={[
-            styles.fieldInput,
-            {
-              color: forbidden ? "#CC3333" : colors.foreground,
-              borderColor: forbidden ? "#9B000060" : colors.border,
-              backgroundColor: forbidden ? "#0A0102" : colors.card,
-            },
-          ]}
+          style={[type.body, s.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
           value={value === undefined ? "" : String(value)}
           onChangeText={onChange}
           keyboardType={field.kind === "number" ? (field.decimal ? "decimal-pad" : "number-pad") : "default"}
           maxLength={field.kind === "text" ? field.max : 12}
-          placeholderTextColor={colors.mutedForeground}
+          placeholderTextColor={colors.subtle}
+          accessibilityLabel={field.label}
           selectTextOnFocus
         />
       )}
@@ -147,94 +165,117 @@ export function LogModal({ visible, onClose }: LogModalProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { addLog, domainScores } = useApp();
+  const streakOf = (d: string) => domainScores.find((x) => x.domain === d)?.streak ?? 0;
 
-  const [selectedDomain, setSelectedDomain] = useState<LogDomain>("BODY");
-  const [selectedType, setSelectedType] = useState(defaultTypeFor("BODY").type);
-  const [values, setValues] = useState<FormValues>(() => initialValues("BODY", defaultTypeFor("BODY").type));
+  const [mode, setMode] = useState<Mode>("say");
+  // No domain is pre-selected: the manual submit stays disabled until one is chosen.
+  const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null);
+  const [customId, setCustomId] = useState<string | null>(null);
+  const [selectedType, setSelectedType] = useState<string | null>(null);
+  const [values, setValues] = useState<FormValues>({});
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [isForbidden, setIsForbidden] = useState(false);
-  const [showForbiddenWarning, setShowForbiddenWarning] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Which day the entry is dated: 0 = today. Free users reach 2 days back, PRO users 30 (the server enforces it).
   const [daysBack, setDaysBack] = useState(0);
   const [showOlder, setShowOlder] = useState(false);
+  // Proposals still waiting on the Say it page (after an Edit, the sheet goes back to them instead of closing).
+  const [openProposals, setOpenProposals] = useState(0);
+  // THE SYSTEM's line after a log; while it shows, the sheet takes no input.
+  const [done, setDone] = useState<string | null>(null);
+  const doneTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accountTz = useAuth().user?.timezone;
   // PRO as the server last reported it; unknown counts as free here, so the chooser never offers a day the server may refuse.
   const pro = usePro();
   const days = dayOptions(new Date(), accountTz, pro, deviceTimezone());
 
-  const config = LOG_CONFIGS.find(c => c.domain === selectedDomain)!;
+  const resetManual = useCallback(() => {
+    setSelectedDomain(null);
+    setCustomId(null);
+    setSelectedType(null);
+    setValues({});
+    setNote("");
+    setIsForbidden(false);
+    setSubmitError(null);
+    setDaysBack(0);
+    setShowOlder(false);
+  }, []);
 
-  const domainScore = domainScores.find(s => s.domain === selectedDomain);
-  const streak = domainScore?.streak ?? 0;
-  const tier = getStreakTier(streak);
-  const multiplier = getStreakMultiplier(streak);
+  // Every opening starts fresh on Say it (reset on open, so the closing slide never shows a changing form).
+  useEffect(() => {
+    if (!visible) return;
+    setMode("say");
+    setDone(null);
+    setOpenProposals(0);
+    resetManual();
+  }, [visible, resetManual]);
+
+  useEffect(() => () => {
+    if (doneTimer.current) clearTimeout(doneTimer.current);
+  }, []);
+
+  /** Shows THE SYSTEM's line, then closes the sheet (or returns to waiting proposals). */
+  const finish = (line: string, close = true) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setDone(line);
+    if (doneTimer.current) clearTimeout(doneTimer.current);
+    doneTimer.current = setTimeout(() => {
+      setDone(null);
+      resetManual();
+      if (close) onClose();
+      else setMode("say");
+    }, DONE_MS);
+  };
+
+  const tone = selectedDomain ? DOMAIN_COLORS[selectedDomain] : colors.primary;
+  const check = selectedDomain && selectedType ? checkLogForm(selectedDomain, selectedType, values) : null;
   // Preview only: the server applies the real delta. An entry that does not check yet previews its type's defaults.
-  const check = checkLogForm(selectedDomain, selectedType, values);
-  const previewData = check.ok ? check.data : initialValues(selectedDomain, selectedType);
-  const baseDelta = isForbidden ? FORBIDDEN_DOMAIN_DELTA : previewDelta(selectedDomain, selectedType, previewData, 0);
-  const bonusDelta = isForbidden ? FORBIDDEN_DOMAIN_DELTA : previewDelta(selectedDomain, selectedType, previewData, streak);
-  const bonusGain = Math.round((bonusDelta - baseDelta) * 10) / 10;
-  const tierColor = TIER_COLORS[tier] ?? config.color;
-  // The streak multiplier line only applies when at least one of the log's changes takes the streak bonus.
-  const takesBonus = !isForbidden && logChanges(selectedDomain, selectedType, previewData, false).some(c => c.bonus);
-  const shownTier = takesBonus ? tier : "none";
+  const previewData = check?.ok ? check.data : selectedDomain && selectedType ? initialValues(selectedDomain, selectedType) : {};
+  const gains: Gain[] =
+    selectedDomain && selectedType
+      ? logGains([{ domain: selectedDomain, type: selectedType, data: previewData, forbidden: isForbidden }], streakOf)
+      : [];
+  const streak = selectedDomain ? streakOf(selectedDomain) : 0;
+  // The streak line only applies when at least one of the log's changes takes the streak bonus.
+  const takesBonus =
+    !!selectedDomain && !!selectedType && !isForbidden && logChanges(selectedDomain, selectedType, previewData, false).some((c) => c.bonus);
 
-  const bannerOpacity = useRef(new Animated.Value(1)).current;
-  const bannerTranslate = useRef(new Animated.Value(0)).current;
-  const prevDomain = useRef(selectedDomain);
-  const forbiddenFlash = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (prevDomain.current === selectedDomain) return;
-    prevDomain.current = selectedDomain;
-    bannerOpacity.setValue(0);
-    bannerTranslate.setValue(6);
-    Animated.parallel([
-      Animated.timing(bannerOpacity, { toValue: 1, duration: 220, useNativeDriver: false }),
-      Animated.timing(bannerTranslate, { toValue: 0, duration: 220, useNativeDriver: false }),
-    ]).start();
-  }, [selectedDomain]);
-
-  const pulseOpacity = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    if (tier !== "high" && tier !== "max") {
-      pulseOpacity.setValue(1);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseOpacity, { toValue: 0.4, duration: 700, useNativeDriver: false }),
-        Animated.timing(pulseOpacity, { toValue: 1, duration: 700, useNativeDriver: false }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [tier, selectedDomain]);
-
-  const selectType = (domain: LogDomain, type: string) => {
-    setSelectedType(type);
-    setValues(initialValues(domain, type));
+  const selectType = (domain: Domain, t: string) => {
+    setSelectedType(t);
+    setValues(initialValues(domain, t));
     setSubmitError(null);
   };
 
-  const handleDomainSelect = (domain: LogDomain, firstType: string) => {
+  const chooseDomain = (domain: Domain) => {
     Haptics.selectionAsync();
+    setCustomId(null);
     setSelectedDomain(domain);
-    selectType(domain, firstType);
+    selectType(domain, defaultTypeFor(domain).type);
+  };
+
+  const chooseCustom = (id: string | null) => {
+    setCustomId(id);
+    if (id) {
+      setSelectedDomain(null);
+      setSelectedType(null);
+      setIsForbidden(false);
+    }
+    setSubmitError(null);
   };
 
   const setValue = (key: string, value: string | number) => {
-    setValues(v => ({ ...v, [key]: value }));
+    setValues((v) => ({ ...v, [key]: value }));
     setSubmitError(null);
   };
 
-  // EDIT on a free-form proposal: the structured form opens prefilled, the original text becomes the note.
+  // Edit on a proposal: the manual form opens prefilled, the original text becomes the note.
   const handleEditProposal = (p: LogProposalDto, text: string) => {
     Haptics.selectionAsync();
+    Keyboard.dismiss();
+    setMode("manual");
     setIsForbidden(false);
-    setShowForbiddenWarning(false);
+    setCustomId(null);
     setSelectedDomain(p.domain);
     setSelectedType(p.logType);
     setValues(proposalToFormValues(p));
@@ -242,21 +283,13 @@ export function LogModal({ visible, onClose }: LogModalProps) {
     setSubmitError(null);
   };
 
-  const handleToggleForbidden = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    if (!isForbidden) {
-      setShowForbiddenWarning(true);
-      // Flash red
-      Animated.sequence([
-        Animated.timing(forbiddenFlash, { toValue: 1, duration: 150, useNativeDriver: false }),
-        Animated.timing(forbiddenFlash, { toValue: 0, duration: 400, useNativeDriver: false }),
-      ]).start();
-    }
-    setIsForbidden(f => !f);
+  const handleToggleForbidden = (on: boolean) => {
+    Haptics.impactAsync(on ? Haptics.ImpactFeedbackStyle.Heavy : Haptics.ImpactFeedbackStyle.Light);
+    setIsForbidden(on);
   };
 
   const handleSubmit = async () => {
-    if (submitting) return;
+    if (submitting || !selectedDomain || !selectedType || !check) return;
     if (!check.ok) {
       setSubmitError(check.message);
       return;
@@ -269,7 +302,7 @@ export function LogModal({ visible, onClose }: LogModalProps) {
     setSubmitting(true);
     setSubmitError(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
+    const line = loggedLine(gains);
     try {
       // Queued in the outbox: it is kept on the device and sent when there is a connection.
       await addLog({
@@ -285,455 +318,301 @@ export function LogModal({ visible, onClose }: LogModalProps) {
       setSubmitting(false);
       return;
     }
-
-    setNote("");
-    setDaysBack(0);
-    setShowOlder(false);
-    selectType(selectedDomain, selectedType);
-    setIsForbidden(false);
-    setShowForbiddenWarning(false);
     setSubmitting(false);
-    onClose();
+    // Proposals still waiting from Say it: go back to them instead of closing.
+    finish(line, openProposals === 0);
   };
 
-  const forbiddenBg = forbiddenFlash.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["transparent", "#9B000030"],
-  });
+  const goBack = () => {
+    if (done) return;
+    if (mode === "manual") {
+      setMode("say");
+      resetManual();
+    } else onClose();
+  };
+
+  const gainText = gainsText(gains);
+  const submitLabel = !selectedDomain
+    ? "Log it"
+    : isForbidden
+      ? `Log forbidden · ${gainText}`
+      : `Log it${gainText ? ` · ${gainText}` : ""}`;
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
-      <Animated.View style={[
-        styles.container,
-        { backgroundColor: colors.background, paddingBottom: insets.bottom + 16 },
-        isForbidden ? { backgroundColor: "#0A0203" } : {},
-      ]}>
-        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: forbiddenBg }]} pointerEvents="none" />
-
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Text style={[styles.title, { color: isForbidden ? "#9B0000" : colors.foreground }]}>
-              {isForbidden ? "FORBIDDEN TRANSMISSION" : "LOG ENTRY"}
-            </Text>
-          </View>
-          <TouchableOpacity onPress={onClose}>
-            <Feather name="x" size={20} color={colors.mutedForeground} />
-          </TouchableOpacity>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={goBack}>
+      <KeyboardAvoidingView
+        style={[s.container, { backgroundColor: colors.background, paddingBottom: insets.bottom + space.md }]}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View style={s.header}>
+          {mode === "manual" ? <IconButton icon="arrow-left" label="Back to Say it" onPress={goBack} /> : <View style={s.headerGap} />}
+          <Text style={[type.title, s.headerTitle, { color: colors.foreground }]} accessibilityRole="header" numberOfLines={1}>
+            {mode === "manual" ? "Log manually" : "Say it"}
+          </Text>
+          <IconButton icon="x" label="Close" onPress={() => (done ? undefined : onClose())} />
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
-          <FreeFormLog onLogged={onClose} onEdit={handleEditProposal} />
+        <ScrollView
+          style={[s.flex, done ? s.dimmed : null]}
+          contentContainerStyle={s.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          pointerEvents={done ? "none" : "auto"}
+        >
+          {/* Say it stays mounted under the manual form, so waiting proposals survive an Edit. */}
+          <View style={[s.section, mode !== "say" && s.hidden]}>
+            <Text style={[type.body, { color: colors.mutedForeground }]}>What did you do? Say it in your own words.</Text>
+            <FreeFormLog
+              onLogged={(g) => finish(loggedLine(g))}
+              onEdit={handleEditProposal}
+              onOpenChange={setOpenProposals}
+            />
+            <Button
+              label="Log manually"
+              variant="text"
+              onPress={() => {
+                Haptics.selectionAsync();
+                Keyboard.dismiss();
+                setMode("manual");
+              }}
+              style={s.manualLink}
+            />
+          </View>
 
-          {/* Forbidden mode toggle */}
-          <TouchableOpacity
-            style={[
-              styles.forbiddenToggle,
-              {
-                borderColor: isForbidden ? "#9B000080" : colors.border,
-                backgroundColor: isForbidden ? "#9B000015" : "transparent",
-              },
-            ]}
-            onPress={handleToggleForbidden}
-            activeOpacity={0.7}
-          >
-            <View style={styles.forbiddenLeft}>
-              <Feather name="alert-triangle" size={13} color={isForbidden ? "#9B0000" : colors.mutedForeground} />
-              <View>
-                <Text style={[styles.forbiddenTitle, { color: isForbidden ? "#9B0000" : colors.mutedForeground }]}>
-                  {isForbidden ? "FORBIDDEN MODE ACTIVE" : "FORBIDDEN LOG"}
-                </Text>
-                <Text style={[styles.forbiddenSub, { color: colors.mutedForeground }]}>
-                  {isForbidden ? `${FORBIDDEN_GAIN} pts, ${FORBIDDEN_PENALTY} DISCIPLINE. Record is permanent.` : "High-risk, high-gain transmission"}
-                </Text>
-              </View>
-            </View>
-            <View style={[
-              styles.forbiddenTogglePill,
-              { backgroundColor: isForbidden ? "#9B0000" : colors.muted },
-            ]}>
-              <View style={[
-                styles.forbiddenToggleDot,
-                { marginLeft: isForbidden ? "auto" : 2, backgroundColor: "#fff" },
-              ]} />
-            </View>
-          </TouchableOpacity>
-
-          {/* Forbidden warning */}
-          {showForbiddenWarning && isForbidden && (
-            <View style={styles.forbiddenWarning}>
-              <Text style={styles.forbiddenWarningText}>
-                {`This entry is flagged as forbidden. It yields ${FORBIDDEN_GAIN} pts to the selected domain but ${FORBIDDEN_PENALTY} to DISCIPLINE. The record cannot be deleted.`}
-              </Text>
-            </View>
-          )}
-
-          {/* Domain selector */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DOMAIN</Text>
-            <View style={styles.domainGrid}>
-              {LOG_CONFIGS.map(cfg => {
-                const ds = domainScores.find(s => s.domain === cfg.domain);
-                const dStreak = ds?.streak ?? 0;
-                const dTier = getStreakTier(dStreak);
-                const isSelected = selectedDomain === cfg.domain;
-                const badgeColor = TIER_COLORS[dTier] ?? cfg.color;
-                const activeColor = isForbidden ? "#9B0000" : cfg.color;
-
-                return (
-                  <TouchableOpacity
-                    key={cfg.domain}
-                    style={[
-                      styles.domainBtn,
-                      {
-                        borderColor: isSelected ? activeColor : colors.border,
-                        backgroundColor: isSelected ? activeColor + "20" : colors.card,
-                      },
-                    ]}
-                    onPress={() => handleDomainSelect(cfg.domain, cfg.types[0]!.type)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.domainBtnMain}>
-                      <Feather
-                        name={cfg.icon as "activity"}
-                        size={16}
-                        color={isSelected ? activeColor : colors.mutedForeground}
+          {mode === "manual" ? (
+            <View style={s.section}>
+              <View style={s.field}>
+                <Text style={[type.label, { color: colors.mutedForeground }]}>DOMAIN</Text>
+                <View style={s.wrapRow}>
+                  {ALL_DOMAINS.map((d) => {
+                    const streakDays = streakOf(d);
+                    return (
+                      <Chip
+                        key={d}
+                        label={d}
+                        icon={DOMAIN_ICONS[d]}
+                        selected={selectedDomain === d}
+                        tone={DOMAIN_COLORS[d]}
+                        meta={streakDays > 0 ? `${streakDays}d` : undefined}
+                        accessibilityLabel={streakDays > 0 ? `${d}, ${streakDays} day streak` : d}
+                        onPress={() => chooseDomain(d)}
                       />
-                      <Text style={[styles.domainLabel, { color: isSelected ? activeColor : colors.mutedForeground }]}>
-                        {cfg.domain}
+                    );
+                  })}
+                </View>
+              </View>
+
+              <CustomLogSection
+                selectedId={customId}
+                onSelect={chooseCustom}
+                onLogged={(line) => finish(line, openProposals === 0)}
+                onNavigate={onClose}
+              />
+
+              {selectedDomain && selectedType ? (
+                <>
+                  {selectedDomain === "BODY" ? (
+                    <View style={[s.rowFrame, { borderColor: colors.border }]}>
+                      <ListRow
+                        title="Gym tracker"
+                        subtitle="Sets, PRs and plan completion"
+                        dot={DOMAIN_COLORS.BODY}
+                        chevron
+                        onPress={() => {
+                          onClose();
+                          router.push("/gym");
+                        }}
+                      />
+                    </View>
+                  ) : null}
+
+                  <View style={s.field}>
+                    <Text style={[type.label, { color: colors.mutedForeground }]}>TYPE</Text>
+                    <View style={s.wrapRow}>
+                      {typesFor(selectedDomain).map((t) => (
+                        <Chip
+                          key={t.type}
+                          label={t.label}
+                          selected={selectedType === t.type}
+                          tone={tone}
+                          onPress={() => selectType(selectedDomain, t.type)}
+                        />
+                      ))}
+                    </View>
+                  </View>
+
+                  {(LOG_FIELDS[selectedType] ?? []).map((field) => (
+                    <FieldInput
+                      key={`${selectedType}.${field.key}`}
+                      field={field}
+                      value={values[field.key]}
+                      tone={tone}
+                      onChange={(v) => setValue(field.key, v)}
+                    />
+                  ))}
+
+                  {/* Day: today by default; yesterday and 2 days back for everyone, older days (to 30) for PRO */}
+                  <View style={s.field}>
+                    <Text style={[type.label, { color: colors.mutedForeground }]}>DAY</Text>
+                    <View style={s.wrapRow}>
+                      {days.slice(0, FREE_DAYS_BACK + 1).filter((d) => d.offered).map((d) => (
+                        <Chip
+                          key={d.date}
+                          label={d.label}
+                          selected={daysBack === d.daysBack}
+                          tone={tone}
+                          accessibilityLabel={`Log for ${d.label}`}
+                          onPress={() => {
+                            Haptics.selectionAsync();
+                            setDaysBack(d.daysBack);
+                            setSubmitError(null);
+                          }}
+                        />
+                      ))}
+                      {pro ? (
+                        <Chip
+                          label={daysBack > FREE_DAYS_BACK ? days[daysBack]!.label : "Older"}
+                          selected={daysBack > FREE_DAYS_BACK}
+                          tone={tone}
+                          accessibilityLabel="Pick an older day"
+                          onPress={() => setShowOlder((o) => !o)}
+                        />
+                      ) : null}
+                    </View>
+                    {!pro ? <ProLock label="Older days" /> : null}
+                    {pro && showOlder ? (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={s.olderRow}>
+                        {days.slice(FREE_DAYS_BACK + 1).filter((d) => d.offered).map((d) => (
+                          <Chip
+                            key={d.date}
+                            label={d.label}
+                            selected={daysBack === d.daysBack}
+                            tone={tone}
+                            accessibilityLabel={`Log for ${d.label}`}
+                            onPress={() => {
+                              Haptics.selectionAsync();
+                              setDaysBack(d.daysBack);
+                              setShowOlder(false);
+                              setSubmitError(null);
+                            }}
+                          />
+                        ))}
+                      </ScrollView>
+                    ) : null}
+                    {daysBack > 0 ? (
+                      <Text style={[type.meta, { color: colors.mutedForeground }]}>
+                        Dated {days[daysBack]!.label}. Scores, but a day already closed keeps its streak.
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  <View style={s.field}>
+                    <Text style={[type.label, { color: colors.mutedForeground }]}>NOTE</Text>
+                    <TextInput
+                      style={[type.body, s.input, s.note, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
+                      placeholder={isForbidden ? "What you did. The record is permanent." : "Optional. What happened, specifically."}
+                      placeholderTextColor={colors.subtle}
+                      value={note}
+                      onChangeText={setNote}
+                      accessibilityLabel="Note"
+                      multiline
+                      numberOfLines={3}
+                    />
+                  </View>
+
+                  {/* Forbidden log: below the fields, a deliberate switch with its trade spelled out. */}
+                  <View style={[s.forbidden, { borderColor: isForbidden ? colors.destructive : colors.border }]}>
+                    <View style={s.flex}>
+                      <Text style={[type.bodyStrong, { color: isForbidden ? colors.destructive : colors.foreground }]}>Forbidden log</Text>
+                      <Text style={[type.meta, { color: colors.mutedForeground }]}>
+                        {`${FORBIDDEN_GAIN} to ${selectedDomain}, ${FORBIDDEN_PENALTY} DISCIPLINE. The record cannot be deleted.`}
                       </Text>
                     </View>
-                    {dTier !== "none" && (
-                      <View style={[styles.domainStreakBadge, { backgroundColor: badgeColor + "20" }]}>
-                        {(dTier === "mid" || dTier === "high" || dTier === "max") && (
-                          <Feather name="zap" size={7} color={badgeColor} />
-                        )}
-                        <Text style={[styles.domainStreakText, { color: badgeColor }]}>
-                          {dStreak}D
-                        </Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
+                    <Switch
+                      value={isForbidden}
+                      onValueChange={handleToggleForbidden}
+                      accessibilityLabel="Forbidden log"
+                      trackColor={{ true: colors.destructive, false: colors.muted }}
+                      thumbColor={colors.foreground}
+                    />
+                  </View>
 
-          {/* Multiplier preview banner */}
-          <Animated.View
-            style={[
-              styles.multiplierBanner,
-              {
-                borderColor: isForbidden ? "#9B000050" :
-                  shownTier === "none" ? colors.border : tierColor + "50",
-                backgroundColor: isForbidden ? "#9B000010" :
-                  shownTier === "none" ? "transparent" : tierColor + "0E",
-                opacity: bannerOpacity,
-                transform: [{ translateY: bannerTranslate }],
-                marginBottom: 24,
-              },
-            ]}
-          >
-            <View style={styles.multiplierLeft}>
-              <Feather
-                name={isForbidden ? "alert-triangle" : "zap"}
-                size={13}
-                color={isForbidden ? "#9B0000" : tierColor}
-              />
-              <View>
-                <Text style={[
-                  styles.multiplierMain,
-                  { color: isForbidden ? "#9B0000" : shownTier === "none" ? colors.mutedForeground : tierColor },
-                ]}>
-                  {isForbidden
-                    ? "FORBIDDEN  ·  RISK ACTIVE"
-                    : shownTier === "none"
-                    ? (takesBonus ? "NO STREAK  ·  BASE" : "FLAT  ·  NO STREAK BONUS")
-                    : `×${multiplier.toFixed(1)}  ·  ${streak}D  ·  ${TIER_LABELS[tier]}`
-                  }
-                </Text>
-                <Text style={[styles.multiplierSub, { color: colors.mutedForeground }]}>
-                  {isForbidden ? `${FORBIDDEN_PENALTY} DISCIPLINE penalty applied` : bonusGain > 0 ? `base ${signed(baseDelta)} pts  →  boosted` : ""}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.multiplierRight}>
-              <Text style={[
-                styles.multiplierPts,
-                { color: isForbidden ? "#9B0000" : shownTier === "none" ? colors.mutedForeground : tierColor },
-              ]}>
-                {signed(bonusDelta)}
-              </Text>
-              <Text style={[styles.multiplierPtsLabel, { color: colors.mutedForeground }]}>pts</Text>
-            </View>
-          </Animated.View>
-
-          {/* Type */}
-          {selectedDomain === "BODY" && (
-            <TouchableOpacity
-              style={[styles.gymShortcut, { borderColor: colors.border, backgroundColor: colors.card }]}
-              onPress={() => {
-                onClose();
-                router.push("/gym");
-              }}
-              activeOpacity={0.7}
-            >
-              <Feather name="activity" size={13} color={config.color} />
-              <Text style={[styles.gymShortcutText, { color: colors.foreground }]}>
-                Open Gym tracker for structured sets, PRs, and plan completion
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Type */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TYPE</Text>
-            <View style={styles.typeRow}>
-              {config.types.map(type => (
-                <TouchableOpacity
-                  key={type.type}
-                  style={[
-                    styles.typeBtn,
-                    {
-                      borderColor: selectedType === type.type
-                        ? (isForbidden ? "#9B0000" : config.color)
-                        : colors.border,
-                      backgroundColor: selectedType === type.type
-                        ? (isForbidden ? "#9B000020" : config.color + "20")
-                        : "transparent",
-                    },
-                  ]}
-                  onPress={() => selectType(selectedDomain, type.type)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.typeLabel,
-                    { color: selectedType === type.type
-                        ? (isForbidden ? "#9B0000" : config.color)
-                        : colors.mutedForeground },
-                  ]}>
-                    {type.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Fields of the selected type, prefilled with its defaults */}
-          {(LOG_FIELDS[selectedType] ?? []).map(field => (
-            <FieldInput
-              key={`${selectedType}.${field.key}`}
-              field={field}
-              value={values[field.key]}
-              color={isForbidden ? "#9B0000" : config.color}
-              forbidden={isForbidden}
-              onChange={v => setValue(field.key, v)}
-            />
-          ))}
-
-          {/* Day: today by default; yesterday and 2 days back for everyone, older days (to 30) for PRO */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DAY</Text>
-            <View style={styles.typeRow}>
-              {days.slice(0, FREE_DAYS_BACK + 1).filter(d => d.offered).map(d => {
-                const on = daysBack === d.daysBack;
-                const activeColor = isForbidden ? "#9B0000" : config.color;
-                return (
-                  <TouchableOpacity
-                    key={d.date}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Log for ${d.label}`}
-                    style={[styles.typeBtn, { borderColor: on ? activeColor : colors.border, backgroundColor: on ? activeColor + "20" : "transparent" }]}
-                    onPress={() => { Haptics.selectionAsync(); setDaysBack(d.daysBack); setSubmitError(null); }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.typeLabel, { color: on ? activeColor : colors.mutedForeground }]}>{d.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-              {pro ? (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel="Pick an older day"
-                  style={[styles.typeBtn, { borderColor: daysBack > FREE_DAYS_BACK ? config.color : colors.border }]}
-                  onPress={() => setShowOlder(o => !o)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.typeLabel, { color: daysBack > FREE_DAYS_BACK ? config.color : colors.mutedForeground }]}>
-                    {daysBack > FREE_DAYS_BACK ? days[daysBack]!.label : "Older"}
-                  </Text>
-                </TouchableOpacity>
+                  {takesBonus && streak > 0 ? (
+                    <Text style={[type.meta, { color: colors.mutedForeground }]}>
+                      {`${streak}-day ${selectedDomain} streak: ×${getStreakMultiplier(streak).toFixed(1)} on this entry.`}
+                    </Text>
+                  ) : null}
+                </>
+              ) : !customId ? (
+                <Text style={[type.body, { color: colors.mutedForeground }]}>Choose a domain.</Text>
               ) : null}
             </View>
-            {!pro ? <ProLock label="Older days" /> : null}
-            {pro && showOlder ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeRow}>
-                {days.slice(FREE_DAYS_BACK + 1).filter(d => d.offered).map(d => {
-                  const on = daysBack === d.daysBack;
-                  return (
-                    <TouchableOpacity
-                      key={d.date}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Log for ${d.label}`}
-                      style={[styles.typeBtn, { borderColor: on ? config.color : colors.border, backgroundColor: on ? config.color + "20" : "transparent" }]}
-                      onPress={() => { Haptics.selectionAsync(); setDaysBack(d.daysBack); setShowOlder(false); setSubmitError(null); }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.typeLabel, { color: on ? config.color : colors.mutedForeground }]}>{d.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            ) : null}
-            {daysBack > 0 ? (
-              <Text style={[styles.forbiddenSub, { color: colors.mutedForeground }]}>
-                Dated {days[daysBack]!.label}. Scores, but a day already closed keeps its streak.
-              </Text>
-            ) : null}
-          </View>
-
-          {/* Note */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              {isForbidden ? "FORBIDDEN NOTE (REQUIRED)" : "NOTE (OPTIONAL)"}
-            </Text>
-            <TextInput
-              style={[
-                styles.input,
-                {
-                  color: isForbidden ? "#CC3333" : colors.foreground,
-                  borderColor: isForbidden ? "#9B000060" : colors.border,
-                  backgroundColor: isForbidden ? "#0A0102" : colors.card,
-                },
-              ]}
-              placeholder={isForbidden
-                ? "Document what you're transmitting. This record is permanent."
-                : "What happened. Be specific."
-              }
-              placeholderTextColor={isForbidden ? "#660000" : colors.mutedForeground}
-              value={note}
-              onChangeText={setNote}
-              multiline
-              numberOfLines={3}
-            />
-          </View>
-
-          <CustomLogSection onLogged={onClose} onNavigate={onClose} />
+          ) : null}
         </ScrollView>
 
-        {submitError && (
-          <Text style={[styles.submitError, { color: "#E05555" }]}>{submitError}</Text>
-        )}
+        {/* The manual form's own submit, only on that page and never while a custom stat (with its own) is chosen. */}
+        {mode === "manual" && !customId && !done ? (
+          <View style={[s.footer, { borderTopColor: colors.border }]}>
+            {submitError ? <Text style={[type.body, { color: colors.destructive }]}>{submitError}</Text> : null}
+            <Button
+              label={submitLabel}
+              variant={isForbidden ? "destructive" : "filled"}
+              onPress={() => void handleSubmit()}
+              disabled={!selectedDomain}
+              loading={submitting}
+              block
+            />
+          </View>
+        ) : null}
 
-        {/* Submit */}
-        <TouchableOpacity
-          style={[styles.submitBtn, {
-            backgroundColor: isForbidden ? "#6B0000" : config.color,
-            borderWidth: isForbidden ? 1 : 0,
-            borderColor: isForbidden ? "#9B0000" : "transparent",
-          }]}
-          onPress={handleSubmit}
-          activeOpacity={0.8}
-          disabled={submitting}
-        >
-          <Text style={styles.submitText}>
-            {isForbidden ? "TRANSMIT FORBIDDEN" : "LOG IT"}
-          </Text>
-          <View style={styles.submitDivider} />
-          <Text style={styles.submitPts}>
-            {isForbidden
-              ? `${FORBIDDEN_GAIN} pts / ${FORBIDDEN_PENALTY} DISC`
-              : `${signed(bonusDelta)} pts${shownTier !== "none" && shownTier !== "low" ? `  ×${multiplier.toFixed(1)}` : ""}`
-            }
-          </Text>
-        </TouchableOpacity>
-      </Animated.View>
+        {done ? (
+          <View style={s.doneLayer} pointerEvents="none" accessibilityLiveRegion="polite">
+            <SystemWindow title="SYSTEM" style={s.doneWindow} solid>
+              <Text style={[type.title, s.doneText, { color: colors.foreground }]}>{done}</Text>
+            </SystemWindow>
+          </View>
+        ) : null}
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
-const styles = StyleSheet.create({
-  submitError: { fontSize: 11, lineHeight: 16, marginBottom: 8, textAlign: "center" },
-  container: { flex: 1, padding: 20 },
-  header: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    marginBottom: 20, marginTop: 8,
-  },
-  headerLeft: { flex: 1 },
-  title: { fontSize: 14, fontWeight: "700" as const, letterSpacing: 3 },
-  section: { marginBottom: 24, gap: 10 },
-  sectionLabel: { fontSize: 9, fontWeight: "600" as const, letterSpacing: 2 },
-  forbiddenToggle: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    borderWidth: 1, borderRadius: 6, padding: 12, marginBottom: 12,
-  },
-  forbiddenLeft: { flexDirection: "row", alignItems: "flex-start", gap: 10, flex: 1 },
-  forbiddenTitle: { fontSize: 10, fontWeight: "800" as const, letterSpacing: 2 },
-  forbiddenSub: { fontSize: 9, marginTop: 2, letterSpacing: 0.5 },
-  forbiddenTogglePill: {
-    width: 38, height: 22, borderRadius: 11, padding: 2,
-    flexDirection: "row", alignItems: "center",
-  },
-  forbiddenToggleDot: { width: 18, height: 18, borderRadius: 9 },
-  forbiddenWarning: {
-    borderWidth: 1, borderColor: "#9B000050", borderRadius: 4,
-    padding: 10, marginBottom: 12, backgroundColor: "#9B000008",
-  },
-  forbiddenWarningText: { fontSize: 10, color: "#CC3333", lineHeight: 16, letterSpacing: 0.3 },
-  gymShortcut: {
+const s = StyleSheet.create({
+  container: { flex: 1 },
+  flex: { flex: 1 },
+  header: { height: 56, flexDirection: "row", alignItems: "center", paddingHorizontal: space.xs, marginTop: space.sm },
+  headerGap: { width: 48 },
+  headerTitle: { flex: 1, paddingHorizontal: space.xs },
+  content: { paddingHorizontal: space.md, paddingTop: space.sm, paddingBottom: space.xl },
+  section: { gap: space.lg },
+  hidden: { display: "none" },
+  dimmed: { opacity: 0.15 },
+  manualLink: { alignSelf: "center" },
+  field: { gap: space.sm },
+  wrapRow: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  olderRow: { flexDirection: "row", gap: space.sm },
+  chipClip: { borderWidth: 1, borderRadius: 4, overflow: "hidden" },
+  chip: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.md },
+  scaleRow: { flexDirection: "row", alignItems: "center" },
+  scaleHit: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
+  scaleBar: { width: 36, height: 8, borderRadius: 2 },
+  scaleText: { marginLeft: space.sm, flex: 1 },
+  input: { minHeight: 48, borderWidth: 1, borderRadius: 4, paddingHorizontal: space.md, paddingVertical: space.sm },
+  note: { minHeight: 96, textAlignVertical: "top", paddingTop: space.sm + 4 },
+  rowFrame: { borderWidth: 1, borderRadius: 4, overflow: "hidden" },
+  forbidden: {
+    minHeight: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
     borderWidth: 1,
     borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    marginTop: space.sm,
   },
-  gymShortcutText: {
-    fontSize: 10,
-    letterSpacing: 0.4,
-    flex: 1,
-  },
-  domainGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  domainBtn: { flex: 1, minWidth: "45%", padding: 12, borderWidth: 1, borderRadius: 4, gap: 8 },
-  domainBtnMain: { flexDirection: "row", alignItems: "center", gap: 8 },
-  domainLabel: { fontSize: 10, fontWeight: "700" as const, letterSpacing: 2 },
-  domainStreakBadge: {
-    flexDirection: "row", alignItems: "center", gap: 3, alignSelf: "flex-start",
-    paddingHorizontal: 5, paddingVertical: 2, borderRadius: 2,
-  },
-  domainStreakText: { fontSize: 8, fontWeight: "700" as const, letterSpacing: 1 },
-  multiplierBanner: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    borderWidth: 1, borderRadius: 4, paddingHorizontal: 14, paddingVertical: 12,
-  },
-  multiplierLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  multiplierMain: { fontSize: 11, fontWeight: "700" as const, letterSpacing: 1.5 },
-  multiplierSub: { fontSize: 9, letterSpacing: 0.5, marginTop: 2 },
-  multiplierRight: { flexDirection: "row", alignItems: "baseline", gap: 3 },
-  multiplierPts: { fontSize: 22, fontWeight: "800" as const, letterSpacing: -0.5 },
-  multiplierPtsLabel: { fontSize: 10, fontWeight: "600" as const, letterSpacing: 1 },
-  typeRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  typeBtn: { paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 2 },
-  typeLabel: { fontSize: 11, fontWeight: "600" as const },
-  intensityRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  intensityBtn: { width: 32, height: 6, borderRadius: 1 },
-  intensityLabel: { fontSize: 11, marginLeft: 4 },
-  fieldInput: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
-  input: {
-    borderWidth: 1, borderRadius: 4, padding: 12,
-    fontSize: 13, minHeight: 80, textAlignVertical: "top",
-  },
-  submitBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    padding: 16, borderRadius: 2, marginTop: 8, gap: 12,
-  },
-  submitText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" as const, letterSpacing: 3 },
-  submitDivider: { width: StyleSheet.hairlineWidth, height: 16, backgroundColor: "#FFFFFF40" },
-  submitPts: { color: "#FFFFFF", fontSize: 12, fontWeight: "600" as const, letterSpacing: 1, opacity: 0.85 },
+  footer: { paddingHorizontal: space.md, paddingTop: space.md, gap: space.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  doneLayer: { ...StyleSheet.absoluteFillObject, justifyContent: "center", paddingHorizontal: space.md },
+  doneWindow: { paddingVertical: space.lg },
+  doneText: { textAlign: "center" },
 });

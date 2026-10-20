@@ -1,16 +1,22 @@
-// A financial goal (PRD 19: "Save ₹50,000 by March"): new, or with ?id= edited, abandoned or reopened. A goal is
-// achieved by contributions (from the finance screen) once the saved amount reaches the target.
+// A financial goal (PRD 19: "Save ₹50,000 by March"): new, or with ?id= contributed to, edited, abandoned or reopened.
+// A goal is achieved by contributions once the saved amount reaches the target; a contribution also scores (a WEALTH
+// saving log on the server).
 import React, { useEffect, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
-import { AuthField } from "@/components/AuthField";
-import { AuthButton, AuthLink, AuthNotice, AuthShell } from "@/components/AuthShell";
-import { useFinanceActions, useFinanceQuery } from "@/hooks/useFinance";
-import { describeFinanceError, parseAmount, parseDeadline } from "@/lib/finance/finance";
-import type { MutationResult } from "@/lib/game/actions";
+import { StyleSheet, Text, View } from "react-native";
 
-const SYNC_PENDING = "Queued entries have not reached the System yet. Retry shortly.";
+import { Button } from "@/components/ui/Button";
+import { Screen } from "@/components/ui/Screen";
+import { SystemWindow } from "@/components/ui/SystemWindow";
+import { space, type } from "@/constants/type";
+import { Bar, LoadState, StatusLine, useAttempt } from "@/features/finance/components";
+import { TextField } from "@/features/gym/components/Fields";
+import { useColors } from "@/hooks/useColors";
+import { useFinanceActions, useFinanceQuery } from "@/hooks/useFinance";
+import { goalProgress, money, parseAmount, parseDeadline } from "@/lib/finance/finance";
 
 export default function GoalScreen() {
+  const colors = useColors();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const q = useFinanceQuery();
   const actions = useFinanceActions();
@@ -19,9 +25,10 @@ export default function GoalScreen() {
   const [title, setTitle] = useState("");
   const [target, setTarget] = useState("");
   const [deadline, setDeadline] = useState("");
+  const [contribution, setContribution] = useState("");
   const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const edit = useAttempt();
+  const give = useAttempt();
 
   useEffect(() => {
     if (!goal || loaded) return;
@@ -31,54 +38,87 @@ export default function GoalScreen() {
     setLoaded(true);
   }, [goal, loaded]);
 
-  const attempt = async (send: () => Promise<MutationResult<unknown>>) => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await send();
-      if (!r.ok) setError(SYNC_PENDING);
-      else router.back();
-    } catch (e) {
-      setError(describeFinanceError(e));
-    } finally {
-      setBusy(false);
-    }
+  const leaveOn = async (send: Parameters<typeof edit.attempt>[0]) => {
+    if (await edit.attempt(send)) router.back();
   };
 
   const save = () => {
     const targetAmount = parseAmount(target);
     const due = parseDeadline(deadline);
-    if (!title.trim() || title.trim().length > 80) return setError("Name the goal in 1 to 80 characters.");
-    if (targetAmount === null) return setError("The target is a positive amount.");
-    if (due === undefined) return setError("The deadline is a date as YYYY-MM-DD, or blank.");
+    if (!title.trim() || title.trim().length > 80) return edit.fail("Name the goal in 1 to 80 characters.");
+    if (targetAmount === null) return edit.fail("The target is a positive amount.");
+    if (due === undefined) return edit.fail("The deadline is a date as YYYY-MM-DD, or blank.");
     const fields = { title: title.trim(), targetAmount, deadline: due };
-    void attempt(() => (goal ? actions.updateGoal(goal.id, fields) : actions.createGoal(fields)));
+    void leaveOn(() => (goal ? actions.updateGoal(goal.id, fields) : actions.createGoal(fields)));
+  };
+
+  const contribute = async () => {
+    if (!goal) return;
+    const amount = parseAmount(contribution);
+    if (amount === null) return give.fail("Enter a positive amount.");
+    if (await give.attempt(() => actions.contribute(goal.id, amount), "Contribution recorded.")) setContribution("");
   };
 
   if (id && !goal) {
     return (
-      <AuthShell tag="WEALTH" title="Goal" back>
-        {q.isError ? <AuthNotice message={describeFinanceError(q.error)} onRetry={() => void q.refetch()} /> : <AuthNotice tone="info" message={q.data ? "Goal not found." : "Loading."} />}
-      </AuthShell>
+      <Screen title="Goal" back>
+        {q.data ? (
+          <Text style={[type.body, { color: colors.mutedForeground }]}>Goal not found. It may have been removed.</Text>
+        ) : (
+          <LoadState error={q.isError ? q.error : null} onRetry={() => void q.refetch()} />
+        )}
+      </Screen>
     );
   }
 
   return (
-    <AuthShell
-      tag="WEALTH"
-      title={goal ? "Edit goal" : "New goal"}
-      subtitle="A number and a date. Contributions are logged as savings. THE SYSTEM tracks the gap."
-      back
-    >
-      {error ? <AuthNotice message={error} /> : null}
-      <AuthField label="GOAL" value={title} onChangeText={setTitle} placeholder="Emergency fund" autoCapitalize="sentences" maxLength={80} />
-      <AuthField label={`TARGET${currency ? ` (${currency})` : ""}`} value={target} onChangeText={setTarget} keyboardType="decimal-pad" />
-      <AuthField label="DEADLINE (OPTIONAL)" value={deadline} onChangeText={setDeadline} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" mono />
-      {goal?.status !== "achieved" ? <AuthButton label={goal ? "SAVE GOAL" : "SET GOAL"} loading={busy} onPress={save} /> : null}
-      {goal?.status === "active" ? <AuthLink label="ABANDON GOAL" onPress={() => void attempt(() => actions.updateGoal(goal.id, { status: "abandoned" }))} /> : null}
-      {goal?.status === "abandoned" ? <AuthLink label="REOPEN GOAL" onPress={() => void attempt(() => actions.updateGoal(goal.id, { status: "active" }))} /> : null}
-      {goal?.status === "achieved" ? <AuthNotice tone="info" message="Achieved. It stays on the record." /> : null}
-    </AuthShell>
+    <Screen title={goal ? goal.title : "New goal"} back>
+      {goal ? (
+        <View style={s.group}>
+          <Text style={[type.display, { color: colors.foreground }]}>{Math.round(goalProgress(goal) * 100)}%</Text>
+          <Bar fraction={goalProgress(goal)} />
+          <Text style={[type.body, { color: colors.mutedForeground }]}>
+            {money(goal.savedAmount, currency)} of {money(goal.targetAmount, currency)}
+            {goal.deadline ? ` by ${goal.deadline}` : ""}
+          </Text>
+        </View>
+      ) : (
+        <Text style={[type.body, { color: colors.mutedForeground }]}>A number and a date. Contributions are logged as savings. THE SYSTEM tracks the gap.</Text>
+      )}
+
+      {goal?.status === "achieved" ? (
+        <SystemWindow title="GOAL ACHIEVED" frameColor={colors.domain.WEALTH}>
+          <Text style={[type.body, { color: colors.foreground }]}>It stays on the record.</Text>
+        </SystemWindow>
+      ) : null}
+
+      {goal?.status === "active" ? (
+        <View style={s.group}>
+          <TextField label={`CONTRIBUTE${currency ? ` (${currency})` : ""}`} value={contribution} onChangeText={setContribution} keyboardType="decimal-pad" />
+          <StatusLine notice={give.notice} />
+          <Button label="Add to goal" block loading={give.busy} onPress={() => void contribute()} />
+        </View>
+      ) : null}
+
+      {goal?.status !== "achieved" ? (
+        <View style={s.group}>
+          {goal ? <Text style={[type.title, { color: colors.foreground }]}>Edit goal</Text> : null}
+          <TextField label="GOAL" value={title} onChangeText={setTitle} placeholder="Emergency fund" autoCapitalize="sentences" maxLength={80} />
+          <TextField label={`TARGET${currency ? ` (${currency})` : ""}`} value={target} onChangeText={setTarget} keyboardType="decimal-pad" />
+          <TextField label="DEADLINE (OPTIONAL)" value={deadline} onChangeText={setDeadline} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+          <StatusLine notice={edit.notice} />
+          <Button label={goal ? "Save goal" : "Set goal"} variant={goal ? "tonal" : "filled"} block loading={edit.busy} onPress={save} />
+        </View>
+      ) : null}
+
+      {goal?.status === "active" ? (
+        <Button label="Abandon goal" variant="text" onPress={() => void leaveOn(() => actions.updateGoal(goal.id, { status: "abandoned" }))} />
+      ) : null}
+      {goal?.status === "abandoned" ? (
+        <Button label="Reopen goal" variant="text" onPress={() => void leaveOn(() => actions.updateGoal(goal.id, { status: "active" }))} />
+      ) : null}
+    </Screen>
   );
 }
+
+const s = StyleSheet.create({ group: { gap: space.md } });

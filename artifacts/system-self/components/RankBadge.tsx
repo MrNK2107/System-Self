@@ -1,5 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { fonts, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import type { Rank } from "@/context/AppContext";
 
@@ -18,60 +19,31 @@ const RANK_LABELS: Record<Rank, string> = {
   S: "SYSTEM-LEVEL",
 };
 
+// Letter sizes stay on the type scale: 12 (label), 20 (number/title).
+const SIZES = {
+  sm: { badge: 28, font: type.label.fontSize, line: type.label.lineHeight },
+  md: { badge: 40, font: type.number.fontSize, line: type.number.lineHeight },
+  lg: { badge: 56, font: type.number.fontSize, line: type.number.lineHeight },
+} as const;
+
+/** Small square rank chip for rows and lists. The hexagon RankEmblem is the hero version on Status. */
 export function RankBadge({ rank, size = "md", showLabel = false }: RankBadgeProps) {
   const colors = useColors();
-
   const rankColor = colors.rank[rank] ?? colors.mutedForeground;
-
-  const sizeStyles = {
-    sm: { badge: 28, font: 12, border: 1 },
-    md: { badge: 40, font: 18, border: 1.5 },
-    lg: { badge: 64, font: 28, border: 2 },
-  };
-
-  const { badge, font, border } = sizeStyles[size];
+  const { badge, font, line } = SIZES[size];
 
   return (
-    <View style={styles.container}>
-      <View style={[
-        styles.badge,
-        {
-          width: badge,
-          height: badge,
-          borderColor: rankColor,
-          borderWidth: border,
-          backgroundColor: `${rankColor}18`,
-        }
-      ]}>
-        <Text style={[styles.rankText, { fontSize: font, color: rankColor, fontFamily: "SpaceMono" }]}>
-          {rank}
-        </Text>
+    <View style={styles.container} accessible accessibilityLabel={`Rank ${rank}${showLabel ? `, ${RANK_LABELS[rank]}` : ""}`}>
+      <View style={[styles.badge, { width: badge, height: badge, borderColor: rankColor, backgroundColor: colors.card }]}>
+        <Text style={[styles.letter, { fontSize: font, lineHeight: line, color: rankColor }]}>{rank}</Text>
       </View>
-      {showLabel && (
-        <Text style={[styles.label, { color: rankColor }]}>
-          {RANK_LABELS[rank]}
-        </Text>
-      )}
+      {showLabel && <Text style={[type.label, { color: rankColor }]}>{RANK_LABELS[rank]}</Text>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    alignItems: "center",
-    gap: 4,
-  },
-  badge: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  rankText: {
-    fontWeight: "700" as const,
-    letterSpacing: 2,
-  },
-  label: {
-    fontSize: 9,
-    letterSpacing: 2,
-    fontWeight: "600" as const,
-  },
+  container: { alignItems: "center", gap: 4 },
+  badge: { alignItems: "center", justifyContent: "center", borderWidth: 1, borderRadius: 4 },
+  letter: { fontFamily: fonts.displayBold },
 });

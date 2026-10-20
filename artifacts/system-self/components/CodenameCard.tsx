@@ -1,7 +1,8 @@
 // The user's own public codename with a share action. Semi-public and anonymous players can only be found by it.
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Share, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Pressable, Share, StyleSheet, Text, View } from "react-native";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { codenameShareMessage, codenameShareOptions } from "@/lib/social/social";
 
@@ -14,40 +15,36 @@ export async function shareCodename(codename: string): Promise<void> {
   }
 }
 
+/** A single row: "Your codename", the codename, and a share button when sharing makes sense. */
 export function CodenameCard({ codename, identity }: { codename: string; identity?: "anonymous" | "semi-public" | "public" }) {
   const colors = useColors();
   const { canShare, note } = codenameShareOptions(identity);
   return (
-    <View style={[s.card, { borderColor: colors.border, backgroundColor: colors.card }]}>
+    <View style={[s.row, { borderColor: colors.border, backgroundColor: colors.card }]}>
       <View style={s.text}>
-        <Text style={[s.label, { color: colors.mutedForeground }]}>YOUR CODENAME</Text>
-        <Text style={[s.value, { color: colors.foreground }]} selectable>
+        <Text style={[type.meta, { color: colors.mutedForeground }]}>Your codename</Text>
+        <Text style={[type.bodyStrong, { color: colors.foreground }]} selectable>
           {codename}
         </Text>
-        {note ? <Text style={[s.note, { color: colors.mutedForeground }]}>{note}</Text> : null}
+        {note ? <Text style={[type.meta, { color: colors.mutedForeground }]}>{note}</Text> : null}
       </View>
       {canShare ? (
-      <TouchableOpacity
-        onPress={() => void shareCodename(codename)}
-        accessibilityRole="button"
-        accessibilityLabel="Share your codename"
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        style={[s.btn, { borderColor: colors.primary + "60" }]}
-      >
-        <Feather name="share-2" size={12} color={colors.primary} />
-        <Text style={[s.btnText, { color: colors.primary }]}>SHARE</Text>
-      </TouchableOpacity>
+        <Pressable
+          onPress={() => void shareCodename(codename)}
+          accessibilityRole="button"
+          accessibilityLabel="Share your codename"
+          android_ripple={{ color: "rgba(168,121,255,0.2)", borderless: true, radius: 24 }}
+          style={s.share}
+        >
+          <Feather name="share-2" size={20} color={colors.primary} />
+        </Pressable>
       ) : null}
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  card: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderRadius: 4, padding: 12 },
-  text: { flex: 1, gap: 3 },
-  label: { fontSize: 8, letterSpacing: 2.5, fontWeight: "700" },
-  value: { fontSize: 13, fontWeight: "700", letterSpacing: 0.5 },
-  note: { fontSize: 10, lineHeight: 15 },
-  btn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 3, paddingHorizontal: 10, paddingVertical: 6 },
-  btnText: { fontSize: 9, fontWeight: "800", letterSpacing: 2 },
+  row: { minHeight: 64, flexDirection: "row", alignItems: "center", gap: space.md, borderWidth: 1, borderRadius: 4, paddingLeft: space.md, paddingRight: space.xs, paddingVertical: space.sm },
+  text: { flex: 1, gap: 2 },
+  share: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
 });

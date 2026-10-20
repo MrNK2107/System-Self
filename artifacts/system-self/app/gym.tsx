@@ -1,31 +1,52 @@
+// Gym (reached from Status -> BODY). One job: train today. The landing view offers today's planned session (or a free
+// one); a running session takes over the screen. Plans, personal records and history sit behind rows, each pushed as
+// its own view of this route (?view=...), so the app bar back and Android back both return to the gym.
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import { CrowdReportSheet } from "@/components/CrowdReportSheet";
+import { Button } from "@/components/ui/Button";
+import { ListRow } from "@/components/ui/ListRow";
+import { Screen } from "@/components/ui/Screen";
+import { SystemWindow } from "@/components/ui/SystemWindow";
+import { space, type } from "@/constants/type";
 import { useAuth } from "@/context/AuthContext";
-import { useColors } from "@/hooks/useColors";
-import { useGym } from "@/features/gym/context/GymContext";
+import { NumberStepper } from "@/features/gym/components/Fields";
 import { PlanEditor } from "@/features/gym/components/PlanEditor";
+import { useGym } from "@/features/gym/context/GymContext";
+import { sessionSummary } from "@/features/gym/lib/today";
+import { useColors } from "@/hooks/useColors";
 import { api } from "@/lib/api/client";
 import { getOutbox } from "@/lib/api/outbox";
 import { submitCrowdReport, type CrowdLevel } from "@/lib/game/dungeon";
-import { quietHoursKey } from "@/lib/game/keys";
 import type { PlanDraft } from "@/lib/game/gym";
-import { ABANDONED_SESSION_MESSAGE, planBlocksFor } from "@/lib/game/gym";
+import { ABANDONED_SESSION_MESSAGE, planBlocksFor, weekdayOf } from "@/lib/game/gym";
+import { quietHoursKey } from "@/lib/game/keys";
 
-type TabKey = "plans" | "today" | "history" | "prs";
+type View_ = "home" | "plans" | "new-plan" | "prs" | "history";
 
-const NO_PLAN_TODAY = "No session planned today. Pick a day or log a free session.";
+const TITLES: Record<View_, string> = {
+  home: "Gym",
+  plans: "Plans",
+  "new-plan": "New plan",
+  prs: "Personal records",
+  history: "History",
+};
+
+const NO_PLAN_TODAY = "No session planned today. Train free, or choose a plan.";
 const SYNC_PENDING_START = "Sync pending. Reconnect to start a session.";
 const SYNC_PENDING_COMPLETE = "Sync pending. Reconnect to complete the session.";
-const MONO = "SpaceMono";
+
+const asView = (v: string | undefined): View_ => (v && v in TITLES ? (v as View_) : "home");
 
 export default function GymScreen() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { view: viewParam } = useLocalSearchParams<{ view?: string }>();
+  const view = asView(viewParam);
   const {
     loading,
     loadFailed,
@@ -53,10 +74,8 @@ export default function GymScreen() {
     abandonedNotice,
     dismissAbandonedNotice,
   } = useGym();
-  const [activeTab, setActiveTab] = useState<TabKey>("today");
-  const [reps, setReps] = useState("5");
-  const [weight, setWeight] = useState("40");
-  const [editing, setEditing] = useState(false);
+  const [reps, setReps] = useState(5);
+  const [weight, setWeight] = useState(40);
   const [saving, setSaving] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -64,17 +83,16 @@ export default function GymScreen() {
   // The session just completed, while the scout-report sheet is offered for it.
   const [crowdFor, setCrowdFor] = useState<string | null>(null);
   const [crowdBusy, setCrowdBusy] = useState(false);
-  const router = useRouter();
-  const queryClient = useQueryClient();
 
   const { user } = useAuth();
   const timeZone = user?.timezone;
-  const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const plan = workoutPlans.find((p) => p.id === activePlanId) ?? workoutPlans[0];
   const todayBlocks = useMemo(() => planBlocksFor(plan, new Date(), timeZone), [plan, timeZone]);
+  const today = useMemo(() => weekdayOf(new Date(), timeZone), [timeZone]);
 
   const exById = useMemo(() => Object.fromEntries(exercises.map((x) => [x.id, x])), [exercises]);
   const activeSession = workoutSessions.find((s) => s.id === activeSessionId);
+  const open = (v: View_) => router.push({ pathname: "/gym", params: { view: v } });
 
   const startSession = async () => {
     if (working || restoring) return;
@@ -92,8 +110,8 @@ export default function GymScreen() {
     if (!activeSessionId) return;
     await logPerformedSet(activeSessionId, {
       exerciseId,
-      reps: Math.min(200, Math.max(1, Math.round(Number(reps)) || 1)),
-      weight: Math.min(1000, Math.max(0, Number(weight) || 0)),
+      reps: Math.min(200, Math.max(1, Math.round(reps) || 1)),
+      weight: Math.min(1000, Math.max(0, weight || 0)),
       completed: true,
     });
   };
@@ -114,7 +132,7 @@ export default function GymScreen() {
       } else if (r.reason === "already_completed") {
         setMessage("This session was already recorded.");
       } else if (r.reason === "abandoned") {
-        // Shown by the abandoned notice below.
+        // Shown by the abandoned notice.
       } else {
         setMessage(r.reason === "sync_pending" ? SYNC_PENDING_COMPLETE : "The session could not be completed. Try again.");
       }
@@ -148,305 +166,327 @@ export default function GymScreen() {
     setEditorError(null);
     try {
       const r = await createWorkoutPlan(draft);
-      if (r.ok) setEditing(false);
+      if (r.ok) router.back();
       else setEditorError(r.message ?? "The plan could not be saved. Try again.");
     } finally {
       setSaving(false);
     }
   };
 
+  const body = colors.domain.BODY;
+  const title = view === "home" && activeSession ? "Session" : TITLES[view];
+
   if (loading) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.primary} />
-        <Text style={{ color: colors.mutedForeground, marginTop: 8 }}>Loading gym data.</Text>
-      </View>
+      <Screen title={title} back>
+        <View style={s.center}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[type.body, { color: colors.mutedForeground }]}>Loading gym data.</Text>
+        </View>
+      </Screen>
     );
   }
 
   if (loadFailed) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.mutedForeground }}>The gym data could not be loaded.</Text>
-        <TouchableOpacity onPress={() => void refresh()} style={{ marginTop: 10 }}>
-          <Text style={{ color: colors.primary, letterSpacing: 1 }}>RETRY</Text>
-        </TouchableOpacity>
-      </View>
+      <Screen title={title} back>
+        <SystemWindow title="ERROR">
+          <Text style={[type.title, { color: colors.foreground }]}>The gym data could not be loaded.</Text>
+          <Button label="Retry" onPress={() => void refresh()} />
+        </SystemWindow>
+      </Screen>
     );
   }
 
-  const freeSession = !!activeSession && todayBlocks.length === 0;
+  // --- notices shared by the landing and session views ---------------------------------------------------
+  const notices = (
+    <>
+      {rejectedSets > 0 && (
+        <Notice
+          color={colors.destructive}
+          text={`${rejectedSets} ${rejectedSets === 1 ? "set was" : "sets were"} rejected. Tap to dismiss.`}
+          onPress={dismissRejectedSets}
+        />
+      )}
+      {abandonedNotice && <Notice color={colors.warn} text={`${ABANDONED_SESSION_MESSAGE} Tap to dismiss.`} onPress={dismissAbandonedNotice} />}
+      {message && <Notice color={colors.mutedForeground} text={message} />}
+      {unsyncedSets > 0 && <Notice color={colors.warn} text={`${unsyncedSets} ${unsyncedSets === 1 ? "set" : "sets"} waiting to sync.`} />}
+    </>
+  );
 
-  return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16, paddingBottom: insets.bottom + 90 }]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={[styles.title, { color: colors.foreground }]}>GYM</Text>
-        <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          Plans, workouts, BODY points, and Big-5 PR tracking
-        </Text>
+  // --- sub-views ------------------------------------------------------------------------------------------
+  if (view === "new-plan") {
+    return (
+      <Screen title={title} back>
+        <PlanEditor exercises={exercises} saving={saving} error={editorError} onSave={(d) => void savePlan(d)} onCancel={() => router.back()} />
+      </Screen>
+    );
+  }
 
-        <View style={styles.tabs}>
-          {(["plans", "today", "history", "prs"] as TabKey[]).map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              style={[
-                styles.tab,
-                {
-                  borderColor: activeTab === tab ? colors.primary : colors.border,
-                  backgroundColor: activeTab === tab ? colors.accentFill + "20" : colors.card,
-                },
-              ]}
-              onPress={() => setActiveTab(tab)}
-            >
-              <Text style={{ color: activeTab === tab ? colors.primary : colors.mutedForeground, fontSize: 11 }}>
-                {tab.toUpperCase()}
-              </Text>
-            </TouchableOpacity>
-          ))}
+  if (view === "plans") {
+    return (
+      <Screen title={title} back>
+        <View>
+          {workoutPlans.map((p) => {
+            const active = p.id === (plan?.id ?? null);
+            return (
+              <ListRow
+                key={p.id}
+                title={p.name}
+                subtitle={`${p.goal ? `${p.goal} · ` : ""}${p.days.map((d) => d.weekday).join(" ") || "No days"}`}
+                dot={active ? body : undefined}
+                trailing={
+                  active ? (
+                    <Text style={[type.label, { color: colors.primary }]}>ACTIVE</Text>
+                  ) : (
+                    <Button label="Set active" variant="text" onPress={() => void updateWorkoutPlan(p.id, { isActive: true })} />
+                  )
+                }
+              />
+            );
+          })}
+        </View>
+        {workoutPlans.length === 0 && <Text style={[type.body, { color: colors.mutedForeground }]}>No plans yet. Build one: days, exercises, sets and reps.</Text>}
+        <Button label="Create plan" variant={workoutPlans.length === 0 ? "filled" : "tonal"} block onPress={() => open("new-plan")} />
+      </Screen>
+    );
+  }
+
+  if (view === "history") {
+    const sessions = workoutSessions.slice().reverse();
+    return (
+      <Screen title={title} back>
+        {sessions.length === 0 ? (
+          <Text style={[type.body, { color: colors.mutedForeground }]}>No sessions yet. Your first one is recorded here.</Text>
+        ) : (
+          <View>
+            {sessions.map((x) => (
+              <ListRow
+                key={x.id}
+                title={new Date(x.date).toLocaleDateString()}
+                subtitle={x.completedAt ? `Completed · ${x.performed.length} sets` : "In progress"}
+                dot={body}
+                trailing={x.completedAt ? <Text style={[type.number, { color: colors.foreground }]}>+{x.points.toFixed(1)}</Text> : undefined}
+              />
+            ))}
+          </View>
+        )}
+      </Screen>
+    );
+  }
+
+  if (view === "prs") {
+    return (
+      <Screen title={title} back>
+        <Section label="BIG 5">
+          {personalRecords.length === 0 ? (
+            <Text style={[type.body, { color: colors.mutedForeground }]}>No records yet. Log a heavy set of a Big 5 lift.</Text>
+          ) : (
+            personalRecords.map((pr) => (
+              <ListRow
+                key={pr.exerciseId}
+                title={exById[pr.exerciseId]?.name ?? pr.exerciseId}
+                subtitle={`Estimated 1RM ${pr.value}`}
+                trailing={<Text style={[type.number, { color: colors.foreground }]}>{pr.weight} × {pr.reps}</Text>}
+              />
+            ))
+          )}
+        </Section>
+        {lastPrEvents.length > 0 && (
+          <Section label="LATEST RECORDS">
+            {lastPrEvents.map((evt) => (
+              <ListRow
+                key={`${evt.exerciseId}-${evt.achievedAt}`}
+                title={evt.exerciseName}
+                subtitle={new Date(evt.achievedAt).toLocaleDateString()}
+                trailing={<Text style={[type.number, { color: colors.success }]}>{evt.value}</Text>}
+              />
+            ))}
+          </Section>
+        )}
+        <Section label="POINTS BY BODY PART">
+          {bodyPartScores.length === 0 ? (
+            <Text style={[type.body, { color: colors.mutedForeground }]}>No points yet. Complete a planned session.</Text>
+          ) : (
+            bodyPartScores.map((x) => (
+              <ListRow
+                key={x.bodyPart}
+                title={x.bodyPart.charAt(0).toUpperCase() + x.bodyPart.slice(1)}
+                trailing={<Text style={[type.number, { color: colors.foreground }]}>{x.pointsTotal.toFixed(1)}</Text>}
+              />
+            ))
+          )}
+        </Section>
+      </Screen>
+    );
+  }
+
+  // --- a running session takes over the landing view -----------------------------------------------------
+  if (activeSession) {
+    const free = todayBlocks.length === 0;
+    const setsFor = (id: string) => activeSession.performed.filter((x) => x.exerciseId === id && x.completed).length;
+    return (
+      <Screen title={title} back>
+        {notices}
+        {restoredSession && (
+          <SystemWindow title="SESSION RESTORED">
+            <Text style={[type.body, { color: colors.foreground }]}>
+              Unfinished session found: {activeSession.performed.length} sets logged. Resume it or discard it.
+            </Text>
+            <Button label="Discard session" variant="text" onPress={() => void discardActiveSession()} />
+          </SystemWindow>
+        )}
+
+        <View style={s.steppers}>
+          <NumberStepper label="REPS" value={reps} min={1} max={200} onChange={setReps} />
+          <NumberStepper label="WEIGHT" value={weight} min={0} max={1000} step={2.5} decimal onChange={setWeight} />
         </View>
 
-        {activeTab === "plans" &&
-          (editing ? (
-            <PlanEditor
-              exercises={exercises}
-              saving={saving}
-              error={editorError}
-              onSave={(d) => void savePlan(d)}
-              onCancel={() => {
-                setEditing(false);
-                setEditorError(null);
-              }}
-            />
-          ) : (
-            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Weekly Plans</Text>
-              {workoutPlans.map((p) => (
-                <View key={p.id} style={styles.rowBetween}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.foreground, fontWeight: "700" }}>{p.name}</Text>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
-                      {p.goal ? `${p.goal} | ` : ""}
-                      {p.days.map((d) => d.weekday).join(" ") || "no days"}
-                    </Text>
-                  </View>
-                  {p.id === (plan?.id ?? null) ? (
-                    <Text style={{ color: colors.primary, fontSize: 11 }}>ACTIVE</Text>
-                  ) : (
-                    <TouchableOpacity onPress={() => void updateWorkoutPlan(p.id, { isActive: true })}>
-                      <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>SET ACTIVE</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              ))}
-              {workoutPlans.length === 0 && <Text style={{ color: colors.mutedForeground }}>No plans yet.</Text>}
-              <TouchableOpacity style={[styles.actionBtn, { borderColor: colors.border }]} onPress={() => setEditing(true)}>
-                <Feather name="plus" size={14} color={colors.mutedForeground} />
-                <Text style={{ color: colors.mutedForeground }}>Create plan</Text>
-              </TouchableOpacity>
+        <Section label={free ? "FREE SESSION · TAP TO LOG A SET" : "TAP AN EXERCISE TO LOG A SET"}>
+          {free
+            ? exercises.map((e) => (
+                <ListRow
+                  key={e.id}
+                  title={e.name}
+                  subtitle={e.primaryBodyPart}
+                  dot={body}
+                  accessibilityLabel={`Log a set of ${e.name}`}
+                  trailing={<Text style={[type.number, { color: colors.foreground }]}>{activeSession.performed.filter((x) => x.exerciseId === e.id).length}</Text>}
+                  onPress={() => void addSet(e.id)}
+                />
+              ))
+            : todayBlocks.map((block) => {
+                const name = exById[block.exerciseId]?.name ?? block.exerciseId;
+                const done = setsFor(block.exerciseId);
+                return (
+                  <ListRow
+                    key={`${block.exerciseId}-${block.repRange}`}
+                    title={name}
+                    subtitle={`${block.sets} × ${block.repRange} · rest ${block.restSec} s`}
+                    dot={done >= block.sets ? colors.success : body}
+                    accessibilityLabel={`Log a set of ${name}, ${done} of ${block.sets} done`}
+                    trailing={
+                      <Text style={[type.number, { color: done >= block.sets ? colors.success : colors.foreground }]}>
+                        {done}/{block.sets}
+                      </Text>
+                    }
+                    onPress={() => void addSet(block.exerciseId)}
+                  />
+                );
+              })}
+        </Section>
+        {free && <Text style={[type.meta, { color: colors.mutedForeground }]}>A free session scores 0 points. Planned sets score BODY.</Text>}
+
+        <Button label="Complete session" block loading={working} onPress={() => void finishSession()} />
+        <CrowdReportSheet visible={crowdFor !== null} busy={crowdBusy} onChoose={(l) => void chooseCrowd(l)} />
+      </Screen>
+    );
+  }
+
+  // --- landing: today's session, then everything else behind rows ----------------------------------------
+  const newPrs = lastCompletion?.newPrs ?? [];
+  const sessionsDone = workoutSessions.filter((x) => x.completedAt).length;
+
+  return (
+    <Screen title={title} back>
+      {newPrs.length > 0 && (
+        <SystemWindow title="NEW RECORD" frameColor={body}>
+          {newPrs.map((p) => (
+            <View key={`${p.exerciseId}-${p.achievedAt}`} style={s.pr}>
+              <Text style={[type.bodyStrong, { color: colors.foreground }]}>{p.name}</Text>
+              <Text style={[type.number, { color: colors.foreground }]}>
+                {p.weight} × {p.reps}
+              </Text>
+              <Text style={[type.meta, { color: colors.mutedForeground }]}>
+                Estimated 1RM {p.value}
+                {p.previous !== null ? ` (was ${p.previous})` : ""}
+              </Text>
             </View>
           ))}
+        </SystemWindow>
+      )}
+      {notices}
 
-        {activeTab === "today" && (
-          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.rowBetween}>
-              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Today Workout</Text>
-              <TouchableOpacity onPress={() => router.push("/dungeon/briefing")} accessibilityRole="button" accessibilityLabel="Briefing">
-                <Text style={{ color: colors.primary, letterSpacing: 1, fontSize: 11 }}>BRIEFING</Text>
-              </TouchableOpacity>
-              {!activeSession ? (
-                <TouchableOpacity onPress={() => void startSession()} disabled={working || restoring}>
-                  <Text style={{ color: colors.primary, opacity: working || restoring ? 0.5 : 1 }}>
-                    {todayBlocks.length === 0 ? "Start Free Session" : "Start Session"}
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity onPress={() => void finishSession()} disabled={working}>
-                  <Text style={{ color: "#4B8B6F", opacity: working ? 0.5 : 1 }}>Complete</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {activeSession && restoredSession && (
-              <View style={[styles.block, { borderColor: colors.border }]}>
-                <Text style={{ color: colors.foreground, fontSize: 12 }}>
-                  Unfinished session restored: {activeSession.performed.length} sets logged. Resume it or discard it.
-                </Text>
-                <TouchableOpacity onPress={() => void discardActiveSession()}>
-                  <Text style={{ color: "#E05555", fontSize: 11, letterSpacing: 1 }}>DISCARD SESSION</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            {rejectedSets > 0 && (
-              <TouchableOpacity onPress={dismissRejectedSets}>
-                <Text style={{ color: "#E05555", fontSize: 12 }}>
-                  {rejectedSets} {rejectedSets === 1 ? "set was" : "sets were"} rejected. Tap to dismiss.
-                </Text>
-              </TouchableOpacity>
-            )}
-            {abandonedNotice && (
-              <TouchableOpacity onPress={dismissAbandonedNotice}>
-                <Text style={{ color: "#C4873A", fontSize: 12 }}>{ABANDONED_SESSION_MESSAGE} Tap to dismiss.</Text>
-              </TouchableOpacity>
-            )}
-            {message && <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{message}</Text>}
-            {unsyncedSets > 0 && (
-              <Text style={{ color: "#C4873A", fontSize: 12 }}>
-                {unsyncedSets} {unsyncedSets === 1 ? "set" : "sets"} waiting to sync.
-              </Text>
-            )}
-
-            {!activeSession && lastCompletion && lastCompletion.newPrs.length > 0 &&
-              lastCompletion.newPrs.map((p) => (
-                <View key={`${p.exerciseId}-${p.achievedAt}`} style={[styles.block, { borderColor: "#C4873A" }]}>
-                  <Text style={{ color: "#C4873A", fontSize: 11, letterSpacing: 1 }}>NEW PR</Text>
-                  <Text style={{ color: colors.foreground, fontWeight: "700" }}>{p.name}</Text>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: MONO }}>
-                    {p.weight} x {p.reps} | est 1RM {p.value}
-                    {p.previous !== null ? ` (was ${p.previous})` : ""}
-                  </Text>
-                </View>
-              ))}
-
-            {activeSession && (
-              <View style={styles.inlineInputs}>
-                <TextInput
-                  value={reps}
-                  onChangeText={setReps}
-                  keyboardType="number-pad"
-                  style={[styles.input, { borderColor: colors.border, color: colors.foreground, fontFamily: MONO }]}
-                  placeholder="Reps"
-                  placeholderTextColor={colors.mutedForeground}
-                />
-                <TextInput
-                  value={weight}
-                  onChangeText={setWeight}
-                  keyboardType="decimal-pad"
-                  style={[styles.input, { borderColor: colors.border, color: colors.foreground, fontFamily: MONO }]}
-                  placeholder="Weight"
-                  placeholderTextColor={colors.mutedForeground}
-                />
-              </View>
-            )}
-
-            {todayBlocks.length === 0 && <Text style={{ color: colors.mutedForeground }}>{NO_PLAN_TODAY}</Text>}
-
-            {todayBlocks.map((block) => {
-              const ex = exById[block.exerciseId];
-              const done = activeSession?.performed.filter((x) => x.exerciseId === block.exerciseId && x.completed).length ?? 0;
-              return (
-                <View key={`${block.exerciseId}-${block.repRange}`} style={[styles.block, { borderColor: colors.border }]}>
-                  <View style={styles.rowBetween}>
-                    <Text style={{ color: colors.foreground, fontWeight: "700" }}>{ex?.name ?? block.exerciseId}</Text>
-                    <Text style={{ color: colors.mutedForeground, fontFamily: MONO }}>{done}/{block.sets} sets</Text>
-                  </View>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
-                    {block.sets} x {block.repRange} | rest {block.restSec}s
-                  </Text>
-                  <TouchableOpacity
-                    style={[styles.actionBtn, { borderColor: colors.border }]}
-                    onPress={() => void addSet(block.exerciseId)}
-                    disabled={!activeSession}
-                  >
-                    <Feather name="check" size={12} color={colors.mutedForeground} />
-                    <Text style={{ color: colors.mutedForeground }}>
-                      {activeSession ? "Log completed set" : "Start session first"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
-
-            {freeSession && (
-              <View style={{ gap: 6 }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
-                  Free session: tap an exercise to log a set. A free session scores 0 points.
-                </Text>
-                <View style={styles.chips}>
-                  {exercises.map((e) => (
-                    <TouchableOpacity
-                      key={e.id}
-                      style={[styles.chip, { borderColor: colors.border, backgroundColor: colors.card }]}
-                      onPress={() => void addSet(e.id)}
-                    >
-                      <Text style={{ color: colors.foreground, fontSize: 11 }}>
-                        {e.name} ({activeSession?.performed.filter((x) => x.exerciseId === e.id).length ?? 0})
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
+      {todayBlocks.length > 0 && plan ? (
+        <View style={[s.today, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={s.todayHead}>
+            <Text style={[type.title, { color: colors.foreground }]}>{plan.name}</Text>
+            <Text style={[type.meta, { color: colors.mutedForeground }]}>
+              {today} · {sessionSummary(todayBlocks)}
+            </Text>
           </View>
+          <Text style={[type.body, { color: colors.mutedForeground }]} numberOfLines={2}>
+            {todayBlocks.map((b) => exById[b.exerciseId]?.name ?? b.exerciseId).join(", ")}
+          </Text>
+          <Button label="Start session" block loading={working || restoring} onPress={() => void startSession()} />
+          <Button label="Briefing" variant="text" onPress={() => router.push("/dungeon/briefing")} accessibilityLabel="Open the dungeon briefing" />
+        </View>
+      ) : (
+        <SystemWindow>
+          <Text style={[type.title, { color: colors.foreground }]}>{NO_PLAN_TODAY}</Text>
+          <Button label="Start a free session" block loading={working || restoring} onPress={() => void startSession()} />
+        </SystemWindow>
+      )}
+
+      <View>
+        {todayBlocks.length === 0 && (
+          <ListRow title="Choose a plan" subtitle={plan ? `${plan.name} has no session on ${today}` : "No plan yet"} chevron onPress={() => open("plans")} />
         )}
-
-        {activeTab === "history" && (
-          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Session History</Text>
-            {workoutSessions.slice().reverse().map((s) => (
-              <View key={s.id} style={[styles.block, { borderColor: colors.border }]}>
-                <Text style={{ color: colors.foreground }}>{new Date(s.date).toLocaleDateString()}</Text>
-                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
-                  {s.completedAt ? `Completed | BODY +${s.points.toFixed(1)}` : "In progress"}
-                </Text>
-              </View>
-            ))}
-            {workoutSessions.length === 0 && <Text style={{ color: colors.mutedForeground }}>No sessions yet.</Text>}
-          </View>
-        )}
-
-        {activeTab === "prs" && (
-          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Big-5 PRs</Text>
-            {personalRecords.map((pr) => (
-              <View key={pr.exerciseId} style={styles.rowBetween}>
-                <Text style={{ color: colors.foreground }}>{exById[pr.exerciseId]?.name ?? pr.exerciseId}</Text>
-                <Text style={{ color: "#C4873A", fontFamily: MONO }}>{pr.weight} x {pr.reps} (1RM {pr.value})</Text>
-              </View>
-            ))}
-            {personalRecords.length === 0 && <Text style={{ color: colors.mutedForeground }}>No PRs yet.</Text>}
-
-            <Text style={[styles.sectionTitle, { color: colors.foreground, marginTop: 14 }]}>Latest PR Events</Text>
-            {lastPrEvents.map((evt) => (
-              <Text key={`${evt.exerciseId}-${evt.achievedAt}`} style={{ color: "#4B8B6F", fontSize: 12 }}>
-                NEW PR: {evt.exerciseName} | est 1RM {evt.value}
-              </Text>
-            ))}
-            {lastPrEvents.length === 0 && <Text style={{ color: colors.mutedForeground }}>None this session.</Text>}
-
-            <Text style={[styles.sectionTitle, { color: colors.foreground, marginTop: 14 }]}>Body Part Points</Text>
-            {bodyPartScores.map((s) => (
-              <View key={s.bodyPart} style={styles.rowBetween}>
-                <Text style={{ color: colors.mutedForeground }}>{s.bodyPart}</Text>
-                <Text style={{ color: colors.foreground, fontFamily: MONO }}>{s.pointsTotal.toFixed(1)}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </ScrollView>
+        <ListRow
+          title="Plans"
+          subtitle={plan ? `Active: ${plan.name}` : `${workoutPlans.length} saved`}
+          dot={body}
+          chevron
+          onPress={() => open("plans")}
+        />
+        <ListRow
+          title="Personal records (Big 5)"
+          subtitle={personalRecords.length ? `${personalRecords.length} recorded` : "None yet"}
+          dot={body}
+          chevron
+          onPress={() => open("prs")}
+        />
+        <ListRow
+          title="History"
+          subtitle={sessionsDone ? `${sessionsDone} ${sessionsDone === 1 ? "session" : "sessions"} completed` : "No sessions yet"}
+          dot={body}
+          chevron
+          onPress={() => open("history")}
+        />
+      </View>
       <CrowdReportSheet visible={crowdFor !== null} busy={crowdBusy} onChoose={(l) => void chooseCrowd(l)} />
+    </Screen>
+  );
+}
+
+function Notice({ text, color, onPress }: { text: string; color: string; onPress?: () => void }) {
+  const line = <Text style={[type.body, { color }]}>{text}</Text>;
+  if (!onPress) return line;
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" android_ripple={{ color: "rgba(168,121,255,0.12)" }} style={s.notice}>
+      {line}
+    </Pressable>
+  );
+}
+
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  const colors = useColors();
+  return (
+    <View style={s.section}>
+      <Text style={[type.label, { color: colors.mutedForeground }]} accessibilityRole="header">
+        {label}
+      </Text>
+      <View>{children}</View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  scroll: { paddingHorizontal: 16, gap: 12 },
-  title: { fontSize: 18, letterSpacing: 2, fontWeight: "700" },
-  subtitle: { fontSize: 12, marginBottom: 4 },
-  tabs: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  tab: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 7 },
-  card: { borderWidth: 1, borderRadius: 4, padding: 14, gap: 10 },
-  sectionTitle: { fontSize: 13, fontWeight: "700", letterSpacing: 1 },
-  rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  actionBtn: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", gap: 8, alignItems: "center" },
-  block: { borderWidth: 1, borderRadius: 4, padding: 10, gap: 6 },
-  inlineInputs: { flexDirection: "row", gap: 8 },
-  input: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 8, flex: 1 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  chip: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 7 },
+const s = StyleSheet.create({
+  center: { alignItems: "center", justifyContent: "center", gap: space.sm, paddingVertical: space.xxl },
+  today: { borderWidth: 1, borderRadius: 4, padding: space.md, gap: space.md },
+  todayHead: { gap: space.xs },
+  steppers: { flexDirection: "row", gap: space.md },
+  section: { gap: space.sm },
+  notice: { minHeight: 48, justifyContent: "center" },
+  pr: { gap: 2 },
 });

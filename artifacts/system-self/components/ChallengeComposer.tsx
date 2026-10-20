@@ -1,29 +1,18 @@
 // PRO named challenge: pick a domain and a length, send it to one player (a followed user or a clanmate). The server
 // answers 402 pro_required for free accounts, which shows the PRO lock instead of an error.
 import React, { useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { RANKED_DOMAINS, type RankedDomain } from "@workspace/engine";
-import { AuthButton, AuthNotice } from "@/components/AuthShell";
+import { Chip, Notice } from "@/components/arena/parts";
 import { ProLock } from "@/components/ProLock";
+import { Button } from "@/components/ui/Button";
+import { DOMAIN_COLORS } from "@/constants/domains";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { useChallengeActions } from "@/hooks/useChallenges";
 import { CHALLENGE_DAYS, CHALLENGE_RULE, createOutcome, type ChallengeDraft } from "@/lib/challenges/challenges";
 
 const SYNC_PENDING = "Queued entries have not reached the System yet. Retry shortly.";
-
-function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
-  const colors = useColors();
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      style={[s.chip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.accentFill + "20" : "transparent" }]}
-    >
-      <Text style={[s.chipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
 
 /** `opponent` is the handle exactly as shown to the viewer (a clanmate's username, or a followed player's handle). */
 export function ChallengeComposer({ opponent }: { opponent: string }) {
@@ -56,31 +45,28 @@ export function ChallengeComposer({ opponent }: { opponent: string }) {
 
   if (pro) return <ProLock label="NAMED CHALLENGE" />;
   return (
-    <View style={s.panel}>
-      <Text style={[s.label, { color: colors.mutedForeground }]}>CHALLENGE {opponent.toUpperCase()}</Text>
+    <View style={s.panel} accessibilityLabel={`Challenge ${opponent}`}>
+      <Text style={[type.label, { color: colors.mutedForeground }]}>DOMAIN</Text>
       <View style={s.row}>
         {RANKED_DOMAINS.map((d) => (
-          <Chip key={d} label={d} selected={d === domain} onPress={() => setDomain(d)} />
+          <Chip key={d} label={d} dot={DOMAIN_COLORS[d]} selected={d === domain} onPress={() => setDomain(d)} />
         ))}
       </View>
+      <Text style={[type.label, { color: colors.mutedForeground }]}>LENGTH</Text>
       <View style={s.row}>
         {CHALLENGE_DAYS.map((n) => (
-          <Chip key={n} label={`${n} DAYS`} selected={n === days} onPress={() => setDays(n)} />
+          <Chip key={n} label={`${n} days`} selected={n === days} onPress={() => setDays(n)} />
         ))}
       </View>
-      <Text style={[s.hint, { color: colors.mutedForeground }]}>{CHALLENGE_RULE}</Text>
-      {error ? <AuthNotice message={error} /> : null}
-      {sent ? <AuthNotice tone="info" message="Challenge sent. They have 48 hours to answer. Logged." /> : null}
-      <AuthButton label="SEND CHALLENGE" loading={busy} onPress={() => void send()} />
+      <Text style={[type.meta, { color: colors.mutedForeground }]}>{CHALLENGE_RULE}</Text>
+      {error ? <Notice message={error} /> : null}
+      {sent ? <Notice tone="info" message="Challenge sent. They have 48 hours to answer. Logged." /> : null}
+      <Button label={`Challenge ${opponent}`} block loading={busy} onPress={() => void send()} />
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  panel: { gap: 10 },
-  label: { fontSize: 10, letterSpacing: 2, fontWeight: "800" as const },
-  row: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  chip: { borderWidth: 1, borderRadius: 3, paddingHorizontal: 10, paddingVertical: 6 },
-  chipText: { fontSize: 10, fontWeight: "800" as const, letterSpacing: 1.5 },
-  hint: { fontSize: 10, letterSpacing: 1, fontWeight: "600" as const, lineHeight: 15 },
+  panel: { gap: space.sm },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: space.sm, marginBottom: space.xs },
 });

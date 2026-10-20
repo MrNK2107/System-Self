@@ -3,7 +3,9 @@
 import React, { useState } from "react";
 import { StyleSheet, Switch, Text, View } from "react-native";
 import { AuthField } from "@/components/AuthField";
-import { AuthButton, AuthNotice } from "@/components/AuthShell";
+import { AuthNotice } from "@/components/AuthShell";
+import { Button } from "@/components/ui/Button";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import { checkCustomDomainForm, type CustomDomainDraft, type CustomDomainInput } from "@/lib/custom/custom";
 import { CUSTOM_LOG_LABEL_MAX, CUSTOM_NAME_MAX, CUSTOM_UNIT_MAX } from "@workspace/contracts";
@@ -41,12 +43,12 @@ export function CustomDomainForm({
       <AuthField label="NAME" value={draft.name} onChangeText={(v) => set("name", v)} placeholder="Language" autoCapitalize="sentences" maxLength={CUSTOM_NAME_MAX} />
       <AuthField label="UNIT (OPTIONAL)" value={draft.unit} onChangeText={(v) => set("unit", v)} placeholder="min" maxLength={CUSTOM_UNIT_MAX} />
       <AuthField label="LOG BUTTON LABEL (OPTIONAL)" value={draft.logLabel} onChangeText={(v) => set("logLabel", v)} placeholder="Log" autoCapitalize="sentences" maxLength={CUSTOM_LOG_LABEL_MAX} />
-      <AuthField label="STARTING VALUE" value={draft.baseline} onChangeText={(v) => set("baseline", v)} keyboardType="numbers-and-punctuation" mono />
-      <AuthField label="TARGET" value={draft.target} onChangeText={(v) => set("target", v)} keyboardType="numbers-and-punctuation" mono />
+      <AuthField label="STARTING VALUE" value={draft.baseline} onChangeText={(v) => set("baseline", v)} keyboardType="numbers-and-punctuation" />
+      <AuthField label="TARGET" value={draft.target} onChangeText={(v) => set("target", v)} keyboardType="numbers-and-punctuation" />
       <View style={[s.row, { borderColor: colors.border, backgroundColor: colors.card }]}>
         <View style={s.rowText}>
-          <Text style={[s.rowLabel, { color: colors.foreground }]}>SHOW TO FOLLOWERS AND CLAN</Text>
-          <Text style={[s.rowHint, { color: colors.mutedForeground }]}>Only the name and score. Never your entries.</Text>
+          <Text style={[type.bodyStrong, { color: colors.foreground }]}>Show to followers and clan</Text>
+          <Text style={[type.meta, { color: colors.mutedForeground }]}>Only the name and score. Never your entries.</Text>
         </View>
         <Switch
           value={draft.isPublic}
@@ -55,15 +57,13 @@ export function CustomDomainForm({
           trackColor={{ true: colors.accentFill, false: colors.muted }}
         />
       </View>
-      <AuthButton label={submitLabel} loading={busy} onPress={submit} />
+      <Button label={submitLabel} loading={busy} onPress={submit} block />
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  form: { gap: 14 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderRadius: 4, padding: 12 },
+  form: { gap: space.md },
+  row: { minHeight: 64, flexDirection: "row", alignItems: "center", gap: space.md, borderWidth: 1, borderRadius: 4, paddingHorizontal: space.md, paddingVertical: space.sm },
   rowText: { flex: 1, gap: 2 },
-  rowLabel: { fontSize: 10, fontWeight: "800", letterSpacing: 1.5 },
-  rowHint: { fontSize: 11, lineHeight: 16 },
 });

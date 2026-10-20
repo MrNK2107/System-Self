@@ -1,6 +1,10 @@
-import { Link, Stack } from "expo-router";
+import { router, Stack } from "expo-router";
+import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
+import { Button } from "@/components/ui/Button";
+import { SystemWindow } from "@/components/ui/SystemWindow";
+import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 
 export default function NotFoundScreen() {
@@ -8,38 +12,20 @@ export default function NotFoundScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: "Oops!" }} />
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text style={[styles.title, { color: colors.foreground }]}>
-          This screen doesn&apos;t exist.
-        </Text>
-
-        <Link href="/" style={styles.link}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>
-            Go to home screen!
-          </Text>
-        </Link>
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={[s.container, { backgroundColor: colors.background }]}>
+        <SystemWindow title="NOT FOUND" style={s.window}>
+          <Text style={[type.title, s.center, { color: colors.foreground }]}>This screen does not exist.</Text>
+          <Button label="Go to Today" block onPress={() => router.replace("/")} style={s.action} />
+        </SystemWindow>
       </View>
     </>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-  link: {
-    marginTop: 15,
-    paddingVertical: 15,
-  },
-  linkText: {
-    fontSize: 14,
-  },
+const s = StyleSheet.create({
+  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: space.lg },
+  window: { padding: space.lg, gap: space.md, width: "100%", maxWidth: 420 },
+  center: { textAlign: "center" },
+  action: { marginTop: space.sm },
 });
