@@ -15,6 +15,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { NotificationPrompt } from "@/components/NotificationPrompt";
+import { SystemEchoProvider } from "@/components/ui/SystemEcho";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AppProvider } from "@/context/AppContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -95,11 +96,13 @@ export default function RootLayout() {
             <ThemeProvider>
             <GestureHandlerRootView style={{ flex: 1 }}>
               <KeyboardProvider>
+                <SystemEchoProvider>
                 <AppProvider>
                   <GymProvider>
                     <RootLayoutNav />
                   </GymProvider>
                 </AppProvider>
+                </SystemEchoProvider>
               </KeyboardProvider>
             </GestureHandlerRootView>
             </ThemeProvider>

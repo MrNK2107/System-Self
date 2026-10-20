@@ -2,6 +2,8 @@
 // /api/chains/templates) through React Query; logs go through the outbox. No game rule is computed here.
 // Rivals, challenges and taunts live on the server too (GET /api/rivals, hooks/useRivals.ts).
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useSystemEcho } from "@/components/ui/SystemEcho";
+import { appliedLine } from "@/lib/game/echo";
 import { useQueryClient } from "@tanstack/react-query";
 import type { FloorRoutineDto, SeasonKind } from "@workspace/contracts";
 import { streakMultiplier } from "@workspace/engine";
@@ -279,10 +281,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [queryClient, userId],
   );
 
+  const echo = useSystemEcho();
   const completeQuest = useCallback(
-    (questId: string) =>
-      runGuarded("quest-complete", (id) => completeQuestRequest(api, getOutbox(), questId, id), { activity: true }),
-    [runGuarded],
+    async (questId: string) => {
+      const r = await runGuarded("quest-complete", (id) => completeQuestRequest(api, getOutbox(), questId, id), { activity: true });
+      // THE SYSTEM answers with what the server actually applied.
+      if (r.ok) echo({ title: "QUEST COMPLETE", line: appliedLine(r.value.results) });
+      return r;
+    },
+    [runGuarded, echo],
   );
   const refuseQuest = useCallback(
     (questId: string, reason: string) =>

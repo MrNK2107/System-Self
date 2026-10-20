@@ -2,6 +2,7 @@
 // dark scrim, THE SYSTEM's line typed out, and one filled button. The pieces (NoticeShell, Typewriter, NoticeLine,
 // NoticeFigure) are exported so the dedicated modals (rank up, achievement, failure...) speak the same way.
 import React, { useEffect, useRef, useState, type ReactNode } from "react";
+import { setStatusBarStyle } from "expo-status-bar";
 import { AccessibilityInfo, Animated, Easing, Modal, ScrollView, StyleSheet, Text, View, type TextStyle } from "react-native";
 
 import { Button } from "@/components/ui/Button";
@@ -51,6 +52,11 @@ export function NoticeShell({ visible, title, frameColor, onClose, children }: S
   const reduce = useReducedMotion();
   const opacity = useRef(new Animated.Value(0)).current;
   const lift = useRef(new Animated.Value(16)).current;
+
+  // Android can hand back dark status-bar icons when a full-screen transparent modal closes; reassert light ones.
+  useEffect(() => {
+    if (!visible) setStatusBarStyle("light", false);
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
