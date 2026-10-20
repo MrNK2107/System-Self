@@ -78,7 +78,12 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      ["expo-secure-store", { "faceIDPermission": false }],
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       [
         "expo-audio",
         {
@@ -97,6 +102,11 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "androidStatusBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#07060B",
+      "translucent": true
     }
   }
 }
