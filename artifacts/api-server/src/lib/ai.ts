@@ -62,11 +62,50 @@ export interface AiDeps {
   audio?: AudioModelCaller;
 }
 
+export type AiProvider = "ollama" | "gemini" | "template";
+
+/** A local Ollama model wins when configured; otherwise Gemini with a key; otherwise templates. */
+export function aiProvider(): AiProvider {
+  if (env.OLLAMA_MODEL) return "ollama";
+  return env.GEMINI_API_KEY ? "gemini" : "template";
+}
+
 export function aiAvailable(): boolean {
+  return aiProvider() !== "template";
+}
+
+/** Audio input (voice logs) needs Gemini: the Ollama path is text only. */
+export function audioAvailable(): boolean {
   return Boolean(env.GEMINI_API_KEY);
 }
 
+async function callOllama(model: string, options: AiCallOptions): Promise<string> {
+  const res = await fetch(`${env.OLLAMA_URL}/api/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(env.OLLAMA_TIMEOUT_MS),
+    body: JSON.stringify({
+      model,
+      stream: false,
+      // Gemma 4 can think first; the replies here are short and the budget is maxOutputTokens, so it answers directly.
+      think: false,
+      keep_alive: -1,
+      messages: [
+        { role: "system", content: options.systemInstruction },
+        { role: "user", content: options.prompt },
+      ],
+      options: { num_predict: options.maxOutputTokens, temperature: options.temperature, num_ctx: env.OLLAMA_NUM_CTX },
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
+  const body = (await res.json()) as { message?: { content?: string } };
+  return (body.message?.content ?? "").trim();
+}
+
 async function callModel(model: string, options: AiCallOptions): Promise<string> {
+  if (aiProvider() === "ollama") return callOllama(model, options);
   if (!env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY must be set.");
   }
@@ -107,16 +146,16 @@ async function callAudioModel(model: string, options: AiCallOptions, audio: Audi
 }
 
 /** Without a configured key this resolves with model "template" and empty text; callers substitute a template. */
-export async function generateWithFallback(
-  options: AiCallOptions,
-  call: ModelCaller = callModel,
-): Promise<AiCallResult> {
-  if (!aiAvailable()) {
+export function generateWithFallback(options: AiCallOptions, call: ModelCaller = callModel): Promise<AiCallResult> {
+  if (aiProvider() === "ollama") return runModels([env.OLLAMA_MODEL!], options, call);
+  return runModels(env.GEMINI_API_KEY ? [env.GEMINI_MODEL, env.GEMINI_FALLBACK_MODEL] : [], options, call);
+}
+
+async function runModels(candidates: string[], options: AiCallOptions, call: ModelCaller): Promise<AiCallResult> {
+  if (candidates.length === 0) {
     return { text: "", model: "template", attempts: 1 };
   }
-  const models = [env.GEMINI_MODEL, env.GEMINI_FALLBACK_MODEL].filter(
-    (m, i, arr) => m && arr.indexOf(m) === i,
-  );
+  const models = candidates.filter((m, i, arr) => m && arr.indexOf(m) === i);
 
   let attempts = 0;
   let lastError: unknown = null;
@@ -169,12 +208,15 @@ export async function generateOrTemplate(
 /**
  * Audio input through the same model order, retries and fallback as text. Throws when every attempt fails.
  * Without a key it resolves with model "template" and empty text, like generateWithFallback: voice callers check
- * aiAvailable first and answer 503 ai_unavailable.
+ * audioAvailable first and answer 503 ai_unavailable.
  */
 export function generateFromAudio(
   options: AiCallOptions,
   audio: AudioInput,
   call: AudioModelCaller = callAudioModel,
 ): Promise<AiCallResult> {
-  return generateWithFallback(options, (model, o) => call(model, o, audio));
+  // Always the Gemini models, even when Ollama answers text: the local path has no audio input.
+  return runModels(audioAvailable() ? [env.GEMINI_MODEL, env.GEMINI_FALLBACK_MODEL] : [], options, (model, o) =>
+    call(model, o, audio),
+  );
 }

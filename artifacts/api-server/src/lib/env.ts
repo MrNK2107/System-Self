@@ -42,6 +42,12 @@ const envSchema = z.object({
   GEMINI_FALLBACK_MODEL: z.string().default("gemini-2.5-flash-lite"),
   GEMINI_RETRY_COUNT: z.coerce.number().int().min(0).max(5).default(2),
   GEMINI_RETRY_BASE_MS: z.coerce.number().int().min(50).default(250),
+  /** A local Ollama model (e.g. gemma4:latest). When set it answers text calls instead of Gemini; voice stays on Gemini. */
+  OLLAMA_MODEL: z.string().trim().min(1).optional(),
+  OLLAMA_URL: z.string().url().default("http://127.0.0.1:11434"),
+  /** Fixed so Ollama never reloads the model for a different window; 8k holds every prompt with room to spare. */
+  OLLAMA_NUM_CTX: z.coerce.number().int().min(2048).default(8192),
+  OLLAMA_TIMEOUT_MS: z.coerce.number().int().min(1000).default(60_000),
   CORS_ORIGIN: z.string().optional(),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),

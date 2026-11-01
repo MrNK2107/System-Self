@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { sql } from "drizzle-orm";
 import { HealthCheckResponse } from "@workspace/api-zod";
 import type { Db } from "@workspace/db";
-import { aiAvailable } from "../lib/ai";
+import { aiProvider } from "../lib/ai";
 import { isShuttingDown } from "../lib/shutdown";
 
 export function healthRoutes(db: Db | null): IRouter {
@@ -26,7 +26,7 @@ export function healthRoutes(db: Db | null): IRouter {
       req.log.error({ err }, "Readiness check failed");
       return res.status(503).json({ status: "not_ready", db: "error" });
     }
-    return res.json({ status: "ready", db: "ok", ai: aiAvailable() ? "gemini" : "template" });
+    return res.json({ status: "ready", db: "ok", ai: aiProvider() });
   });
 
   return router;

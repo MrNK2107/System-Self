@@ -11,7 +11,7 @@ import {
   VOICE_LIMIT_CODE,
   parseLogData,
 } from "@workspace/contracts";
-import { aiAvailable, type AiDeps } from "../lib/ai";
+import { audioAvailable, type AiDeps } from "../lib/ai";
 import { parseAudio, parseText } from "../services/ai-parse";
 import { consumeDailyCall, refundDailyCall } from "../services/daily-limit";
 import { requirePro } from "../services/entitlements";
@@ -105,7 +105,7 @@ export function logsRoutes(db: Db, clock: () => Date = () => new Date(), ai: AiD
       res.status(400).json({ error: "No audio received", code: "empty_audio" });
       return;
     }
-    if (!aiAvailable()) {
+    if (!audioAvailable()) {
       res.status(503).json({ error: "Voice logging is unavailable", code: AI_UNAVAILABLE_CODE });
       return;
     }

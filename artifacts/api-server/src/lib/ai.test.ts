@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MESSAGE_TYPES } from "@workspace/contracts";
 import { templateQuests, templateSystemMessage } from "./ai-fallback";
-import { aiAvailable, generateOrTemplate, generateWithFallback } from "./ai";
+import { aiAvailable, aiProvider, audioAvailable, generateFromAudio, generateOrTemplate, generateWithFallback } from "./ai";
 import { env } from "./env";
 
 const ctx = { rank: "C", dayNumber: 12, shadowGap: 7.5, trajectory: "down" as const };
@@ -98,5 +98,42 @@ test("generateOrTemplate passes through a successful model result", async () => 
     assert.equal(result.model, env.GEMINI_MODEL);
   } finally {
     env.GEMINI_API_KEY = saved;
+  }
+});
+
+test("an Ollama model answers text without a Gemini key, with no fallback model", async () => {
+  const saved = { key: env.GEMINI_API_KEY, ollama: env.OLLAMA_MODEL };
+  env.GEMINI_API_KEY = undefined;
+  env.OLLAMA_MODEL = "gemma4:latest";
+  const models: string[] = [];
+  try {
+    assert.equal(aiProvider(), "ollama");
+    assert.equal(aiAvailable(), true);
+    assert.equal(audioAvailable(), false);
+    const result = await generateOrTemplate(OPTIONS, async (model) => {
+      models.push(model);
+      throw new Error("400 bad request");
+    });
+    assert.equal(result.model, "template");
+    assert.deepEqual(models, ["gemma4:latest"]);
+    const ok = await generateWithFallback(OPTIONS, async () => "hello");
+    assert.equal(ok.model, "gemma4:latest");
+  } finally {
+    env.GEMINI_API_KEY = saved.key;
+    env.OLLAMA_MODEL = saved.ollama;
+  }
+});
+
+test("voice stays on the Gemini models when Ollama answers text", async () => {
+  const saved = { key: env.GEMINI_API_KEY, ollama: env.OLLAMA_MODEL };
+  env.GEMINI_API_KEY = "test-key";
+  env.OLLAMA_MODEL = "gemma4:latest";
+  try {
+    assert.equal(audioAvailable(), true);
+    const result = await generateFromAudio(OPTIONS, { data: Buffer.from("x"), mimeType: "audio/wav" }, async (model) => model);
+    assert.equal(result.model, env.GEMINI_MODEL);
+  } finally {
+    env.GEMINI_API_KEY = saved.key;
+    env.OLLAMA_MODEL = saved.ollama;
   }
 });

@@ -22,7 +22,7 @@ test("readyz 200 with db ok and ai mode", { skip }, async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body.status, "ready");
   assert.equal(res.body.db, "ok");
-  assert.ok(["gemini", "template"].includes(res.body.ai));
+  assert.ok(["ollama", "gemini", "template"].includes(res.body.ai));
 });
 
 test("healthz stays 200 without a db", async () => {
