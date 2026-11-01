@@ -34,7 +34,7 @@ async function mkQuest(
       type: over.type ?? "daily",
       title: over.title ?? "Do the thing",
       description: "desc",
-      domain: over.domain ?? "MIND",
+      domain: over.domain ?? "SOCIAL",
       expiresAt: over.expiresAt ?? new Date(Date.now() + 3600_000),
       ...(over.bonus ? { bonus: true } : {}),
     },
@@ -45,20 +45,20 @@ async function mkQuest(
 const deltas = (body: { results: { domain: string; actualDelta: number }[] }) =>
   body.results.map((r) => [r.domain, r.actualDelta]);
 
-test("complete a normal MIND quest credits MIND, +0.8 DISCIPLINE and the clean day; again is 409", { skip }, async () => {
+test("complete a normal quest credits its domain, +0.8 DISCIPLINE and the clean day; again is 409", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
-  const q = await mkQuest(id); // "Do the thing", MIND, no minutes -> 45 min -> normal
+  const q = await mkQuest(id); // "Do the thing", SOCIAL, no count -> 1 -> normal
   assert.equal(q.difficulty, "normal");
   const before = (await score(id, "DISCIPLINE")).score;
   const res = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
   assert.equal(res.status, 200);
   assertContract(QuestCompleteResponseSchema, res.body);
   assert.equal(res.body.quest.status, "complete");
-  // MIND 3.5 * headroom(24)=0.610 = 2.1; DISCIPLINE 0.8 * headroom(12)=0.795 = 0.6;
+  // SOCIAL 3.5 * headroom(28)=0.553 = 1.9; DISCIPLINE 0.8 * headroom(12)=0.795 = 0.6;
   // it was the only daily, so the clean day: 1.2 * headroom(12.6)=0.785 = 0.9
   assert.deepEqual(deltas(res.body), [
-    ["MIND", 2.1],
+    ["SOCIAL", 1.9],
     ["DISCIPLINE", 0.6],
     ["DISCIPLINE", 0.9],
   ]);

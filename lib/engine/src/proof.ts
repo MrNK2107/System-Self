@@ -179,9 +179,9 @@ export function learnPlaces(
 
 /**
  * Target kinds whose quests can only be completed with proof (spec 10a.1: switched on as each proof part ships).
- * Part 2 ships live sessions for workouts and steps.
+ * Part 2 ships live sessions for workouts and steps; Part 3 study sessions with a quiz.
  */
-export const PROOF_REQUIRED_KINDS: readonly QuestTarget["kind"][] = ["workout", "steps"];
+export const PROOF_REQUIRED_KINDS: readonly QuestTarget["kind"][] = ["workout", "steps", "study"];
 
 /** True when this quest must be proven by a live session instead of a tap. */
 export const needsSessionProof = (target: QuestTarget | null | undefined): boolean =>

@@ -204,7 +204,7 @@ test("debrief: unavailable before nightlyTime, available after, verdict matches 
 
   await request(a).post("/api/logs").set(auth(token)).send({ clientId: "d1", domain: "BODY", logType: "workout", data: { kind: "Run", minutes: 30, intensity: 4 } });
   const [q] = await createQuests(db!, id, [
-    { type: "daily", title: "t", description: "d", domain: "MIND", expiresAt: new Date(Date.now() + 3600_000) },
+    { type: "daily", title: "t", description: "d", domain: "SOCIAL", expiresAt: new Date(Date.now() + 3600_000) },
   ]);
   await request(a).post(`/api/quests/${q!.id}/complete`).set(auth(token)).send({});
 

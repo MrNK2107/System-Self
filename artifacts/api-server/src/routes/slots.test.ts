@@ -69,7 +69,7 @@ test("invalid windows are 400", { skip }, async () => {
 test("resolved quest -> 409 not_active, slot stays unset", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
-  const q = await mkQuest(id, "MIND"); // tap-completable (BODY workouts need a live session)
+  const q = await mkQuest(id, "SOCIAL"); // tap-completable (workout and study quests need a live session)
   const done = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
   assert.equal(done.status, 200);
   const r = await patchSlot(a, token, q.id, { slotStart: "17:30", slotEnd: "18:30" });

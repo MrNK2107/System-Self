@@ -419,7 +419,7 @@ test("quest completion after 6 empty days -> comeback notice (first) and row", {
   const a = clockApp();
   const { token, id } = await setup(a);
   await seed(id, addDays(TODAY, -7));
-  const q = await mkDaily(id, "Read", "MIND"); // tap-completable (BODY workouts need a live session)
+  const q = await mkDaily(id, "Call a friend", "SOCIAL"); // tap-completable (workout and study quests need a live session)
   const done = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
   assert.equal(done.status, 200);
   assert.equal(done.body.notices[0].kind, "comeback");
@@ -512,7 +512,7 @@ test("quest completion that finishes the checklist returns the mark; refused dai
     .update(quests)
     .set({ status: "refused", resolvedAt: NOW, resolvedLocalDate: TODAY, refusalReason: "tired" })
     .where(eq(quests.id, refused.id));
-  const q = await mkDaily(id, "Read", "MIND"); // tap-completable (BODY workouts need a live session)
+  const q = await mkDaily(id, "Call a friend", "SOCIAL"); // tap-completable (workout and study quests need a live session)
   const done = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
   assert.equal(done.status, 200);
   assert.ok(kindsOf(done.body).includes("returner_mark"));

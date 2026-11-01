@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { inferQuestSpec, localDate, localTimeToInstant, type QuestTarget } from "@workspace/engine";
-import { questChains, quests, scoreEvents } from "@workspace/db";
+import { questChains, questProofs, quests, scoreEvents } from "@workspace/db";
 import type { Tx } from "./user-lock";
 
 export interface NewQuest {
@@ -134,4 +134,23 @@ export async function isCleanDay(tx: Pick<Tx, "select">, userId: string, today: 
     .where(and(eq(scoreEvents.userId, userId), eq(scoreEvents.reason, "clean_day"), eq(scoreEvents.localDate, today)))
     .limit(1);
   return given.length === 0;
+}
+
+/** How long an answer waiting for AI grading holds its quest open past its deadline (spec 8.5.4). */
+export const REVIEW_GRACE_MS = 24 * 3600_000;
+
+/** True while the quest has an answer waiting for AI grading from the last 24 h: rollover must not fail it yet. */
+export async function hasPendingReview(tx: Pick<Tx, "select">, questId: string, now: Date): Promise<boolean> {
+  const rows = await tx
+    .select({ id: questProofs.id })
+    .from(questProofs)
+    .where(
+      and(
+        eq(questProofs.questId, questId),
+        eq(questProofs.status, "awaiting_review"),
+        gt(questProofs.createdAt, new Date(now.getTime() - REVIEW_GRACE_MS)),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }

@@ -5,10 +5,15 @@ import {
   RANKED_DOMAINS,
   addDays,
   cleanDayChange,
+  QUIZ_LENGTH,
   needsSessionProof,
   questCompletionChanges,
+  studyMinutesRequired,
+  verifyStudy,
   verifyWorkout,
   type QuestDifficulty,
+  type QuizKey,
+  type QuizQuestion,
   type QuestTarget,
   type RankedDomain,
   chainStepQuest,
@@ -24,7 +29,9 @@ import {
   QuestRefuseRequestSchema,
   QuestShameRequestSchema,
   QuestSlotRequestSchema,
+  QuizAnswerRequestSchema,
   SessionProofRequestSchema,
+  type SessionSummaryDto,
 } from "@workspace/contracts";
 import type { AiDeps } from "../lib/ai";
 import { generateQuestsRequestSchema } from "../lib/schemas";
@@ -34,6 +41,7 @@ import { proRequiredUnlessPro } from "../services/entitlements";
 import { templateBonusQuest } from "../lib/ai-fallback";
 import { membershipOf } from "../services/clans";
 import { placeForUser, recordSpotAndLearn } from "../services/places";
+import { buildQuiz, gradeQuiz, type QuizAnswer } from "../services/quiz";
 import { abandonChain, activeBoard, createQuests, hasActiveChain, isCleanDay, slotStateOf, toQuestDto } from "../services/quests";
 import { track } from "../services/analytics";
 import { applyChanges, insertNotice, type ScoreChange } from "../services/scoring";
@@ -325,6 +333,151 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
     return { status: 200, body: { quest: toQuestDto(done), results: applied.results, notices: applied.notices } };
   }
 
+  /** Weekly/arc quests count accepted proofs; returns { done, needed } for the quest. */
+  async function proofProgress(tx: Tx, questId: string, target: QuestTarget) {
+    const [accepted] = await tx
+      .select({ done: count() })
+      .from(questProofs)
+      .where(and(eq(questProofs.questId, questId), eq(questProofs.status, "accepted")));
+    return { done: Number(accepted?.done ?? 0), needed: target.sessions ?? 1 };
+  }
+
+  const proofDtoOf = (p: typeof questProofs.$inferSelect) => ({
+    id: p.id,
+    questId: p.questId,
+    method: p.method as "session",
+    status: p.status as "accepted" | "rejected" | "awaiting_quiz" | "awaiting_review",
+    reason: p.reason,
+    evidence: (p.evidence ?? []) as string[],
+    createdAt: p.createdAt.toISOString(),
+  });
+
+  /** After a proof is judged: completes the quest when it has every session it needs, else reports progress. */
+  async function settleProof(
+    tx: Tx,
+    userId: string,
+    quest: typeof quests.$inferSelect,
+    target: QuestTarget,
+    proof: typeof questProofs.$inferSelect,
+    now: Date,
+  ): Promise<HandlerResult> {
+    const { done, needed } = await proofProgress(tx, quest.id, target);
+    const progress = needed > 1 ? { done, needed } : null;
+    if (proof.status === "accepted" && done >= needed && quest.status === "active") {
+      const tz = (await userTimezone(tx, userId))!;
+      const finished = await finishQuest(tx, userId, quest, now, localDate(now, tz));
+      if (finished.status !== 200) return finished;
+      const b = finished.body as { quest: unknown; results: unknown[]; notices: unknown[] };
+      return {
+        status: 200,
+        body: { proof: proofDtoOf(proof), quest: b.quest, completed: true, progress, results: b.results, notices: b.notices, quiz: null },
+      };
+    }
+    return {
+      status: 200,
+      body: { proof: proofDtoOf(proof), quest: toQuestDto(quest), completed: false, progress, results: [], notices: [], quiz: null },
+    };
+  }
+
+  /** How long the phone has to answer a study quiz after the session ends. */
+  const QUIZ_TTL_MS = 2 * 3600_000;
+
+  /**
+   * A study session (spec 8.5): too short is rejected at once; otherwise a quiz on the topic is built (AI, then the
+   * stored bank, then explain-in-your-own-words) and kept with its answer key on the proof, awaiting the answers.
+   */
+  async function startStudyProof(
+    tx: Tx,
+    userId: string,
+    quest: typeof quests.$inferSelect,
+    target: QuestTarget,
+    summary: SessionSummaryDto,
+    clientId: string | null,
+    now: Date,
+  ): Promise<HandlerResult> {
+    const topic = summary.topic?.trim() || quest.title;
+    const minutes = (Date.parse(summary.endedAt) - Date.parse(summary.startedAt)) / 60000;
+    if (summary.mocked || minutes < studyMinutesRequired(target)) {
+      const v = verifyStudy(summary, target, { correct: 0, total: QUIZ_LENGTH }, topic);
+      const [proof] = await tx
+        .insert(questProofs)
+        .values({
+          questId: quest.id,
+          userId,
+          method: "session",
+          status: "rejected",
+          summary,
+          reason: v.reason,
+          evidence: v.evidence,
+          clientId,
+          createdAt: now,
+        })
+        .returning();
+      return settleProof(tx, userId, quest, target, proof!, now);
+    }
+    const quiz = await buildQuiz(topic, ai);
+    const expiresAt = new Date(now.getTime() + QUIZ_TTL_MS);
+    const [proof] = await tx
+      .insert(questProofs)
+      .values({
+        questId: quest.id,
+        userId,
+        method: "session",
+        status: "awaiting_quiz",
+        summary: { ...summary, topic, quiz, quizExpiresAt: expiresAt.toISOString() },
+        reason: "Answer THE SYSTEM's questions to prove you studied.",
+        evidence: [`${Math.round(minutes)} min on ${topic}`],
+        clientId,
+        createdAt: now,
+      })
+      .returning();
+    const base = await settleProof(tx, userId, quest, target, proof!, now);
+    return {
+      ...base,
+      body: {
+        ...(base.body as object),
+        quiz: { proofId: proof!.id, source: quiz.source, questions: quiz.questions, expiresAt: expiresAt.toISOString() },
+      },
+    };
+  }
+
+  /** Grades a stored study quiz and records the verdict (or keeps it awaiting AI review). */
+  async function judgeStudyQuiz(
+    tx: Tx,
+    userId: string,
+    proof: typeof questProofs.$inferSelect,
+    answers: QuizAnswer[],
+    now: Date,
+  ): Promise<HandlerResult> {
+    const [quest] = await tx.select().from(quests).where(eq(quests.id, proof.questId)).limit(1);
+    if (!quest) return { status: 404, body: { error: "Quest not found" } };
+    const target = quest.target as QuestTarget;
+    const stored = proof.summary as SessionSummaryDto & {
+      topic: string;
+      quiz: { questions: QuizQuestion[]; keys: QuizKey[] };
+    };
+    const graded = await gradeQuiz(stored.topic, stored.quiz.questions, stored.quiz.keys, answers, ai);
+    if (graded.pendingReview) {
+      const [updated] = await tx
+        .update(questProofs)
+        .set({
+          status: "awaiting_review",
+          summary: { ...stored, answers },
+          reason: "THE SYSTEM will grade your explanation when it is back. The quest stays open until then.",
+        })
+        .where(eq(questProofs.id, proof.id))
+        .returning();
+      return settleProof(tx, userId, quest, target, updated!, now);
+    }
+    const v = verifyStudy(stored, target, { correct: graded.correct, total: graded.total }, stored.topic);
+    const [updated] = await tx
+      .update(questProofs)
+      .set({ status: v.ok ? "accepted" : "rejected", summary: { ...stored, answers }, reason: v.reason, evidence: v.evidence })
+      .where(eq(questProofs.id, proof.id))
+      .returning();
+    return settleProof(tx, userId, quest, target, updated!, now);
+  }
+
   router.post("/quests/:id/complete", async (req, res) => {
     const questId = String(req.params.id);
     const userId = req.user!.id;
@@ -383,9 +536,13 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
         return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
       }
       const target = quest.target as QuestTarget | null;
-      if (!target || !needsSessionProof(target) || summary.kind !== "workout") {
-        return { status: 409, body: { error: "This quest is not proven by a workout session.", code: "not_session_quest" } };
+      if (!target || !needsSessionProof(target)) {
+        return { status: 409, body: { error: "This quest is not proven by a session.", code: "not_session_quest" } };
       }
+      if ((target.kind === "study") !== (summary.kind === "study")) {
+        return { status: 409, body: { error: "Wrong kind of session for this quest.", code: "not_session_quest" } };
+      }
+      if (target.kind === "study") return startStudyProof(tx, userId, quest, target, summary, clientId ?? null, now);
       const place = summary.placeId ? await placeForUser(tx, userId, summary.placeId) : null;
       const verdict = verifyWorkout(summary, target, place);
       const [proof] = await tx
@@ -436,6 +593,62 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
         status: 200,
         body: { proof: proofDto, quest: toQuestDto(quest), completed: false, progress, results: [], notices: [] },
       };
+    });
+  });
+
+  /** Answers to a study session's quiz (spec 8.5). Within 2 h of the session; graded by key, AI, or later review. */
+  router.post("/proofs/:id/quiz", async (req, res) => {
+    const proofId = String(req.params.id);
+    const userId = req.user!.id;
+    const body = QuizAnswerRequestSchema.safeParse(req.body ?? {});
+    if (!UUID.test(proofId) || !body.success) {
+      res.status(400).json({ error: "Invalid answers", code: "invalid_answers" });
+      return;
+    }
+    await withIdempotency(db, req, res, `POST /proofs/${proofId}/quiz`, async (tx) => {
+      const now = clock();
+      const [proof] = await tx
+        .select()
+        .from(questProofs)
+        .where(and(eq(questProofs.id, proofId), eq(questProofs.userId, userId)))
+        .limit(1);
+      if (!proof) return { status: 404, body: { error: "Proof not found" } };
+      if (proof.status !== "awaiting_quiz") {
+        return { status: 409, body: { error: "This quiz was already answered.", code: "quiz_closed" } };
+      }
+      const exp = Date.parse((proof.summary as { quizExpiresAt?: string }).quizExpiresAt ?? "");
+      if (!(exp > now.getTime())) {
+        await tx
+          .update(questProofs)
+          .set({ status: "rejected", reason: "The quiz expired before you answered." })
+          .where(eq(questProofs.id, proof.id));
+        return { status: 409, body: { error: "The quiz expired. Start a new session.", code: "quiz_expired" } };
+      }
+      return judgeStudyQuiz(tx, userId, proof, body.data.answers, now);
+    });
+  });
+
+  /** Re-tries grading an answer that was waiting for the AI. Still pending when the AI is still down. */
+  router.post("/proofs/:id/review", async (req, res) => {
+    const proofId = String(req.params.id);
+    const userId = req.user!.id;
+    if (!UUID.test(proofId)) {
+      res.status(404).json({ error: "Proof not found" });
+      return;
+    }
+    await withIdempotency(db, req, res, `POST /proofs/${proofId}/review`, async (tx) => {
+      const now = clock();
+      const [proof] = await tx
+        .select()
+        .from(questProofs)
+        .where(and(eq(questProofs.id, proofId), eq(questProofs.userId, userId)))
+        .limit(1);
+      if (!proof) return { status: 404, body: { error: "Proof not found" } };
+      if (proof.status !== "awaiting_review") {
+        return { status: 409, body: { error: "Nothing to review.", code: "not_pending" } };
+      }
+      const answers = ((proof.summary as { answers?: QuizAnswer[] }).answers ?? []) as QuizAnswer[];
+      return judgeStudyQuiz(tx, userId, proof, answers, now);
     });
   });
 

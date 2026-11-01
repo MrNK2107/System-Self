@@ -2,7 +2,7 @@
 // then END sends a summary and THE SYSTEM's verdict comes back. Raw location and sensor data never leave the phone.
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, StyleSheet, Text, View } from "react-native";
+import { AppState, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Button } from "@/components/ui/Button";
 import { Screen } from "@/components/ui/Screen";
@@ -31,13 +31,13 @@ import {
 } from "@/lib/session/tracker";
 import { distanceM, type KnownPlace } from "@workspace/engine";
 
-type Phase = "ready" | "starting" | "running" | "sending" | "result";
+type Phase = "ready" | "starting" | "running" | "sending" | "quiz" | "result";
 
 export default function LiveSessionScreen() {
   const { questId } = useLocalSearchParams<{ questId: string }>();
   const router = useRouter();
   const colors = useColors();
-  const { quests, submitSession } = useApp();
+  const { quests, submitSession, submitQuiz, reviewProof } = useApp();
   const quest = quests.find((q) => q.id === questId) ?? null;
   const kind = quest?.target?.kind === "study" ? "study" : "workout";
 
@@ -48,6 +48,9 @@ export default function LiveSessionScreen() {
   const [note, setNote] = useState<string | null>(null);
   const [result, setResult] = useState<SessionProofResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [topic, setTopic] = useState("");
+  const [quiz, setQuiz] = useState<NonNullable<SessionProofResult["quiz"]> | null>(null);
+  const [answers, setAnswers] = useState<(number | string | null)[]>([]);
   const sessionRef = useRef<ActiveSession | null>(null);
   const stopMotion = useRef<(() => void) | null>(null);
 
@@ -114,6 +117,14 @@ export default function LiveSessionScreen() {
     if (!quest) return;
     setPhase("starting");
     setError(null);
+    if (kind === "study") {
+      const s = newSession(quest.id, kind, [], false);
+      update(s);
+      await saveActiveSession(s);
+      setNote(null);
+      setPhase("running");
+      return;
+    }
     const perm = await requestSessionPermissions();
     let places: KnownPlace[] = [];
     const pos = perm.location !== "denied" ? await currentPosition() : null;
@@ -134,14 +145,14 @@ export default function LiveSessionScreen() {
     setPhase("running");
   };
 
-  const saveHere = async (placeKind: "gym" | "sports" | "study") => {
+  const saveHere = async (placeKind: "gym" | "sports") => {
     const pos = (await currentPosition()) ?? here;
     if (!pos || !sessionRef.current) {
       setNote("No location fix. Step outside or turn on location, then try again.");
       return;
     }
     try {
-      const name = placeKind === "gym" ? "My gym" : placeKind === "sports" ? "My ground" : "My study place";
+      const name = placeKind === "gym" ? "My gym" : "My ground";
       const p = (await savePlace(api, { kind: placeKind, name, lat: pos.lat, lng: pos.lng })) as KnownPlace;
       update({ ...sessionRef.current, places: [...sessionRef.current.places, p] });
       setNote(`${name} saved. Sessions here now count.`);
@@ -156,10 +167,16 @@ export default function LiveSessionScreen() {
     setPhase("sending");
     stopMotion.current?.();
     await stopLocation();
-    const summary = buildSummary(s, await readPoints(), Date.now());
+    const summary = { ...buildSummary(s, await readPoints(), Date.now()), ...(kind === "study" ? { topic: topic.trim() || quest.title } : {}) };
     const r = await submitSession(quest.id, summary);
     if (r.ok) {
       await clearActiveSession();
+      if (r.value.quiz) {
+        setQuiz(r.value.quiz);
+        setAnswers(r.value.quiz.questions.map(() => null));
+        setPhase("quiz");
+        return;
+      }
       setResult(r.value);
       setPhase("result");
     } else {
@@ -169,7 +186,29 @@ export default function LiveSessionScreen() {
     }
   };
 
-  if (!quest && phase !== "result") {
+  const sendQuiz = async () => {
+    if (!quiz) return;
+    setPhase("sending");
+    const r = await submitQuiz(
+      quiz.proofId,
+      answers.map((a) => (a === null ? "" : a)),
+    );
+    if (r.ok) {
+      setResult(r.value);
+      setPhase("result");
+    } else {
+      setError("THE SYSTEM could not grade your answers. Try again.");
+      setPhase("quiz");
+    }
+  };
+
+  const checkAgain = async () => {
+    if (!result) return;
+    const r = await reviewProof(result.proof.id);
+    if (r.ok) setResult(r.value);
+  };
+
+  if (!quest && phase !== "result" && phase !== "quiz") {
     return (
       <Screen title="Session" back>
         <Text style={[type.body, { color: colors.mutedForeground }]}>This quest is no longer active.</Text>
@@ -189,7 +228,30 @@ export default function LiveSessionScreen() {
         </SystemWindow>
       ) : null}
 
-      {phase === "ready" || phase === "starting" ? (
+      {(phase === "ready" || phase === "starting") && kind === "study" ? (
+        <View style={s.block}>
+          <Text style={[type.body, { color: colors.foreground }]}>
+            Name what you will study. When you end the session, THE SYSTEM asks you questions on it. Pass 3 of 5 to prove it.
+          </Text>
+          <TextInput
+            value={topic}
+            onChangeText={setTopic}
+            placeholder="e.g. Thermodynamics, second law"
+            placeholderTextColor={colors.subtle}
+            maxLength={120}
+            style={[s.input, type.body, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
+            accessibilityLabel="Study topic"
+          />
+          <Button
+            label={phase === "starting" ? "STARTING…" : "START"}
+            onPress={() => void start()}
+            disabled={phase === "starting" || topic.trim().length < 2}
+            block
+          />
+        </View>
+      ) : null}
+
+      {(phase === "ready" || phase === "starting") && kind === "workout" ? (
         <View style={s.block}>
           <Text style={[type.body, { color: colors.foreground }]}>
             Start when you begin. THE SYSTEM counts the minutes your phone moves, your steps, and whether you are at a gym or
@@ -207,11 +269,18 @@ export default function LiveSessionScreen() {
           <Text style={[s.timer, { color: colors.foreground }]} accessibilityLabel={`Elapsed ${formatElapsed(elapsed)}`}>
             {formatElapsed(elapsed)}
           </Text>
-          <View style={s.stats}>
-            <Stat label="ACTIVE MIN" value={String(session.movement.activeMinutes)} />
-            <Stat label="STEPS" value={session.steps.toLocaleString("en-IN")} />
-            <Stat label="TARGET" value={quest?.target ? `${quest.target.value}` : "—"} />
-          </View>
+          {kind === "study" ? (
+            <Text style={[type.label, { color: colors.mutedForeground, textAlign: "center" }]}>
+              {`${topic.trim().toUpperCase()} · ${Math.floor(elapsed / 60000)} OF ${quest?.target?.value ?? "—"} MIN`}
+            </Text>
+          ) : (
+            <View style={s.stats}>
+              <Stat label="ACTIVE MIN" value={String(session.movement.activeMinutes)} />
+              <Stat label="STEPS" value={session.steps.toLocaleString("en-IN")} />
+              <Stat label="TARGET" value={quest?.target ? `${quest.target.value}` : "—"} />
+            </View>
+          )}
+          {kind === "workout" ? (
           <Text style={[type.label, { color: nearest?.inside ? colors.success : colors.mutedForeground }]}>
             {nearest?.inside
               ? `AT ${(nearest.place.name ?? (nearest.place.kind === "study" ? "A STUDY PLACE" : "A GYM")).toUpperCase()}`
@@ -219,15 +288,12 @@ export default function LiveSessionScreen() {
                 ? "NOT AT A KNOWN PLACE"
                 : "NO KNOWN PLACE NEARBY"}
           </Text>
-          {!nearest?.inside ? (
-            kind === "study" ? (
-              <Button label="SAVE THIS PLACE AS MY STUDY PLACE" variant="tonal" onPress={() => void saveHere("study")} block />
-            ) : (
-              <View style={s.row}>
-                <Button label="THIS IS MY GYM" variant="tonal" onPress={() => void saveHere("gym")} />
-                <Button label="THIS IS MY GROUND" variant="tonal" onPress={() => void saveHere("sports")} />
-              </View>
-            )
+          ) : null}
+          {!nearest?.inside && kind === "workout" ? (
+            <View style={s.row}>
+              <Button label="THIS IS MY GYM" variant="tonal" onPress={() => void saveHere("gym")} />
+              <Button label="THIS IS MY GROUND" variant="tonal" onPress={() => void saveHere("sports")} />
+            </View>
           ) : null}
           {note ? <Text style={[type.meta, { color: colors.warn }]}>{note}</Text> : null}
           {error ? <Text style={[type.meta, { color: colors.destructive }]}>{error}</Text> : null}
@@ -241,10 +307,64 @@ export default function LiveSessionScreen() {
         </View>
       ) : null}
 
+      {phase === "quiz" && quiz ? (
+        <View style={s.block}>
+          <SystemWindow title="PROVE IT">
+            <Text style={[type.body, { color: colors.foreground }]}>
+              {quiz.source === "explain"
+                ? "THE SYSTEM has no questions on this topic. Explain it in your own words."
+                : `Answer ${quiz.questions.length} questions on what you studied.`}
+            </Text>
+          </SystemWindow>
+          {quiz.questions.map((q, i) => (
+            <View key={q.id} style={s.question}>
+              <Text style={[type.bodyStrong, { color: colors.foreground }]}>{`${i + 1}. ${q.prompt}`}</Text>
+              {q.kind === "mcq" && q.options ? (
+                q.options.map((opt, oi) => {
+                  const chosen = answers[i] === oi;
+                  return (
+                    <Pressable
+                      key={oi}
+                      onPress={() => setAnswers((a) => a.map((x, xi) => (xi === i ? oi : x)))}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: chosen }}
+                      style={[s.option, { borderColor: chosen ? colors.primary : colors.border, backgroundColor: chosen ? colors.muted : colors.card }]}
+                    >
+                      <Text style={[type.body, { color: colors.foreground }]}>{opt}</Text>
+                    </Pressable>
+                  );
+                })
+              ) : (
+                <TextInput
+                  value={typeof answers[i] === "string" ? (answers[i] as string) : ""}
+                  onChangeText={(t) => setAnswers((a) => a.map((x, xi) => (xi === i ? t : x)))}
+                  multiline
+                  placeholder="Your answer"
+                  placeholderTextColor={colors.subtle}
+                  style={[s.input, s.multi, type.body, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
+                />
+              )}
+            </View>
+          ))}
+          {error ? <Text style={[type.meta, { color: colors.destructive }]}>{error}</Text> : null}
+          <Button label="SUBMIT ANSWERS" onPress={() => void sendQuiz()} disabled={answers.some((a) => a === null || a === "")} block />
+        </View>
+      ) : null}
+
       {phase === "result" && result ? (
         <View style={s.block}>
-          <SystemWindow title={result.proof.status === "accepted" ? (result.completed ? "QUEST COMPLETE" : "SESSION COUNTED") : "NOT PROVEN"}>
-            <Text style={[type.title, { color: result.proof.status === "accepted" ? colors.foreground : colors.destructive }]}>
+          <SystemWindow
+            title={
+              result.proof.status === "accepted"
+                ? result.completed
+                  ? "QUEST COMPLETE"
+                  : "SESSION COUNTED"
+                : result.proof.status === "awaiting_review"
+                  ? "PENDING REVIEW"
+                  : "NOT PROVEN"
+            }
+          >
+            <Text style={[type.title, { color: result.proof.status === "rejected" ? colors.destructive : colors.foreground }]}>
               {result.proof.reason}
             </Text>
             {result.progress ? (
@@ -252,12 +372,16 @@ export default function LiveSessionScreen() {
             ) : null}
             <Text style={[type.meta, { color: colors.mutedForeground }]}>{`Proof: ${result.proof.evidence.join(" · ")}`}</Text>
           </SystemWindow>
-          {result.proof.status !== "accepted" ? (
+          {result.proof.status === "awaiting_review" ? (
+            <Button label="CHECK AGAIN" variant="tonal" onPress={() => void checkAgain()} block />
+          ) : null}
+          {result.proof.status === "rejected" ? (
             <Button
               label="TRY AGAIN"
               onPress={() => {
                 setResult(null);
                 setSession(null);
+                setQuiz(null);
                 setPhase("ready");
               }}
               block
@@ -297,4 +421,8 @@ const s = StyleSheet.create({
   stats: { flexDirection: "row", justifyContent: "space-around" },
   stat: { alignItems: "center", gap: space.xs },
   row: { flexDirection: "row", gap: space.sm, flexWrap: "wrap" },
+  input: { borderWidth: 1, borderRadius: 4, paddingHorizontal: space.md, paddingVertical: space.sm, minHeight: 48 },
+  multi: { minHeight: 120, textAlignVertical: "top" },
+  question: { gap: space.sm },
+  option: { borderWidth: 1, borderRadius: 4, padding: space.md },
 });

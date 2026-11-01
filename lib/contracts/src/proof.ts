@@ -42,13 +42,16 @@ export const SessionSummarySchema = z.object({
   mocked: z.boolean(),
   /** Session centre rounded to ~100 m (engine coarse), for learning places. Absent without location permission. */
   coarse: z.object({ lat: z.number(), lng: z.number() }).nullable().optional(),
+  /** What was studied (study sessions only): the quiz is on this topic. */
+  topic: z.string().trim().min(2).max(120).optional(),
 });
 export type SessionSummaryDto = z.infer<typeof SessionSummarySchema>;
 
 /** POST /api/quests/:id/session: submit a live session as proof for a quest. */
 export const SessionProofRequestSchema = z.object({ clientId: ClientIdSchema.optional(), summary: SessionSummarySchema });
 
-export const ProofStatusSchema = z.enum(["accepted", "rejected", "awaiting_review"]);
+/** awaiting_quiz: a study session waiting for its quiz answers. awaiting_review: an answer the AI will grade later. */
+export const ProofStatusSchema = z.enum(["accepted", "rejected", "awaiting_quiz", "awaiting_review"]);
 export const ProofSchema = z.object({
   id: z.string(),
   questId: z.string(),
@@ -65,6 +68,21 @@ export type ProofDto = z.infer<typeof ProofSchema>;
  * (`completed` true, `results` and `notices` as POST /quests/:id/complete). For weekly/arc quests `progress` counts
  * accepted sessions so far against the sessions needed.
  */
+export const QuizQuestionSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["mcq", "short"]),
+  prompt: z.string(),
+  options: z.array(z.string()).optional(),
+});
+/** A study session's quiz (never the answers). Answer it with POST /api/proofs/:proofId/quiz before `expiresAt`. */
+export const QuizSchema = z.object({
+  proofId: z.string(),
+  source: z.enum(["ai", "bank", "explain"]),
+  questions: z.array(QuizQuestionSchema),
+  expiresAt: z.string(),
+});
+export type QuizDto = z.infer<typeof QuizSchema>;
+
 export const SessionProofResponseSchema = z.object({
   proof: ProofSchema,
   quest: QuestSchema,
@@ -72,4 +90,12 @@ export const SessionProofResponseSchema = z.object({
   progress: z.object({ done: z.number().int(), needed: z.number().int() }).nullable(),
   results: z.array(ScoreResultSchema),
   notices: z.array(NoticeSchema),
+  /** Study sessions that lasted long enough: the quiz to answer next (proof status awaiting_quiz). */
+  quiz: QuizSchema.nullable().optional(),
+});
+
+/** POST /api/proofs/:id/quiz: one answer per question, in order (an option index for MCQ, text for short). */
+export const QuizAnswerRequestSchema = z.object({
+  clientId: ClientIdSchema.optional(),
+  answers: z.array(z.union([z.number().int().min(0).max(9), z.string().max(2000)])).min(1).max(10),
 });

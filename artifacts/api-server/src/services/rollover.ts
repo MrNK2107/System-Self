@@ -43,7 +43,7 @@ import { logger } from "../lib/logger";
 import { resolveDueForUser } from "./challenges";
 import { evaluateFinanceWeek, postRecurringIncome } from "./finance";
 import { evaluatePeerRatingsWeek } from "./peer-ratings";
-import { abandonChain, countsForRank } from "./quests";
+import { abandonChain, countsForRank, hasPendingReview } from "./quests";
 import { expireAssignments, rivalRollover } from "./rivals";
 import { applyChanges, insertNotice, toShadowState, type ScoreChange } from "./scoring";
 import { notSystemLog } from "./system-logs";
@@ -166,6 +166,8 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   const failNotices: NoticePayload<"quest_failed">[] = [];
   const shamed: string[] = [];
   for (const q of expired) {
+    // An answer the AI will grade later keeps its quest open for up to a day (spec 8.5.4).
+    if (await hasPendingReview(tx, q.id, now)) continue;
     const [failed] = await tx
       .update(quests)
       .set({ status: "failed", resolvedAt: q.expiresAt, resolvedLocalDate: date })

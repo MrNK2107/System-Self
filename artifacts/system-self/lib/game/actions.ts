@@ -200,6 +200,28 @@ export function submitSessionProof(api: ApiClient, outbox: Guard, questId: strin
   );
 }
 
+/** Answers to a study session's quiz; the server grades them and completes the quest when proven. */
+export function submitQuizAnswers(api: ApiClient, outbox: Guard, proofId: string, answers: (number | string)[], clientId: string) {
+  return afterOutbox(outbox, () =>
+    api.request("POST", `/api/proofs/${encodeURIComponent(proofId)}/quiz`, {
+      body: { clientId, answers },
+      idempotencyKey: clientId,
+      schema: SessionProofResponseSchema,
+    }),
+  );
+}
+
+/** Asks the server to grade an answer that was waiting for the AI. */
+export function reviewProof(api: ApiClient, outbox: Guard, proofId: string, clientId: string) {
+  return afterOutbox(outbox, () =>
+    api.request("POST", `/api/proofs/${encodeURIComponent(proofId)}/review`, {
+      body: {},
+      idempotencyKey: clientId,
+      schema: SessionProofResponseSchema,
+    }),
+  );
+}
+
 /** The reason is required (1-200 characters after trim); a blank one throws before anything is sent. */
 export async function refuseQuest(api: ApiClient, outbox: Guard, questId: string, reason: string, clientId: string) {
   const trimmed = normalizeReason(reason);

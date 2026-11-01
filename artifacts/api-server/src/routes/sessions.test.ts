@@ -198,3 +198,93 @@ test("parseOverpass maps gyms, grounds and libraries, skipping elements without 
   );
   assert.deepEqual(parseOverpass(null), []);
 });
+
+/** A study summary of `minutes` ending now, on `topic`. */
+const study = (minutes: number, topic: string) => ({
+  kind: "study",
+  startedAt: new Date(Date.now() - minutes * 60_000).toISOString(),
+  endedAt: new Date().toISOString(),
+  activeMinutes: 0,
+  steps: 0,
+  placeId: null,
+  placeShare: 0,
+  mocked: false,
+  topic,
+});
+
+test("study: a long-enough session gets a bank quiz (AI off); 3 of 5 right completes the quest", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const q = await mkQuest(id, "Study physics for 45 minutes", { domain: "MIND" });
+  await mkQuest(id, "Call one person", { domain: "SOCIAL" }); // keeps the day from being clean
+  const res = await request(a).post(`/api/quests/${q.id}/session`).set(auth(token)).send({ summary: study(50, "Thermodynamics and entropy") });
+  assert.equal(res.status, 200);
+  assertContract(SessionProofResponseSchema, res.body);
+  assert.equal(res.body.proof.status, "awaiting_quiz");
+  assert.equal(res.body.completed, false);
+  assert.equal(res.body.quiz.source, "bank");
+  assert.equal(res.body.quiz.questions.length, 5);
+  assert.ok(res.body.quiz.questions.every((x: { options?: string[] }) => x.options && !("answerIndex" in x)), "no answers sent");
+  // Read the key from the stored proof and answer 3 right, 2 wrong.
+  const [stored] = await db!.select().from(questProofs).where(eq(questProofs.id, res.body.quiz.proofId));
+  const keys = (stored!.summary as { quiz: { keys: { answerIndex: number }[] } }).quiz.keys;
+  const answers = keys.map((k, i) => (i < 3 ? k.answerIndex : (k.answerIndex + 1) % 4));
+  const graded = await request(a).post(`/api/proofs/${res.body.quiz.proofId}/quiz`).set(auth(token)).send({ answers });
+  assert.equal(graded.status, 200);
+  assertContract(SessionProofResponseSchema, graded.body);
+  assert.equal(graded.body.proof.status, "accepted");
+  assert.equal(graded.body.completed, true);
+  assert.deepEqual(graded.body.proof.evidence, ["50 min on Thermodynamics and entropy", "quiz 3/5"]);
+  assert.ok((await score(id, "MIND")).score > 24);
+  const again = await request(a).post(`/api/proofs/${res.body.quiz.proofId}/quiz`).set(auth(token)).send({ answers });
+  assert.equal(again.status, 409);
+  assert.equal(again.body.code, "quiz_closed");
+});
+
+test("study: 2 of 5 right is rejected and the quest stays open; too short a session gets no quiz", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const q = await mkQuest(id, "Study physics for 45 minutes", { domain: "MIND" });
+  const short = await request(a).post(`/api/quests/${q.id}/session`).set(auth(token)).send({ summary: study(20, "Optics") });
+  assert.equal(short.body.proof.status, "rejected");
+  assert.match(short.body.proof.reason, /20 of 45 minutes/);
+  assert.equal(short.body.quiz, null);
+  const res = await request(a).post(`/api/quests/${q.id}/session`).set(auth(token)).send({ summary: study(46, "Newton's laws of motion") });
+  const [stored] = await db!.select().from(questProofs).where(eq(questProofs.id, res.body.quiz.proofId));
+  const keys = (stored!.summary as { quiz: { keys: { answerIndex: number }[] } }).quiz.keys;
+  const answers = keys.map((k, i) => (i < 2 ? k.answerIndex : (k.answerIndex + 1) % 4));
+  const graded = await request(a).post(`/api/proofs/${res.body.quiz.proofId}/quiz`).set(auth(token)).send({ answers });
+  assert.equal(graded.body.proof.status, "rejected");
+  assert.match(graded.body.proof.reason, /2 of 5 correct/);
+  const [row] = await db!.select().from(quests).where(eq(quests.id, q.id));
+  assert.equal(row!.status, "active");
+});
+
+test("study: a topic outside the bank asks for an explanation; with the AI down it waits for review", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const q = await mkQuest(id, "Study for 45 minutes", { domain: "MIND" });
+  const res = await request(a).post(`/api/quests/${q.id}/session`).set(auth(token)).send({ summary: study(50, "Carnatic music ragas") });
+  assert.equal(res.body.quiz.source, "explain");
+  assert.equal(res.body.quiz.questions.length, 1);
+  const graded = await request(a)
+    .post(`/api/proofs/${res.body.quiz.proofId}/quiz`)
+    .set(auth(token))
+    .send({ answers: ["A raga is a melodic framework with set ascending and descending notes. Melakarta ragas are the 72 parent scales."] });
+  assert.equal(graded.body.proof.status, "awaiting_review");
+  assert.equal(graded.body.completed, false);
+  const review = await request(a).post(`/api/proofs/${res.body.quiz.proofId}/review`).set(auth(token)).send({});
+  assert.equal(review.status, 200);
+  assert.equal(review.body.proof.status, "awaiting_review", "still waiting while the AI is down");
+});
+
+test("study: a workout session can't prove a study quest, and a tap can't either", { skip }, async () => {
+  const a = app();
+  const { token, id } = await setup(a);
+  const q = await mkQuest(id, "Study physics for 45 minutes", { domain: "MIND" });
+  const wrong = await request(a).post(`/api/quests/${q.id}/session`).set(auth(token)).send({ summary: summary({ activeMinutes: 60 }) });
+  assert.equal(wrong.status, 409);
+  const tap = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
+  assert.equal(tap.status, 409);
+  assert.equal(tap.body.code, "proof_required");
+});

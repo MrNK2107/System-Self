@@ -26,6 +26,8 @@ import { useOnline } from "@/lib/api/query";
 import {
   completeQuest as completeQuestRequest,
   submitSessionProof as submitSessionProofRequest,
+  submitQuizAnswers as submitQuizRequest,
+  reviewProof as reviewProofRequest,
   discardFailedEntries,
   enqueueLog,
   generateQuests as generateQuestsRequest,
@@ -140,6 +142,10 @@ interface AppContextType {
   completeQuest: (questId: string) => Promise<GameMutationResult>;
   /** Sends a finished live session as proof; the server judges it and completes the quest when proven. */
   submitSession: (questId: string, summary: SessionSummaryDto) => Promise<GameMutationResult<SessionProofResult>>;
+  /** Answers a study quiz; completes the quest when proven. */
+  submitQuiz: (proofId: string, answers: (number | string)[]) => Promise<GameMutationResult<SessionProofResult>>;
+  /** Re-tries grading an answer that was waiting for the AI. */
+  reviewProof: (proofId: string) => Promise<GameMutationResult<SessionProofResult>>;
   refuseQuest: (questId: string, reason: string) => Promise<GameMutationResult<RefuseOutcome>>;
   /** Lock the Slot for an active quest; null clears it. */
   setQuestSlot: (questId: string, slot: { slotStart: string; slotEnd: string } | null) => Promise<GameMutationResult>;
@@ -308,6 +314,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     },
     [runGuarded, echo],
   );
+  const submitQuiz = useCallback(
+    async (proofId: string, answers: (number | string)[]) => {
+      const r = await runGuarded("quest-quiz", (id) => submitQuizRequest(api, getOutbox(), proofId, answers, id), { activity: true });
+      if (r.ok && r.value.completed) echo({ title: "QUEST COMPLETE", line: appliedLine(r.value.results) });
+      return r;
+    },
+    [runGuarded, echo],
+  );
+  const reviewProof = useCallback(
+    async (proofId: string) => {
+      const r = await runGuarded("quest-review", (id) => reviewProofRequest(api, getOutbox(), proofId, id), { activity: true });
+      if (r.ok && r.value.completed) echo({ title: "QUEST COMPLETE", line: appliedLine(r.value.results) });
+      return r;
+    },
+    [runGuarded, echo],
+  );
   const refuseQuest = useCallback(
     (questId: string, reason: string) =>
       runGuarded("quest-refuse", async (id) => {
@@ -408,6 +430,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addLog,
       completeQuest,
       submitSession,
+      submitQuiz,
+      reviewProof,
       refuseQuest,
       setQuestSlot,
       setQuestShame,
@@ -427,7 +451,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
       state, stateQ.isError, stateQ.error, questsQ.data, questsQ.dataUpdatedAt, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
-      getShadowPhase, addLog, completeQuest, submitSession, refuseQuest, setQuestSlot, setQuestShame, requestBonusQuest, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
+      getShadowPhase, addLog, completeQuest, submitSession, submitQuiz, reviewProof, refuseQuest, setQuestSlot, setQuestShame, requestBonusQuest, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
       pendingCount, outboxSnap.failed.length, retryFailed, discardFailed,
     ],
   );

@@ -94,7 +94,7 @@ const noticesOf = (userId: string, kind: string) =>
 
 async function dailyQuest(userId: string, expiresAt: Date, extra: { chainId?: string; chainStep?: number } = {}) {
   const [q] = await createQuests(db!, userId, [
-    { type: "daily", title: "Daily", description: "d", domain: "MIND", expiresAt, ...extra },
+    { type: "daily", title: "Daily", description: "d", domain: "SOCIAL", expiresAt, ...extra },
   ]);
   return q!;
 }

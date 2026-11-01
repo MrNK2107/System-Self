@@ -3,6 +3,7 @@ export * from "./dates";
 export * from "./scoring";
 export * from "./quest-spec";
 export * from "./proof";
+export * from "./quiz";
 export * from "./logs";
 export * from "./rank";
 export * from "./shadow";
