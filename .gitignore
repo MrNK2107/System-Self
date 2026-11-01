@@ -57,3 +57,9 @@ scripts/load/results/
 
 # Docker smoke (scripts/docker-smoke.sh): generated per run
 .env.smoke
+
+# Private JWT secret for start-dev.ps1 -Share
+.share-jwt-secret
+
+# Impeccable hook cache (machine-local)
+.impeccable/hook.cache.json
