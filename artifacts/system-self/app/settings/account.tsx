@@ -113,7 +113,7 @@ export default function AccountScreen() {
     setDeleteError(null);
     try {
       await deleteAccount(deletePw);
-      router.replace("/auth/sign-in");
+      router.replace("/auth/welcome");
     } catch (e) {
       setDeleteError(describeSettingsError(e, "delete").message);
       setDeleteBusy(false);

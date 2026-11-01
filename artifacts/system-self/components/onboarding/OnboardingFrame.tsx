@@ -36,7 +36,7 @@ export function OnboardingFrame({ step, onBack, title, subtitle, children, actio
   return (
     <KeyboardAvoidingView
       style={[s.root, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={{ paddingTop: insets.top, backgroundColor: colors.background }}>
         <View style={s.barRow}>

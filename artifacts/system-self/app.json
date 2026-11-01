@@ -113,6 +113,11 @@
         "projectId": "e0170ebf-bfdf-408e-ac5c-969954148db9"
       }
     },
-    "owner": "nanda2107"
+    "owner": "nanda2107",
+    "backgroundColor": "#07060B",
+    "androidNavigationBar": {
+      "backgroundColor": "#07060B",
+      "barStyle": "light-content"
+    }
   }
 }

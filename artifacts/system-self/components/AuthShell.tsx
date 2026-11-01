@@ -28,7 +28,7 @@ export function AuthShell({ tag, title, subtitle, back, children }: AuthShellPro
   return (
     <KeyboardAvoidingView
       style={[s.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={{ paddingTop: insets.top, backgroundColor: colors.background }}>
         <View style={s.bar}>

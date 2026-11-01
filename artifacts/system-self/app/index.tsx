@@ -28,7 +28,7 @@ export default function Index() {
   );
 
   if (status === "loading") return splash;
-  if (status === "signed_out") return <Redirect href="/auth/sign-in" />;
+  if (status === "signed_out") return <Redirect href="/auth/welcome" />;
 
   if (onboarding.data === "not_onboarded") return <Redirect href="/onboarding" />;
   if (onboarding.data === "onboarded") return <Redirect href="/(tabs)" />;
