@@ -3,8 +3,15 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { closeTestDb, resetDb } from "@workspace/db/testing";
-import { places, questProofs, quests, sessionSpots } from "@workspace/db";
-import { PlacesNearbyResponseSchema, SavePlaceResponseSchema, SessionProofResponseSchema } from "@workspace/contracts";
+import { follows, places, profiles, questProofs, quests, sessionSpots } from "@workspace/db";
+import {
+  IncomingVouchListSchema,
+  PlacesNearbyResponseSchema,
+  SavePlaceResponseSchema,
+  SessionProofResponseSchema,
+  VouchCreateResponseSchema,
+  VouchRespondResponseSchema,
+} from "@workspace/contracts";
 import { createQuests } from "../services/quests";
 import { parseOverpass } from "../services/places";
 import { app, auth, db, score, setup, skip, assertContract, assertStoredNoticesMatchContract } from "./game-test-helpers";
@@ -287,4 +294,93 @@ test("study: a workout session can't prove a study quest, and a tap can't either
   const tap = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
   assert.equal(tap.status, 409);
   assert.equal(tap.body.code, "proof_required");
+});
+
+/** Two players who follow each other, each onboarded, A with an open SOCIAL quest. */
+async function friends(a: ReturnType<typeof app>) {
+  const alice = await setup(a, { email: "alice@example.com", username: "alice_1" });
+  const bob = await setup(a, { email: "bob@example.com", username: "bob_1" });
+  await db!.insert(follows).values([
+    { followerId: alice.id, followeeId: bob.id },
+    { followerId: bob.id, followeeId: alice.id },
+  ]);
+  const [bobProfile] = await db!.select().from(profiles).where(eq(profiles.userId, bob.id));
+  return { alice, bob, bobHandle: bobProfile!.publicCodename };
+}
+
+/** Gives `userId` a direct (session) proof today. */
+async function proveDirectly(a: ReturnType<typeof app>, token: string, userId: string) {
+  const q = await mkQuest(userId, "Train for 30 minutes");
+  const r = await request(a).post(`/api/quests/${q.id}/session`).set(auth(token)).send({ summary: summary({ activeMinutes: 35 }) });
+  assert.equal(r.body.proof.status, "accepted");
+}
+
+test("vouch: a proven friend confirms and the quest completes; the request shows up for them first", { skip }, async () => {
+  const a = app();
+  const { alice, bob, bobHandle } = await friends(a);
+  const q = await mkQuest(alice.id, "Meet one friend", { domain: "SOCIAL" });
+  await mkQuest(alice.id, "Call one person", { domain: "SOCIAL" }); // keeps the day from being clean
+  const ask = await request(a).post(`/api/quests/${q.id}/vouch`).set(auth(alice.token)).send({ handle: bobHandle, note: "Football 6-8 pm" });
+  assert.equal(ask.status, 201);
+  assertContract(VouchCreateResponseSchema, ask.body);
+  const inbox = await request(a).get("/api/vouches/incoming").set(auth(bob.token));
+  assertContract(IncomingVouchListSchema, inbox.body);
+  assert.equal(inbox.body.items.length, 1);
+  assert.equal(inbox.body.items[0].note, "Football 6-8 pm");
+  // Bob has not proven anything today: he can't vouch yet.
+  const early = await request(a).post(`/api/vouches/${ask.body.request.id}/respond`).set(auth(bob.token)).send({ confirm: true });
+  assert.equal(early.status, 409);
+  assert.equal(early.body.code, "voucher_unproven");
+  await proveDirectly(a, bob.token, bob.id);
+  const ok = await request(a).post(`/api/vouches/${ask.body.request.id}/respond`).set(auth(bob.token)).send({ confirm: true });
+  assert.equal(ok.status, 200);
+  assertContract(VouchRespondResponseSchema, ok.body);
+  assert.deepEqual(ok.body, { status: "confirmed", completed: true });
+  const [row] = await db!.select().from(quests).where(eq(quests.id, q.id));
+  assert.equal(row!.status, "complete");
+  const proofs = await db!.select().from(questProofs).where(eq(questProofs.questId, q.id));
+  assert.equal(proofs[0]!.method, "vouch");
+});
+
+test("vouch: strangers can't be asked; the same friend can't be asked twice; denying closes it", { skip }, async () => {
+  const a = app();
+  const { alice, bob, bobHandle } = await friends(a);
+  const stranger = await setup(a, { email: "s@example.com", username: "stranger_1" });
+  const [sp] = await db!.select().from(profiles).where(eq(profiles.userId, stranger.id));
+  const q = await mkQuest(alice.id, "Meet one friend", { domain: "SOCIAL" });
+  const no = await request(a).post(`/api/quests/${q.id}/vouch`).set(auth(alice.token)).send({ handle: sp!.publicCodename, note: "hi" });
+  assert.equal(no.status, 409);
+  assert.equal(no.body.code, "not_close");
+  const ask = await request(a).post(`/api/quests/${q.id}/vouch`).set(auth(alice.token)).send({ handle: bobHandle, note: "Lunch" });
+  const dup = await request(a).post(`/api/quests/${q.id}/vouch`).set(auth(alice.token)).send({ handle: bobHandle, note: "Lunch" });
+  assert.equal(dup.body.code, "already_asked");
+  const deny = await request(a).post(`/api/vouches/${ask.body.request.id}/respond`).set(auth(bob.token)).send({ confirm: false });
+  assert.deepEqual(deny.body, { status: "denied", completed: false });
+  const again = await request(a).post(`/api/vouches/${ask.body.request.id}/respond`).set(auth(bob.token)).send({ confirm: true });
+  assert.equal(again.body.code, "closed");
+  const alicesView = await request(a).post(`/api/vouches/${ask.body.request.id}/respond`).set(auth(alice.token)).send({ confirm: true });
+  assert.equal(alicesView.status, 404, "only the voucher can answer");
+});
+
+test("vouch: a voucher proven only by a vouch from a directly proven friend still counts (chain)", { skip }, async () => {
+  const a = app();
+  const { alice, bob, bobHandle } = await friends(a);
+  const carol = await setup(a, { email: "carol@example.com", username: "carol_1" });
+  await db!.insert(follows).values([
+    { followerId: carol.id, followeeId: alice.id },
+    { followerId: alice.id, followeeId: carol.id },
+  ]);
+  const [cp] = await db!.select().from(profiles).where(eq(profiles.userId, carol.id));
+  // Bob proves directly, then vouches for Alice; Alice then vouches for Carol.
+  await proveDirectly(a, bob.token, bob.id);
+  const qa = await mkQuest(alice.id, "Meet one friend", { domain: "SOCIAL" });
+  const askA = await request(a).post(`/api/quests/${qa.id}/vouch`).set(auth(alice.token)).send({ handle: bobHandle, note: "Met" });
+  assert.equal((await request(a).post(`/api/vouches/${askA.body.request.id}/respond`).set(auth(bob.token)).send({ confirm: true })).status, 200);
+  const [ap] = await db!.select().from(profiles).where(eq(profiles.userId, alice.id));
+  const qc = await mkQuest(carol.id, "Meet one friend", { domain: "SOCIAL" });
+  const askC = await request(a).post(`/api/quests/${qc.id}/vouch`).set(auth(carol.token)).send({ handle: ap!.publicCodename, note: "Met" });
+  const r = await request(a).post(`/api/vouches/${askC.body.request.id}/respond`).set(auth(alice.token)).send({ confirm: true });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.completed, true);
+  void cp;
 });

@@ -80,3 +80,31 @@ export const questProofs = pgTable(
     uniqueIndex("quest_proofs_user_client_idx").on(t.userId, t.clientId).where(sql`${t.clientId} is not null`),
   ],
 );
+
+/**
+ * A request for a friend, clan member or duo partner to vouch for a quest (spec 8.6). Confirmed requests create a
+ * quest proof with method "vouch"; pending ones lapse after a day.
+ */
+export const vouchRequests = pgTable(
+  "vouch_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    questId: uuid("quest_id")
+      .notNull()
+      .references(() => quests.id, { onDelete: "cascade" }),
+    requesterId: uuid("requester_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    voucherId: uuid("voucher_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    note: text("note").notNull(),
+    status: text("status").notNull().default("pending"), // pending | confirmed | denied
+    createdAt: ts("created_at").defaultNow().notNull(),
+    respondedAt: ts("responded_at"),
+  },
+  (t) => [
+    index("vouch_requests_voucher_status_idx").on(t.voucherId, t.status),
+    index("vouch_requests_requester_idx").on(t.requesterId, t.createdAt),
+  ],
+);

@@ -309,6 +309,13 @@
       "when": 1793516384919,
       "tag": "0043_proof_places",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793520946380,
+      "tag": "0044_vouch_requests",
+      "breakpoints": true
     }
   ]
 }

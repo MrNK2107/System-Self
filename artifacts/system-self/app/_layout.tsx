@@ -68,6 +68,7 @@ function RootLayoutNav() {
         <Stack.Screen name="floor/[routineId]" />
         <Stack.Screen name="dungeon/briefing" />
         <Stack.Screen name="session/[questId]" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="vouch/[questId]" />
         <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
       </Stack>
       <NotificationPrompt />

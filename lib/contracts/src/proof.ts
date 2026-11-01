@@ -99,3 +99,28 @@ export const QuizAnswerRequestSchema = z.object({
   clientId: ClientIdSchema.optional(),
   answers: z.array(z.union([z.number().int().min(0).max(9), z.string().max(2000)])).min(1).max(10),
 });
+
+/** POST /api/quests/:id/vouch: ask a clan member, duo partner or mutual follow (by handle) to vouch for this quest. */
+export const VouchCreateRequestSchema = z.object({
+  handle: z.string().trim().min(1).max(40),
+  note: z.string().trim().min(1).max(140),
+});
+export const VouchCreateResponseSchema = z.object({
+  request: z.object({ id: z.string(), status: z.literal("pending"), createdAt: z.string(), expiresAt: z.string() }),
+});
+
+/** GET /api/vouches/incoming: requests waiting for me. `from` is the requester's public codename. */
+export const IncomingVouchSchema = z.object({
+  id: z.string(),
+  from: z.string(),
+  questTitle: z.string(),
+  note: z.string(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+});
+export type IncomingVouch = z.infer<typeof IncomingVouchSchema>;
+export const IncomingVouchListSchema = z.object({ items: z.array(IncomingVouchSchema) });
+
+/** POST /api/vouches/:id/respond. Confirming needs your own quest proven today (spec 8.6). */
+export const VouchRespondRequestSchema = z.object({ confirm: z.boolean() });
+export const VouchRespondResponseSchema = z.object({ status: z.enum(["confirmed", "denied"]), completed: z.boolean() });

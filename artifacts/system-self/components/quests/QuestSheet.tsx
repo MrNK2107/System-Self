@@ -108,6 +108,17 @@ export function QuestSheet({
             ) : (
               <Button label="Mark complete" onPress={complete} loading={busy} block />
             )}
+            {!quest.bonus ? (
+              <Button
+                label="Ask a friend to vouch"
+                variant="text"
+                onPress={() => {
+                  onClose();
+                  router.push({ pathname: "/vouch/[questId]", params: { questId: quest.id } });
+                }}
+                block
+              />
+            ) : null}
             {canRefuse ? (
               <Button
                 label="Refuse quest"

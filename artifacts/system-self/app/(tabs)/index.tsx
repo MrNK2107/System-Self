@@ -17,6 +17,7 @@ import { FloorQuestCard } from "@/components/FloorQuestCard";
 import { ComebackCard } from "@/components/ComebackCard";
 import { DuoCard } from "@/components/DuoCard";
 import { NextQuestCard, type QuestAction } from "@/components/today/NextQuestCard";
+import { VouchInbox } from "@/components/today/VouchInbox";
 import { ShadowAlert } from "@/components/today/ShadowAlert";
 import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
@@ -246,6 +247,7 @@ export default function Today() {
       </SystemWindow>
 
       <View style={s.section}>
+        <VouchInbox />
         {card ?? (
           <View style={[s.empty, { borderColor: colors.border, backgroundColor: colors.card }]}>
             <Text style={[type.body, { color: colors.foreground }]}>

@@ -95,6 +95,8 @@ export const EXPORT_TABLES: Record<string, Loader> = {
   quest_proofs: owned(s.questProofs, s.questProofs.userId),
   places: owned(s.places, s.places.userId),
   session_spots: owned(s.sessionSpots, s.sessionSpots.userId),
+  // Vouch requests I sent (the voucher is not named: another player's id never leaves).
+  vouch_requests: picked(s.vouchRequests, s.vouchRequests.requesterId, ["questId", "note", "status", "createdAt", "respondedAt"]),
   shadow_selves: owned(s.shadowSelves, s.shadowSelves.userId),
   achievements: owned(s.achievements, s.achievements.userId),
   milestones: owned(s.milestones, s.milestones.userId),

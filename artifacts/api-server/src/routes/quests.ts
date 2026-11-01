@@ -1,12 +1,28 @@
 import { Router, type IRouter } from "express";
-import { and, asc, count, desc, eq, gt, gte, ne } from "drizzle-orm";
-import { generatedQuestBatches, generatedQuests, questChains, questProofs, quests, shadowTakeovers, users, type Db } from "@workspace/db";
+import { and, asc, count, desc, eq, gt, gte, inArray, ne, or } from "drizzle-orm";
+import {
+  follows,
+  generatedQuestBatches,
+  generatedQuests,
+  profiles,
+  questChains,
+  questProofs,
+  quests,
+  shadowTakeovers,
+  users,
+  vouchRequests,
+  type Db,
+} from "@workspace/db";
 import {
   RANKED_DOMAINS,
   addDays,
   cleanDayChange,
   QUIZ_LENGTH,
+  VOUCH_CHAIN_MAX_DEPTH,
+  VOUCH_REQUEST_TTL_MS,
   needsSessionProof,
+  vouchAllowed,
+  type DayProof,
   questCompletionChanges,
   studyMinutesRequired,
   verifyStudy,
@@ -30,6 +46,8 @@ import {
   QuestShameRequestSchema,
   QuestSlotRequestSchema,
   QuizAnswerRequestSchema,
+  VouchCreateRequestSchema,
+  VouchRespondRequestSchema,
   SessionProofRequestSchema,
   type SessionSummaryDto,
 } from "@workspace/contracts";
@@ -40,6 +58,8 @@ import { rollOverBeforeToday } from "../services/rollover";
 import { proRequiredUnlessPro } from "../services/entitlements";
 import { templateBonusQuest } from "../lib/ai-fallback";
 import { membershipOf } from "../services/clans";
+import { duoOf } from "../services/duo";
+import { isBlockedEitherWay, resolveHandle } from "../services/social";
 import { placeForUser, recordSpotAndLearn } from "../services/places";
 import { buildQuiz, gradeQuiz, type QuizAnswer } from "../services/quiz";
 import { abandonChain, activeBoard, createQuests, hasActiveChain, isCleanDay, slotStateOf, toQuestDto } from "../services/quests";
@@ -649,6 +669,204 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
       }
       const answers = ((proof.summary as { answers?: QuizAnswer[] }).answers ?? []) as QuizAnswer[];
       return judgeStudyQuiz(tx, userId, proof, answers, now);
+    });
+  });
+
+  /** Today's accepted proofs for a vouch chain: the voucher, then whoever vouched for them, up to the depth limit. */
+  async function dayProofsFrom(tx: Tx, rootId: string, now: Date): Promise<Map<string, DayProof[]>> {
+    const since = new Date(now.getTime() - 24 * 3600_000);
+    const out = new Map<string, DayProof[]>();
+    let frontier = [rootId];
+    for (let depth = 0; depth < VOUCH_CHAIN_MAX_DEPTH && frontier.length > 0; depth++) {
+      const rows = await tx
+        .select({ userId: questProofs.userId, method: questProofs.method, summary: questProofs.summary })
+        .from(questProofs)
+        .where(and(inArray(questProofs.userId, frontier), eq(questProofs.status, "accepted"), gt(questProofs.createdAt, since)));
+      const next: string[] = [];
+      for (const id of frontier) if (!out.has(id)) out.set(id, []);
+      for (const r of rows) {
+        const voucherId = r.method === "vouch" ? (r.summary as { voucherId?: string }).voucherId : undefined;
+        const p: DayProof = voucherId ? { direct: false, voucherId } : { direct: true };
+        out.get(r.userId)!.push(p);
+        if (voucherId && !out.has(voucherId)) next.push(voucherId);
+      }
+      frontier = [...new Set(next)];
+    }
+    return out;
+  }
+
+  /** True when the two players are in the same clan, a duo together, or follow each other. */
+  async function closeEnoughToVouch(tx: Tx, a: string, b: string): Promise<boolean> {
+    const [ma, mb] = [await membershipOf(tx, a), await membershipOf(tx, b)];
+    if (ma && mb && ma.clanId === mb.clanId) return true;
+    if ((await duoOf(tx, a))?.partnerId === b) return true;
+    const mutual = await tx
+      .select({ f: follows.followerId })
+      .from(follows)
+      .where(or(and(eq(follows.followerId, a), eq(follows.followeeId, b)), and(eq(follows.followerId, b), eq(follows.followeeId, a))));
+    return mutual.length === 2;
+  }
+
+  /** Ask a friend to vouch (spec 8.6): a clan member, duo partner or mutual follow, at most 3 open asks per quest. */
+  router.post("/quests/:id/vouch", async (req, res) => {
+    const questId = String(req.params.id);
+    const userId = req.user!.id;
+    const body = VouchCreateRequestSchema.safeParse(req.body ?? {});
+    if (!UUID.test(questId) || !body.success) {
+      res.status(400).json({ error: "A handle and a short note are required", code: "invalid_vouch" });
+      return;
+    }
+    await withIdempotency(db, req, res, `POST /quests/${questId}/vouch`, async (tx) => {
+      const now = clock();
+      const [quest] = await tx
+        .select()
+        .from(quests)
+        .where(and(eq(quests.id, questId), eq(quests.userId, userId)))
+        .limit(1);
+      if (!quest) return { status: 404, body: { error: "Quest not found" } };
+      if (quest.status !== "active" || quest.expiresAt.getTime() <= now.getTime() || quest.bonus) {
+        return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+      }
+      const player = await resolveHandle(tx, userId, body.data.handle);
+      if (!player || player.self) return { status: 404, body: { error: "Player not found", code: "not_found" } };
+      if ((await isBlockedEitherWay(tx, userId, player.userId)) || !(await closeEnoughToVouch(tx, userId, player.userId))) {
+        return {
+          status: 409,
+          body: { error: "Only a clanmate, your duo partner or someone you follow back can vouch for you.", code: "not_close" },
+        };
+      }
+      const since = new Date(now.getTime() - VOUCH_REQUEST_TTL_MS);
+      const open = await tx
+        .select({ voucherId: vouchRequests.voucherId })
+        .from(vouchRequests)
+        .where(and(eq(vouchRequests.questId, quest.id), eq(vouchRequests.status, "pending"), gt(vouchRequests.createdAt, since)));
+      if (open.some((o) => o.voucherId === player.userId)) {
+        return { status: 409, body: { error: "Already asked. Wait for their answer.", code: "already_asked" } };
+      }
+      if (open.length >= 3) return { status: 409, body: { error: "Three asks are already open for this quest.", code: "too_many_asks" } };
+      const [row] = await tx
+        .insert(vouchRequests)
+        .values({ questId: quest.id, requesterId: userId, voucherId: player.userId, note: body.data.note, createdAt: now })
+        .returning();
+      return {
+        status: 201,
+        body: {
+          request: {
+            id: row!.id,
+            status: "pending",
+            createdAt: row!.createdAt.toISOString(),
+            expiresAt: new Date(row!.createdAt.getTime() + VOUCH_REQUEST_TTL_MS).toISOString(),
+          },
+        },
+      };
+    });
+  });
+
+  /** Vouch requests waiting for me, newest first (the requester by public codename only). */
+  router.get("/vouches/incoming", async (req, res) => {
+    const userId = req.user!.id;
+    const now = clock();
+    const rows = await db
+      .select({
+        id: vouchRequests.id,
+        note: vouchRequests.note,
+        createdAt: vouchRequests.createdAt,
+        questTitle: quests.title,
+        questStatus: quests.status,
+        from: profiles.publicCodename,
+      })
+      .from(vouchRequests)
+      .innerJoin(quests, eq(quests.id, vouchRequests.questId))
+      .innerJoin(profiles, eq(profiles.userId, vouchRequests.requesterId))
+      .where(
+        and(
+          eq(vouchRequests.voucherId, userId),
+          eq(vouchRequests.status, "pending"),
+          gt(vouchRequests.createdAt, new Date(now.getTime() - VOUCH_REQUEST_TTL_MS)),
+        ),
+      )
+      .orderBy(desc(vouchRequests.createdAt))
+      .limit(20);
+    res.json({
+      items: rows
+        .filter((r) => r.questStatus === "active")
+        .map((r) => ({
+          id: r.id,
+          from: r.from,
+          questTitle: r.questTitle,
+          note: r.note,
+          createdAt: r.createdAt.toISOString(),
+          expiresAt: new Date(r.createdAt.getTime() + VOUCH_REQUEST_TTL_MS).toISOString(),
+        })),
+    });
+  });
+
+  /** Confirm or deny a vouch. Confirming needs your own quest proven today (directly or through a vouch chain). */
+  router.post("/vouches/:id/respond", async (req, res) => {
+    const requestId = String(req.params.id);
+    const userId = req.user!.id;
+    const body = VouchRespondRequestSchema.safeParse(req.body ?? {});
+    if (!UUID.test(requestId) || !body.success) {
+      res.status(400).json({ error: "confirm is required", code: "invalid_vouch" });
+      return;
+    }
+    await withIdempotency(db, req, res, `POST /vouches/${requestId}/respond`, async (tx) => {
+      const now = clock();
+      const [vr] = await tx
+        .select()
+        .from(vouchRequests)
+        .where(and(eq(vouchRequests.id, requestId), eq(vouchRequests.voucherId, userId)))
+        .limit(1);
+      if (!vr) return { status: 404, body: { error: "Request not found", code: "not_found" } };
+      if (vr.status !== "pending" || now.getTime() - vr.createdAt.getTime() > VOUCH_REQUEST_TTL_MS) {
+        return { status: 409, body: { error: "This request is closed.", code: "closed" } };
+      }
+      if (!body.data.confirm) {
+        await tx.update(vouchRequests).set({ status: "denied", respondedAt: now }).where(eq(vouchRequests.id, vr.id));
+        return { status: 200, body: { status: "denied", completed: false } };
+      }
+      const weekAgo = new Date(now.getTime() - 7 * 86_400_000);
+      const confirmed = await tx
+        .select({ requesterId: vouchRequests.requesterId })
+        .from(vouchRequests)
+        .where(and(eq(vouchRequests.voucherId, userId), eq(vouchRequests.status, "confirmed"), gt(vouchRequests.respondedAt, weekAgo)));
+      const verdict = vouchAllowed({
+        voucherId: userId,
+        requesterId: vr.requesterId,
+        confirmationsThisWeek: confirmed.length,
+        pairConfirmationsThisWeek: confirmed.filter((c) => c.requesterId === vr.requesterId).length,
+        proofs: await dayProofsFrom(tx, userId, now),
+      });
+      if (!verdict.ok) {
+        const msg = {
+          voucher_unproven: "Prove your own quest today first. Only the proven can vouch.",
+          weekly_limit: "You have vouched 3 times this week. That is the limit.",
+          pair_limit: "You already vouched for this player this week.",
+          self: "You can't vouch for yourself.",
+        }[verdict.code];
+        return { status: 409, body: { error: msg, code: verdict.code } };
+      }
+      const [quest] = await tx.select().from(quests).where(eq(quests.id, vr.questId)).limit(1);
+      if (!quest || quest.status !== "active") return { status: 409, body: { error: "That quest is closed.", code: "closed" } };
+      await tx.update(vouchRequests).set({ status: "confirmed", respondedAt: now }).where(eq(vouchRequests.id, vr.id));
+      const [me] = await tx.select({ codename: profiles.publicCodename }).from(profiles).where(eq(profiles.userId, userId)).limit(1);
+      const [proof] = await tx
+        .insert(questProofs)
+        .values({
+          questId: quest.id,
+          userId: vr.requesterId,
+          method: "vouch",
+          status: "accepted",
+          summary: { voucherId: userId, note: vr.note, requestId: vr.id },
+          reason: `Vouched for by ${me?.codename ?? "a clanmate"}.`,
+          evidence: [`vouched by ${me?.codename ?? "a clanmate"}`],
+          createdAt: now,
+        })
+        .returning();
+      const target = (quest.target ?? { kind: "social_meet", metric: "count", value: 1, unit: "times" }) as QuestTarget;
+      const settled = await settleProof(tx, vr.requesterId, quest, target, proof!, now);
+      const completed = settled.status === 200 && (settled.body as { completed?: boolean }).completed === true;
+      return { status: 200, body: { status: "confirmed", completed } };
     });
   });
 
