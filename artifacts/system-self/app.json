@@ -107,6 +107,12 @@
       "barStyle": "light-content",
       "backgroundColor": "#07060B",
       "translucent": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "e0170ebf-bfdf-408e-ac5c-969954148db9"
+      }
+    },
+    "owner": "nanda2107"
   }
 }

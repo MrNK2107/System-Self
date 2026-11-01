@@ -3,9 +3,11 @@
 #   .\start-dev.ps1 -Fresh   wipe the local dev database first, so you are the first user
 #   .\start-dev.ps1 -Share   reachable from anywhere: the API goes out through a Cloudflare quick tunnel and
 #                            Expo through its own tunnel, so friends on other networks can scan the QR code too
+#   .\start-dev.ps1 -Server  server only, for friends using the installed APK: the API goes out on this laptop's
+#                            permanent Tailscale Funnel address (no Expo, no QR code). Leave the window open.
 #   .\start-dev.ps1 -Model qwen2.5:7b   another local Ollama model for AI text (default gemma4:latest; "none" = Gemini/templates)
 # Optional: set $env:GEMINI_API_KEY before running for voice logs (and for AI text when -Model none).
-param([switch]$Fresh, [switch]$Share, [string]$Model = "gemma4:latest")
+param([switch]$Fresh, [switch]$Share, [switch]$Server, [string]$Model = "gemma4:latest")
 # Not "Stop": Windows PowerShell treats any stderr line from docker/pnpm as an error. Exit codes are checked instead.
 $ErrorActionPreference = "Continue"
 $root = $PSScriptRoot
@@ -51,7 +53,7 @@ if ($LASTEXITCODE -ne 0) { throw "Migrations failed." }
 # 4. API and worker, each in its own window (skipped if the API is already running)
 $ip = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -ne $null -and $_.NetAdapter.Status -eq "Up" } |
   Select-Object -First 1).IPv4Address.IPAddress
-if (-not $ip -and -not $Share) { throw "No Wi-Fi/LAN address found. Connect to the same network as your phone." }
+if (-not $ip -and -not $Share -and -not $Server) { throw "No Wi-Fi/LAN address found. Connect to the same network as your phone." }
 
 $gemini = if ($env:GEMINI_API_KEY) { "`$env:GEMINI_API_KEY='$($env:GEMINI_API_KEY)'; " } else { "" }
 
@@ -73,7 +75,7 @@ if ($Model -ne "none") {
   $ollama = "`$env:OLLAMA_MODEL='$Model'; "
 }
 $shareEnv = ""
-if ($Share) {
+if ($Share -or $Server) {
   # The built-in dev JWT secret is public, so a server on the internet signs with a private one instead.
   # Kept in a gitignored file so friends stay signed in across restarts.
   $secretFile = Join-Path $root ".share-jwt-secret"
@@ -88,7 +90,7 @@ if ($Share) {
 }
 if (Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue) {
   Step "API already running on port 3001"
-  if ($Share) { Write-Host "Close the 'System-Self API' and 'System-Self worker' windows and run this again if they were not started with -Share." -ForegroundColor Yellow }
+  if ($Share -or $Server) { Write-Host "Close the 'System-Self API' and 'System-Self worker' windows and run this again if they were not started with -Share or -Server." -ForegroundColor Yellow }
 } else {
   Step "Starting the API and the worker in new windows"
   Start-Process powershell -WorkingDirectory $root -ArgumentList "-NoExit", "-Command",
@@ -113,6 +115,30 @@ if (-not $nodeAllowed -and -not (Get-NetFirewallRule -DisplayName "System-Self A
   } else {
     Write-Host "If the phone can't connect, run this once as administrator to open port 3001 in the firewall." -ForegroundColor Yellow
   }
+}
+
+if ($Server) {
+  # 6. Permanent public address through Tailscale Funnel (free; same URL every time, so the APK never needs rebuilding for it)
+  Step "Opening the API on this laptop's Tailscale Funnel address"
+  $ts = (Get-Command tailscale -ErrorAction SilentlyContinue).Source
+  if (-not $ts) { $ts = "$env:ProgramFiles\Tailscale\tailscale.exe" }
+  if (-not (Test-Path $ts)) { throw "Tailscale is not installed. Install it (winget install Tailscale.Tailscale), sign in, and run this again." }
+  $status = & $ts status --json | ConvertFrom-Json
+  if ($status.BackendState -ne "Running") { throw "Tailscale is not signed in. Click the Tailscale icon in the taskbar, sign in, and run this again." }
+  $publicApi = "https://" + $status.Self.DNSName.TrimEnd(".")
+  # --bg keeps the Funnel configured across restarts; running it again is harmless.
+  & $ts funnel --bg --yes 3001 | Out-Host
+  Write-Host "Waiting for $publicApi to answer..."
+  $ok = $false
+  for ($i = 0; $i -lt 30 -and -not $ok; $i++) {
+    try { Invoke-WebRequest "$publicApi/api/readyz" -UseBasicParsing -TimeoutSec 5 *> $null; $ok = $true } catch { Start-Sleep 2 }
+  }
+  if ($ok) { Write-Host "`nThe server is live at $publicApi" -ForegroundColor Green }
+  else { Write-Host "`n$publicApi is not answering yet. A brand-new Funnel can take a minute or two to get its certificate." -ForegroundColor Yellow }
+  Write-Host "Friends with the installed app can use it now, from any network."
+  Write-Host "Sign-up email codes appear in the 'System-Self API' window: pass them on to your friends."
+  Write-Host "Keep this laptop on and awake, and the API and worker windows open. Closing this window is fine."
+  return
 }
 
 if ($Share) {
