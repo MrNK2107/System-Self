@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Today - Broadcast Scorecard</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0A1230;--panel:#111C44;--line:#243064;--y:#FFC400;--t:#00B3A4;--w:#fff;--mut:#B4BEE0;--neg:#FF8A8A}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:390px;height:844px;overflow:hidden;background:var(--bg);color:var(--w);font:400 14px/1.35 Barlow,sans-serif;position:relative}
+.cond{font-family:'Barlow Condensed',sans-serif;text-transform:uppercase}
+.status{height:32px;display:flex;justify-content:space-between;align-items:center;padding:0 20px;font-weight:600;font-size:13px}
+.bug{margin:0 16px;display:flex;height:52px;border-radius:2px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
+.bug>div{display:flex;align-items:center;justify-content:center}
+.rank{background:var(--y);color:#0A1230;padding:0 14px;font-weight:800;font-size:22px;letter-spacing:.04em;clip-path:polygon(0 0,100% 0,calc(100% - 10px) 100%,0 100%);width:84px}
+.sc{font-weight:800;font-size:30px;padding:0 10px;color:var(--w)}
+.need{flex:1;flex-direction:column;align-items:flex-start!important;padding-left:8px;justify-content:center;font-weight:600;font-size:14px;letter-spacing:.04em;line-height:1.1}
+.need b{color:var(--y);font-size:20px;font-weight:800}
+.days{background:var(--t);color:#04201E;font-weight:800;font-size:18px;padding:0 12px;flex-direction:column;line-height:1;clip-path:polygon(10px 0,100% 0,100% 100%,0 100%)}
+.days small{font-size:11px;font-weight:700;letter-spacing:.08em}
+.meta{margin:8px 16px 0;display:flex;justify-content:space-between;font-weight:600;font-size:13px;letter-spacing:.1em;color:var(--mut)}
+.meta b{color:var(--w)}
+.comm{margin:12px 16px 0;padding:10px 12px;border-left:4px solid var(--y);background:var(--panel);font-size:14px}
+.comm .cond{display:block;color:var(--y);font-weight:700;font-size:12px;letter-spacing:.14em}
+h2{margin:16px 16px 8px;font-weight:700;font-size:15px;letter-spacing:.16em;color:var(--mut);display:flex;align-items:center;gap:8px}
+h2:after{content:"";flex:1;height:1px;background:var(--line)}
+.cards{margin:0 16px;display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.pc{background:var(--panel);border-top:3px solid var(--c);padding:7px 0 8px;text-align:center;height:112px;display:flex;flex-direction:column;align-items:center;justify-content:space-between}
+.pc .n{font-weight:700;font-size:11.5px;letter-spacing:.04em;color:var(--w)}
+.pc .v{font-family:'Barlow Condensed';font-weight:800;font-size:29px;line-height:1}
+.bar{width:44px;height:7px;background:var(--line);transform:skewX(-20deg)}
+.bar i{display:block;height:100%;background:var(--c)}
+.pc .d{font-family:'Barlow Condensed';font-weight:700;font-size:15px;color:var(--t)}
+.pc .d.dn{color:var(--neg)}.pc .d.z{color:var(--mut)}
+.q{margin:0 16px 8px;padding:10px 12px;background:var(--panel);border-left:4px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center;min-height:56px}
+.q p{font-weight:500;font-size:14px}.q p span{display:block;color:var(--mut);font-size:12.5px;font-weight:400}
+.q .pt{font-family:'Barlow Condensed';font-weight:800;font-size:18px;white-space:nowrap;color:var(--t)}
+.q.hl{background:var(--y);color:#0A1230;border-color:#0A1230;min-height:76px;clip-path:polygon(0 0,100% 0,100% 100%,12px 100%,0 calc(100% - 12px))}
+.q.hl p{font-weight:600;font-size:15px}.q.hl p span{color:#2A2A10;font-weight:500}
+.q.hl .pt{color:#0A1230;font-size:22px}
+.nav{position:absolute;left:0;bottom:0;width:390px;height:80px;background:#0F1A40;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,1fr);padding-top:10px}
+.nav div{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;font-weight:500;color:var(--mut)}
+.ic{width:56px;height:30px;border-radius:15px;display:flex;align-items:center;justify-content:center}
+.ic svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.nav .on{color:var(--w);font-weight:700}.nav .on .ic{background:var(--y);color:#0A1230}
+.nav .log .ic{background:var(--t);color:#04201E;width:60px;height:36px;border-radius:12px;margin-top:-4px}
+.nav .log{color:var(--w)}
+</style></head><body>
+<div class="status"><span>9:41</span><span>5G ▮▮▮▮</span></div>
+<div class="bug cond"><div class="rank">Rank E</div><div class="sc">23.4</div>
+<div class="need">NEED <b>2.6</b> TO REACH D</div><div class="days">14<small>DAYS</small></div></div>
+<div class="meta cond"><b>DAY 12</b><span>player_zero</span></div>
+<div class="comm"><span class="cond">THE SYSTEM</span>Day 12. BODY moved +1.4 this week. WEALTH slipped 0.3. Three quests active.</div>
+<h2 class="cond">Player cards</h2>
+<div class="cards">
+<div class="pc" style="--c:#E05555"><span class="n">BODY</span><span class="v">31.2</span><div class="bar"><i style="width:62%"></i></div><span class="d">+1.4</span></div>
+<div class="pc" style="--c:#4A90D9"><span class="n">MIND</span><span class="v">24.0</span><div class="bar"><i style="width:48%"></i></div><span class="d">+0.2</span></div>
+<div class="pc" style="--c:#2BA36B"><span class="n">WEALTH</span><span class="v">18.5</span><div class="bar"><i style="width:37%"></i></div><span class="d dn">−0.3</span></div>
+<div class="pc" style="--c:#C9A227"><span class="n">SOCIAL</span><span class="v">20.1</span><div class="bar"><i style="width:40%"></i></div><span class="d z">0.0</span></div>
+<div class="pc" style="--c:#8E6CEF"><span class="n" style="font-size:10px;letter-spacing:0">DISCIPLINE</span><span class="v">27.6</span><div class="bar"><i style="width:55%"></i></div><span class="d">+0.9</span></div>
+</div>
+<h2 class="cond">Next overs</h2>
+<div class="q hl"><p>Home session — 25 min bodyweight<span>due 21:00 · 2h left</span></p><span class="pt">BODY +2.5</span></div>
+<div class="q"><p>Deep work — 60 min, no phone</p><span class="pt">MIND +2.0</span></div>
+<div class="q"><p>Review expenses — log 3 transactions</p><span class="pt">WEALTH +1.5</span></div>
+<div class="nav">
+<div class="on"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg></span>Today</div>
+<div><span class="ic"><svg viewBox="0 0 24 24"><path d="M6 8v8M18 8v8M3 10v4M21 10v4M6 12h12"/></svg></span>Gym</div>
+<div class="log"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Log</div>
+<div><span class="ic"><svg viewBox="0 0 24 24"><path d="M7 4h10v5a5 5 0 01-10 0zM9 20h6M12 14v6"/></svg></span>Arena</div>
+<div><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-5 15-5 16 0"/></svg></span>You</div>
+</div>
+</body></html>

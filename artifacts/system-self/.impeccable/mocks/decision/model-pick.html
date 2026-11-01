@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Rank Card</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--card:#F4F2EC;--ink:#121212;--blue:#1F3A93;--red:#C62828;--sec:#555;--rule:#C9C5B8}
+html{background:#d8d6cf}
+body{width:390px;height:844px;overflow:hidden;background:var(--card);color:var(--ink);font:400 14px/1.3 "IBM Plex Sans Condensed",sans-serif;display:flex;flex-direction:column;position:relative}
+.num{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.band{background:var(--blue);color:#fff;padding:0 20px 14px}
+.status{height:28px;display:flex;justify-content:space-between;align-items:center;font:500 13px "IBM Plex Mono",monospace}
+.status i{display:inline-block;width:34px;height:10px;border:1.5px solid #fff;border-radius:3px;position:relative}
+.status i:after{content:"";position:absolute;inset:1.5px 8px 1.5px 1.5px;background:#fff}
+.band h1{font:700 17px/1.2 "IBM Plex Sans Condensed";letter-spacing:.06em;margin-top:8px}
+.band p{font:400 12px "IBM Plex Mono",monospace;margin-top:4px;color:#fff;letter-spacing:.02em}
+.rank{display:flex;align-items:flex-end;padding:14px 20px 12px;position:relative;border-bottom:2px solid var(--ink)}
+.rank .lbl{font:600 12px "IBM Plex Mono";letter-spacing:.18em;color:var(--sec);writing-mode:vertical-rl;transform:rotate(180deg);margin-right:10px;padding-bottom:10px}
+.rank .big{font:700 124px/.82 "IBM Plex Sans Condensed";letter-spacing:-.02em}
+.rank .meta{margin-left:16px;padding-bottom:6px;font:400 12px/1.5 "IBM Plex Mono";color:var(--sec)}
+.rank .meta b{display:block;font:600 22px "IBM Plex Mono";color:var(--ink)}
+table{width:calc(100% - 40px);margin:12px 20px 0;border-collapse:collapse}
+th{font:600 11px "IBM Plex Mono";letter-spacing:.14em;color:var(--sec);text-align:left;padding:0 0 6px;border-bottom:1.5px solid var(--ink)}
+td{padding:0;height:32px;border-bottom:1px solid var(--rule);font:500 14px "IBM Plex Mono"}
+th:nth-child(n+2),td:nth-child(n+2){text-align:right;width:76px}
+td:first-child{font:600 14px "IBM Plex Sans Condensed";letter-spacing:.1em}
+td:first-child:before{content:"";display:inline-block;width:8px;height:8px;margin-right:10px;background:var(--d)}
+.neg{color:var(--red)}.pos{color:var(--ink)}.zero{color:var(--sec)}
+.stamp{position:absolute;right:18px;top:16px;transform:rotate(-7deg);border:3px solid var(--red);border-radius:4px;color:var(--red);font:700 15px/1.15 "IBM Plex Sans Condensed";letter-spacing:.08em;padding:6px 10px;text-align:center;box-shadow:inset 0 0 0 1.5px var(--card),inset 0 0 0 2.5px var(--red)}
+.stamp small{display:block;font:600 9px "IBM Plex Mono";letter-spacing:.2em;margin-bottom:2px}
+h2{font:600 11px "IBM Plex Mono";letter-spacing:.14em;color:var(--sec);margin:16px 20px 4px;display:flex;justify-content:space-between}
+ol{list-style:none;margin:0 20px;border-top:1.5px solid var(--ink)}
+li{display:grid;grid-template-columns:30px 1fr;padding:9px 0;border-bottom:1px solid var(--rule)}
+li .n{font:600 14px "IBM Plex Mono";color:var(--blue);padding-top:1px}
+li b{display:block;font:600 15px "IBM Plex Sans Condensed"}
+li span{display:block;font-size:13px;color:var(--sec)}
+li em{font:500 12px "IBM Plex Mono";font-style:normal;color:var(--ink)}
+li .due{color:var(--red);font-weight:600}
+nav{margin-top:auto;height:80px;background:#fff;border-top:1px solid var(--rule);display:flex;padding:10px 4px 12px}
+nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;font:500 12px "IBM Plex Sans Condensed";color:var(--sec);letter-spacing:.02em}
+nav svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+nav .pill{width:56px;height:30px;border-radius:15px;display:flex;align-items:center;justify-content:center}
+nav .on{color:var(--ink);font-weight:700}nav .on .pill{background:#D6DCF2;color:var(--blue)}
+nav .log .pill{width:56px;height:36px;background:var(--blue);color:#fff;border-radius:18px;margin-top:-6px}
+nav .log{color:var(--ink);font-weight:600}
+</style></head><body>
+<div class="band"><div class="status"><span>9:41</span><i></i></div>
+<h1>SYSTEM // SELF — RESULT CARD</h1><p>Candidate: player_zero · Day 12</p></div>
+<div class="rank"><div class="lbl">RANK</div><div class="big">E</div>
+<div class="meta"><b>23.4</b>Composite<br>Next rank D at 26.0</div>
+<div class="stamp"><small>THE SYSTEM</small>WEALTH SLIPPING.<br>LOG IT.</div></div>
+<table><tr><th>DOMAIN</th><th>SCORE</th><th>WEEK</th></tr>
+<tr style="--d:#2E7D32"><td>BODY</td><td>31.2</td><td class="pos">+1.4</td></tr>
+<tr style="--d:#6A3FB5"><td>MIND</td><td>24.0</td><td class="pos">+0.2</td></tr>
+<tr style="--d:#B26A00"><td>WEALTH</td><td>18.5</td><td class="neg">−0.3</td></tr>
+<tr style="--d:#0277A8"><td>SOCIAL</td><td>20.1</td><td class="zero">0.0</td></tr>
+<tr style="--d:#121212"><td>DISCIPLINE</td><td>27.6</td><td class="pos">+0.9</td></tr></table>
+<h2><span>TODAY'S QUESTS</span><span>3 OPEN</span></h2>
+<ol>
+<li><span class="n">01</span><div><b>Home session</b><span>25 min bodyweight</span><em>BODY +2.5 · due 21:00 · </em><em class="due">expires in 2h</em></div></li>
+<li><span class="n">02</span><div><b>Deep work</b><span>60 min, no phone</span><em>MIND +2.0</em></div></li>
+<li><span class="n">03</span><div><b>Review expenses</b><span>Log 3 transactions</span><em>WEALTH +1.5</em></div></li>
+</ol>
+<nav>
+<a class="on"><div class="pill"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div>Today</a>
+<a><div class="pill"><svg viewBox="0 0 24 24"><path d="M3 9v6M6 6v12M18 6v12M21 9v6M6 12h12"/></svg></div>Gym</a>
+<a class="log"><div class="pill"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div>Log</a>
+<a><div class="pill"><svg viewBox="0 0 24 24"><path d="M7 4h10v5a5 5 0 0 1-10 0zM12 14v4M8 20h8M7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3"/></svg></div>Arena</a>
+<a><div class="pill"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></div>You</a>
+</nav>
+</body></html>

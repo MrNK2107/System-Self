@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Today - Quest Coupons</title>
+<meta name="viewport" content="width=390,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--g:#E9E6DF;--w:#fff;--navy:#14254D;--red:#C8102E;--pur:#5B3A8C;--mut:#46506B;--rule:#14254D}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:390px;height:844px;overflow:hidden;background:var(--g);font:400 14px/1.3 Barlow,sans-serif;color:var(--navy);position:relative}
+.mono{font-family:'IBM Plex Mono',monospace}
+.status{height:24px;padding:6px 20px 0;display:flex;justify-content:space-between;font:600 11px 'IBM Plex Mono',monospace}
+.wallet{margin:4px 16px 0;height:44px;background:var(--navy);color:#fff;border-radius:6px;display:flex;align-items:center;justify-content:space-between;padding:0 12px}
+.wallet b{font:700 15px 'Barlow Condensed',sans-serif;letter-spacing:.08em}
+.wallet i{font:500 11px 'IBM Plex Mono',monospace;font-style:normal;color:#D5DBEC}
+.wallet .rank{font:700 11px 'IBM Plex Mono',monospace;color:var(--navy);background:#fff;padding:2px 6px;border-radius:3px;margin:0 6px}
+.sys{margin:12px 16px 10px;font:500 13px/1.35 'IBM Plex Mono',monospace;display:flex;gap:8px}
+.sys em{font-style:normal;color:var(--red);font-weight:700}
+.coupon{position:relative;margin:0 16px 10px;height:168px;background:var(--w);border-radius:8px;display:grid;grid-template-columns:1fr 78px;box-shadow:0 1px 0 #cfcabd,0 2px 6px rgba(20,37,77,.10);overflow:hidden}
+.coupon::before,.coupon::after{content:"";position:absolute;left:calc(100% - 78px - 7px);width:14px;height:14px;border-radius:50%;background:var(--g);z-index:2}
+.coupon::before{top:-7px}.coupon::after{bottom:-7px}
+.main{padding:0 14px 12px 0;display:flex;flex-direction:column}
+.tab{align-self:flex-start;background:var(--navy);color:#fff;font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.14em;padding:5px 14px 4px 14px;border-radius:0 0 8px 0;height:26px}
+.tab span{opacity:.75;margin:0 4px}
+.title{padding:10px 0 0 14px;font:600 20px/1.12 'Barlow Condensed',sans-serif;letter-spacing:.01em;min-height:56px}
+.boxes{margin:auto 0 0 14px;display:grid;grid-template-columns:.9fr .9fr 1.4fr;border:1.5px solid var(--rule);height:50px}
+.boxes div{padding:4px 8px;border-left:1px solid var(--rule)}
+.boxes div:first-child{border-left:0}
+.boxes small{display:block;font:600 10px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:var(--mut)}
+.boxes b{display:block;font:700 17px/1.25 'IBM Plex Mono',monospace;color:var(--pur)}
+.boxes .st{font:700 14px/1.5 'IBM Plex Mono',monospace;color:var(--navy)}
+.boxes .st.v{color:var(--red)}
+.boxes .st em{font:500 10px 'IBM Plex Mono',monospace;font-style:normal;color:var(--red);display:block;margin-top:-5px}
+.stub{border-left:2px dashed #9AA3BA;padding:12px 6px 10px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;text-align:center}
+.stub small{font:600 10px 'Barlow Condensed',sans-serif;letter-spacing:.16em;color:var(--mut)}
+.stub b{font:700 28px/1 'IBM Plex Mono',monospace;color:var(--pur)}
+.stub .bar{width:46px;height:22px;background:repeating-linear-gradient(90deg,var(--navy) 0 2px,#fff 2px 4px,var(--navy) 4px 5px,#fff 5px 8px)}
+.used .stub b,.void .stub b{opacity:.45}
+.stamp{position:absolute;z-index:3;font:700 30px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;border:3px solid var(--red);color:var(--red);padding:5px 10px 3px;border-radius:4px;transform:rotate(-12deg);background:rgba(255,255,255,.55);pointer-events:none}
+.void .stamp{left:128px;top:62px}
+.used .stamp{left:128px;top:62px;transform:rotate(-8deg);font-size:28px}
+.void .title,.void .boxes{opacity:.6}.used .title,.used .boxes{opacity:.7}
+.mark{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red);margin-right:5px}
+nav{position:absolute;left:0;bottom:0;width:390px;height:80px;background:#F6F4EF;border-top:1px solid #CFCABD;display:grid;grid-template-columns:repeat(5,1fr);padding-top:10px}
+nav a{display:flex;flex-direction:column;align-items:center;gap:4px;font:500 12px 'Barlow',sans-serif;color:var(--mut)}
+nav .pill{width:56px;height:30px;border-radius:15px;display:grid;place-items:center}
+nav .pill svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+nav .on{color:var(--navy);font-weight:600}nav .on .pill{background:#D9DDEB}
+nav .log{color:var(--navy);font-weight:600}nav .log .pill{background:var(--red);color:#fff}
+</style></head><body>
+<div class="status"><span>9:41</span><span>5G ▮▮▮</span></div>
+<header class="wallet"><b>SYSTEM // SELF</b><i>player_zero · Day 12<span class="rank">RANK E</span><span style="color:#fff;font-weight:700">23.4</span></i></header>
+<p class="sys"><em>&gt;</em><span>Three coupons issued. One void. Nothing disappears.</span></p>
+
+<section class="coupon"><div class="main">
+<div class="tab">QUEST 01<span>·</span>BODY</div>
+<h2 class="title">Home session — 25 min bodyweight</h2>
+<div class="boxes"><div><small>REWARD</small><b>+2.5</b></div><div><small>DUE</small><b>21:00</b></div><div><small>STATUS</small><span class="st v"><span class="mark"></span>VALID</span><em>expires in 2h</em></div></div></div>
+<div class="stub"><small>No.</small><b>01</b><div class="bar"></div></div></section>
+
+<section class="coupon used"><div class="main">
+<div class="tab">QUEST 02<span>·</span>MIND</div>
+<h2 class="title">Deep work — 60 min, no phone</h2>
+<div class="boxes"><div><small>REWARD</small><b>+2.0</b></div><div><small>DUE</small><b>18:00</b></div><div><small>STATUS</small><span class="st">USED</span></div></div></div>
+<div class="stub"><small>No.</small><b>02</b><div class="bar"></div></div><div class="stamp">USED</div></section>
+
+<section class="coupon void"><div class="main">
+<div class="tab">QUEST 03<span>·</span>WEALTH</div>
+<h2 class="title">Review expenses — log 3 transactions</h2>
+<div class="boxes"><div><small>REWARD</small><b>+1.5</b></div><div><small>DUE</small><b>20:00</b></div><div><small>STATUS</small><span class="st v">VOID</span></div></div></div>
+<div class="stub"><small>No.</small><b>03</b><div class="bar"></div></div><div class="stamp">VOID</div></section>
+
+<nav>
+<a class="on"><span class="pill"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></span>Today</a>
+<a><span class="pill"><svg viewBox="0 0 24 24"><path d="M3 9v6M6 7v10M18 7v10M21 9v6M6 12h12"/></svg></span>Gym</a>
+<a class="log"><span class="pill"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Log</a>
+<a><span class="pill"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V7z"/></svg></span>Arena</a>
+<a><span class="pill"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg></span>You</a>
+</nav>
+</body></html>

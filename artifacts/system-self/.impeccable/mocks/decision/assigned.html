@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Today - System Window</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root{--g:#070B14;--t:#E6EEFF;--s:#A9B4C8;--f:#5AA9FF;--p:#0E1A33}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:#000}
+body{width:390px;height:844px;overflow:hidden;position:relative;background:var(--g);color:var(--t);font:400 16px/24px 'Barlow Semi Condensed',sans-serif}
+.sm{font-size:13px;line-height:16px}.md{font-size:16px;line-height:24px}.lg{font-size:22px;line-height:24px;font-weight:600}
+.mono{font-family:'Share Tech Mono',monospace}.sec{color:var(--s)}
+.status{height:24px;padding:0 16px;display:flex;justify-content:space-between;align-items:center}
+.top{height:48px;padding:0 16px;display:flex;justify-content:space-between;align-items:center}
+.top b{font-weight:600;letter-spacing:2px}
+.win{position:relative;margin:8px 16px 0;height:128px;padding:8px 16px;background:rgba(14,26,51,.9);
+ clip-path:polygon(8px 0,calc(100% - 8px) 0,100% 8px,100% calc(100% - 8px),calc(100% - 8px) 100%,8px 100%,0 calc(100% - 8px),0 8px)}
+.win::before{content:"";position:absolute;inset:0;background:var(--f);z-index:0;
+ clip-path:polygon(8px 0,calc(100% - 8px) 0,100% 8px,100% calc(100% - 8px),calc(100% - 8px) 100%,8px 100%,0 calc(100% - 8px),0 8px)}
+.win::after{content:"";position:absolute;inset:1px;background:#0E1A33f0;z-index:0;
+ clip-path:polygon(8px 0,calc(100% - 8px) 0,100% 8px,100% calc(100% - 8px),calc(100% - 8px) 100%,8px 100%,0 calc(100% - 8px),0 8px)}
+.win>*{position:relative;z-index:1}
+.win h2{font-size:13px;line-height:16px;font-weight:600;letter-spacing:3px;color:var(--f);text-align:center;margin:8px 0}
+.win p{font-size:16px;line-height:24px;color:var(--t)}
+.rank{margin:8px 16px 0;height:96px;display:flex;align-items:center;gap:24px}
+.big{font:600 96px/96px 'Barlow Semi Condensed',sans-serif;width:72px;text-align:center;color:var(--t)}
+.rank .col{display:flex;flex-direction:column;gap:8px}
+.bands{margin:8px 16px 0}
+.band{height:40px;display:flex;align-items:center;margin-bottom:0}
+.band .n{width:128px;height:40px;padding:0 16px;display:flex;align-items:center;color:var(--g);font-weight:600;font-size:13px;letter-spacing:2px}
+.band .v{flex:1;height:40px;padding:0 16px;display:flex;justify-content:space-between;align-items:center}
+.band .v b{font-size:22px;font-weight:600}.band .v span{font-size:13px;color:var(--t)}
+.qh{margin:16px 16px 0;height:24px;display:flex;justify-content:space-between;align-items:center}
+.q{margin:8px 16px 0;height:72px;display:flex;background:#0E1A33}
+.q i{width:8px;flex:none}
+.q div{padding:8px 16px;display:flex;flex-direction:column;justify-content:center;flex:1}
+.warn{color:#F2C14E;font-weight:600}
+.nav{position:absolute;left:0;right:0;bottom:0;height:80px;background:#0E1A33;border-top:1px solid #5AA9FF;display:flex;padding:8px 0 16px}
+.nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:13px;line-height:16px;color:var(--s)}
+.nav .ic{width:64px;height:32px;border-radius:16px;display:flex;align-items:center;justify-content:center}
+.nav svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2}
+.nav .on{color:var(--t)}.nav .on .ic{background:#1E3A6B}
+.nav .log .ic{background:#5AA9FF;color:var(--g);border-radius:16px}.nav .log{color:var(--t)}
+.btn{position:absolute;left:16px;right:16px}
+</style></head><body>
+<div class="status sm mono"><span>9:41</span><span>5G &nbsp;LTE &nbsp;86%</span></div>
+<div class="top"><b class="sm mono">SYSTEM // SELF</b><span class="sm sec mono">player_zero &middot; Day 12</span></div>
+
+<div class="win"><h2 class="mono">[ MORNING BRIEFING ]</h2>
+<p>Day 12. BODY moved +1.4 this week. WEALTH slipped 0.3. Rival SIM-07 logged at 06:10. Three quests active.</p></div>
+
+<div class="rank"><div class="big">E</div>
+<div class="col"><span class="sm sec mono">RANK E &middot; UNRANKED</span><span class="lg">23.4</span><span class="sm sec">Next: D at 26.0</span></div></div>
+
+<div class="bands">
+<div class="band"><div class="n" style="background:#E05555">BODY</div><div class="v" style="background:#441F26"><b>31.2</b><span class="mono">+1.4</span></div></div>
+<div class="band"><div class="n" style="background:#4A90D9">MIND</div><div class="v" style="background:#1A304B"><b>24.0</b><span class="mono">+0.2</span></div></div>
+<div class="band"><div class="n" style="background:#2BA36B">WEALTH</div><div class="v" style="background:#11362C"><b>18.5</b><span class="mono">&minus;0.3</span></div></div>
+<div class="band"><div class="n" style="background:#C9A227">SOCIAL</div><div class="v" style="background:#3D3519"><b>20.1</b><span class="mono">0.0</span></div></div>
+<div class="band"><div class="n" style="background:#8E6CEF">DISCIPLINE</div><div class="v" style="background:#2D2651"><b>27.6</b><span class="mono">+0.9</span></div></div>
+</div>
+
+<div class="qh"><span class="lg">Quests</span><span class="sm sec mono">3 ACTIVE</span></div>
+<div class="q"><i style="background:#E05555"></i><div><span class="md">Home session &mdash; 25 min bodyweight</span><span class="sm sec">BODY +2.5 &middot; due 21:00 &middot; <span class="warn">&#9679; expires in 2h</span></span></div></div>
+<div class="q"><i style="background:#4A90D9"></i><div><span class="md">Deep work &mdash; 60 min, no phone</span><span class="sm sec">MIND +2.0</span></div></div>
+<div class="q"><i style="background:#2BA36B"></i><div><span class="md">Review expenses &mdash; log 3 transactions</span><span class="sm sec">WEALTH +1.5</span></div></div>
+
+<nav class="nav">
+<a class="on"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg></span>Today</a>
+<a><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 9v6M6 6v12M18 6v12M21 9v6M6 12h12"/></svg></span>Gym</a>
+<a class="log"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Log</a>
+<a><span class="ic"><svg viewBox="0 0 24 24"><path d="M5 4l14 14M19 4L5 18M3 20l3-3M21 20l-3-3"/></svg></span>Arena</a>
+<a><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-5 15-5 16 0"/></svg></span>You</a>
+</nav>
+</body></html>

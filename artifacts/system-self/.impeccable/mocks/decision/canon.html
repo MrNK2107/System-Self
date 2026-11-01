@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Today - Canon</title>
+<meta name="viewport" content="width=390">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#121318;--card:#1E2026;--hi:#282A31;--pri:#8AB4F8;--on:#E3E3E8;--var:#C4C6D0;--line:#44474F}
+body{width:390px;height:844px;overflow:hidden;background:var(--bg);color:var(--on);font:400 14px/20px Roboto,sans-serif;position:relative}
+.status{height:24px;display:flex;justify-content:space-between;padding:4px 24px 0;font-size:12px;font-weight:500}
+.bar{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 16px}
+.bar h1{font-size:22px;line-height:28px;font-weight:400}
+.av{width:40px;height:40px;border-radius:50%;background:#2F4A78;color:#D8E6FF;display:grid;place-items:center;font-weight:500;font-size:14px}
+main{padding:0 16px}
+.greet{padding:4px 4px 14px}
+.greet b{display:block;font-size:24px;line-height:32px;font-weight:400}
+.greet span{color:var(--var);font-size:14px}
+.greet i{font-style:normal;color:var(--pri);font-weight:500}
+.card{background:var(--card);border-radius:16px;padding:16px}
+.rings{display:flex;justify-content:space-between;padding:14px 8px 12px}
+.r{width:60px;text-align:center}
+.r svg{display:block;margin:0 auto;width:48px;height:48px;transform:rotate(-90deg)}
+.r circle{fill:none;stroke-width:5;stroke-linecap:round}
+.r .t{stroke:#33353D}
+.r .n{position:relative;margin-top:-33px;height:18px;font-weight:500;font-size:14px}
+.r small{display:block;margin-top:15px;font-size:10px;line-height:14px;letter-spacing:.5px;font-weight:500;color:var(--var)}
+.brief{margin-top:12px;background:var(--hi)}
+.brief h2,.sec h2{font-size:14px;line-height:20px;font-weight:500;letter-spacing:.1px;color:var(--pri);margin-bottom:6px}
+.brief p{color:var(--on)}
+.sec{display:flex;justify-content:space-between;align-items:center;margin:20px 4px 8px}
+.sec h2{margin:0}.sec span{color:var(--var);font-size:12px}
+.q{display:flex;align-items:center;gap:14px;padding:12px 16px;margin-bottom:8px;min-height:64px}
+.cb{flex:none;width:24px;height:24px;border-radius:50%;border:2px solid #9A9DA8}
+.q div{flex:1;min-width:0}
+.q b{display:block;font-weight:500;font-size:16px;line-height:22px}
+.q span{display:flex;align-items:center;gap:6px;color:var(--var);font-size:12px;line-height:16px;margin-top:2px}
+.q em{width:8px;height:8px;border-radius:50%;flex:none}
+.chip{flex:none;height:28px;padding:0 10px;border-radius:8px;border:1px solid #8E919A;color:var(--on);font-size:12px;font-weight:500;display:grid;place-items:center}
+.fab{position:absolute;right:16px;bottom:100px;height:56px;padding:0 20px 0 16px;border-radius:16px;background:#2F4A78;color:#D8E6FF;display:flex;align-items:center;gap:12px;font-weight:500;font-size:14px;letter-spacing:.1px;box-shadow:0 3px 8px rgba(0,0,0,.45)}
+nav{position:absolute;left:0;bottom:0;width:390px;height:80px;background:#1A1C22;display:flex;padding:12px 8px 16px}
+nav a{flex:1;text-align:center;color:var(--var);font-size:12px;line-height:16px;font-weight:500;letter-spacing:.5px}
+nav i{display:block;width:64px;height:32px;border-radius:16px;margin:0 auto 4px;display:grid;place-items:center}
+nav .on{color:var(--on)}nav .on i{background:#2F4A78}
+nav svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+nav .on svg{stroke:#D8E6FF}
+.gest{position:absolute;bottom:6px;left:130px;width:130px;height:4px;border-radius:2px;background:#E3E3E8}
+</style></head><body>
+<div class="status"><span>9:41</span><span>5G 86%</span></div>
+<div class="bar"><h1>Today</h1><div class="av">N</div></div>
+<main>
+<div class="greet"><b>Day 12 · Rank E</b><span>Composite <i>23.4</i> — 2.6 to rank D</span></div>
+<div class="card rings">
+<div class="r"><svg viewBox="0 0 48 48"><circle class="t" cx="24" cy="24" r="20"/><circle cx="24" cy="24" r="20" stroke="#E05555" stroke-dasharray="39 125.7"/></svg><div class="n">31</div><small>BODY</small></div>
+<div class="r"><svg viewBox="0 0 48 48"><circle class="t" cx="24" cy="24" r="20"/><circle cx="24" cy="24" r="20" stroke="#4A90D9" stroke-dasharray="30 125.7"/></svg><div class="n">24</div><small>MIND</small></div>
+<div class="r"><svg viewBox="0 0 48 48"><circle class="t" cx="24" cy="24" r="20"/><circle cx="24" cy="24" r="20" stroke="#2BA36B" stroke-dasharray="24 125.7"/></svg><div class="n">19</div><small>WEALTH</small></div>
+<div class="r"><svg viewBox="0 0 48 48"><circle class="t" cx="24" cy="24" r="20"/><circle cx="24" cy="24" r="20" stroke="#C9A227" stroke-dasharray="25 125.7"/></svg><div class="n">20</div><small>SOCIAL</small></div>
+<div class="r"><svg viewBox="0 0 48 48"><circle class="t" cx="24" cy="24" r="20"/><circle cx="24" cy="24" r="20" stroke="#8E6CEF" stroke-dasharray="35 125.7"/></svg><div class="n">28</div><small>DISCIPLINE</small></div>
+</div>
+<div class="card brief"><h2>Morning briefing</h2><p>Day 12. BODY moved +1.4 this week. WEALTH slipped 0.3. Three quests active.</p></div>
+<div class="sec"><h2>Quests</h2><span>0 of 3 done</span></div>
+<div class="card q"><i class="cb"></i><div><b>Home session</b><span><em style="background:#E05555"></em>25 min bodyweight · +2.5 BODY · due 21:00</span></div><i class="chip">2h left</i></div>
+<div class="card q"><i class="cb"></i><div><b>Deep work</b><span><em style="background:#4A90D9"></em>60 min, no phone · +2.0 MIND</span></div></div>
+<div class="card q"><i class="cb"></i><div><b>Review expenses</b><span><em style="background:#2BA36B"></em>Log 3 transactions · +1.5 WEALTH</span></div></div>
+</main>
+<div class="fab"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#D8E6FF" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Log</div>
+<nav>
+<a class="on"><i><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg></i>Today</a>
+<a><i><svg viewBox="0 0 24 24"><path d="M3 9v6M6 7v10M18 7v10M21 9v6M6 12h12"/></svg></i>Gym</a>
+<a><i><svg viewBox="0 0 24 24"><path d="M6 4h12v16H6zM9 9h6M9 13h6"/></svg></i>Log</a>
+<a><i><svg viewBox="0 0 24 24"><path d="M7 4h10v5a5 5 0 01-10 0zM12 14v4M8 20h8"/></svg></i>Arena</a>
+<a><i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c1-4 4-6 8-6s7 2 8 6"/></svg></i>You</a>
+</nav>
+<div class="gest"></div>
+</body></html>
