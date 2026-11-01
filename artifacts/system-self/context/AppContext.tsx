@@ -5,7 +5,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSystemEcho } from "@/components/ui/SystemEcho";
 import { appliedLine } from "@/lib/game/echo";
 import { useQueryClient } from "@tanstack/react-query";
-import type { FloorRoutineDto, SeasonKind } from "@workspace/contracts";
+import type { FloorRoutineDto, SeasonKind, SessionProofResponseSchema, SessionSummaryDto } from "@workspace/contracts";
+import type { z } from "zod";
 import { streakMultiplier } from "@workspace/engine";
 import type { OutboxItem } from "@/lib/api/outbox";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -24,6 +25,7 @@ import { getOutbox } from "@/lib/api/outbox";
 import { useOnline } from "@/lib/api/query";
 import {
   completeQuest as completeQuestRequest,
+  submitSessionProof as submitSessionProofRequest,
   discardFailedEntries,
   enqueueLog,
   generateQuests as generateQuestsRequest,
@@ -92,6 +94,9 @@ export function getStreakTier(streak: number): "none" | "low" | "mid" | "high" |
 }
 
 /** Outcome of a quest / chain request. `sync_pending`: older logs are still queued, nothing was sent. */
+/** The server's verdict on a live session (POST /quests/:id/session). */
+export type SessionProofResult = z.infer<typeof SessionProofResponseSchema>;
+
 export type GameMutationResult<T = unknown> =
   | { ok: true; value: T }
   | { ok: false; reason: "sync_pending" }
@@ -133,6 +138,8 @@ interface AppContextType {
   /** Queues the log in the outbox and starts a flush; it shows as pending until the server has it. */
   addLog: (entry: LogInput) => Promise<void>;
   completeQuest: (questId: string) => Promise<GameMutationResult>;
+  /** Sends a finished live session as proof; the server judges it and completes the quest when proven. */
+  submitSession: (questId: string, summary: SessionSummaryDto) => Promise<GameMutationResult<SessionProofResult>>;
   refuseQuest: (questId: string, reason: string) => Promise<GameMutationResult<RefuseOutcome>>;
   /** Lock the Slot for an active quest; null clears it. */
   setQuestSlot: (questId: string, slot: { slotStart: string; slotEnd: string } | null) => Promise<GameMutationResult>;
@@ -291,6 +298,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     },
     [runGuarded, echo],
   );
+  const submitSession = useCallback(
+    async (questId: string, summary: SessionSummaryDto) => {
+      const r = await runGuarded("quest-session", (id) => submitSessionProofRequest(api, getOutbox(), questId, summary, id), {
+        activity: true,
+      });
+      if (r.ok && r.value.completed) echo({ title: "QUEST COMPLETE", line: appliedLine(r.value.results) });
+      return r;
+    },
+    [runGuarded, echo],
+  );
   const refuseQuest = useCallback(
     (questId: string, reason: string) =>
       runGuarded("quest-refuse", async (id) => {
@@ -390,6 +407,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getShadowPhase,
       addLog,
       completeQuest,
+      submitSession,
       refuseQuest,
       setQuestSlot,
       setQuestShame,
@@ -409,7 +427,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [
       user, domainScores, logs, quests, questChains, chainTemplates, shadowSelf, trajectory, tierProgress, achievements, milestones,
       state, stateQ.isError, stateQ.error, questsQ.data, questsQ.dataUpdatedAt, questsQ.error, refresh, getDomainScore, getWeakestDomain, getShadowScores, getShadowRank,
-      getShadowPhase, addLog, completeQuest, refuseQuest, setQuestSlot, setQuestShame, requestBonusQuest, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
+      getShadowPhase, addLog, completeQuest, submitSession, refuseQuest, setQuestSlot, setQuestShame, requestBonusQuest, setHomePath, scheduleSeason, cancelSeason, startQuestChain, generateQuests, syncBlocked, online,
       pendingCount, outboxSnap.failed.length, retryFailed, discardFailed,
     ],
   );

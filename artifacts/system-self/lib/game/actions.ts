@@ -15,6 +15,8 @@ import {
   QuestRefuseResponseSchema,
   QuestShameResponseSchema,
   QuestSlotResponseSchema,
+  SessionProofResponseSchema,
+  type SessionSummaryDto,
   type ComebackResponse,
   type GameLog,
 } from "@workspace/contracts";
@@ -183,6 +185,17 @@ export function completeQuest(api: ApiClient, outbox: Guard, questId: string, cl
       body: { clientId },
       idempotencyKey: clientId,
       schema: LooseQuestCompleteSchema,
+    }),
+  );
+}
+
+/** A finished live session as proof for a quest; queued logs land first. The server completes the quest when proven. */
+export function submitSessionProof(api: ApiClient, outbox: Guard, questId: string, summary: SessionSummaryDto, clientId: string) {
+  return afterOutbox(outbox, () =>
+    api.request("POST", `/api/quests/${encodeURIComponent(questId)}/session`, {
+      body: { clientId, summary },
+      idempotencyKey: clientId,
+      schema: SessionProofResponseSchema,
     }),
   );
 }

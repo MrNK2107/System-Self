@@ -1,6 +1,6 @@
 THIRD-PARTY SOFTWARE NOTICES: SYSTEM // SELF mobile app
 
-This product includes the following 806 third-party packages. Each is listed with its version,
+This product includes the following 810 third-party packages. Each is listed with its version,
 its licence and the licence text it ships with. Generated from the lockfile-resolved dependency graph; do not
 edit by hand.
 
@@ -396,18 +396,21 @@ edit by hand.
   expo-keep-awake@15.0.8  (MIT)
   expo-linear-gradient@15.0.8  (MIT)
   expo-linking@8.0.12  (MIT)
+  expo-location@19.0.8  (MIT)
   expo-manifests@1.0.11  (MIT)
   expo-modules-autolinking@3.0.25  (MIT)
   expo-modules-core@3.0.30  (MIT)
   expo-notifications@0.32.17  (MIT)
   expo-router@6.0.23  (MIT)
   expo-secure-store@15.0.8  (MIT)
+  expo-sensors@15.0.8  (MIT)
   expo-server@1.0.6  (MIT)
   expo-sharing@14.0.8  (MIT)
   expo-splash-screen@31.0.13  (MIT)
   expo-status-bar@3.0.9  (MIT)
   expo-symbols@1.0.8  (MIT)
   expo-system-ui@6.0.9  (MIT)
+  expo-task-manager@14.0.9  (MIT)
   expo-updates-interface@2.0.0  (MIT)
   expo-web-browser@15.0.11  (MIT)
   exponential-backoff@3.1.3  (Apache-2.0)
@@ -765,6 +768,7 @@ edit by hand.
   unicode-match-property-ecmascript@2.0.0  (MIT)
   unicode-match-property-value-ecmascript@2.2.1  (MIT)
   unicode-property-aliases-ecmascript@2.2.0  (MIT)
+  unimodules-app-loader@6.0.8  (MIT)
   unpipe@1.0.0  (MIT)
   update-browserslist-db@1.3.4  (MIT)
   use-callback-ref@1.3.3  (MIT)
@@ -11467,6 +11471,13 @@ Source: https://docs.expo.dev/versions/latest/sdk/linking
 (The package ships no licence file; its package.json declares "MIT".)
 
 ==============================================================================
+expo-location@19.0.8
+License: MIT
+Source: https://docs.expo.dev/versions/latest/sdk/location/
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
 expo-manifests@1.0.11
 License: MIT
 Source: https://docs.expo.dev/versions/latest/sdk/manifests/
@@ -11509,6 +11520,13 @@ Source: https://docs.expo.dev/versions/latest/sdk/securestore/
 (The package ships no licence file; its package.json declares "MIT".)
 
 ==============================================================================
+expo-sensors@15.0.8
+License: MIT
+Source: https://docs.expo.dev/versions/latest/sdk/sensors/
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
 expo-server@1.0.6
 License: MIT
 Source: https://github.com/expo/expo/tree/main/packages/expo-server#readme
@@ -11547,6 +11565,13 @@ Source: https://docs.expo.dev/versions/latest/sdk/symbols/
 expo-system-ui@6.0.9
 License: MIT
 Source: https://docs.expo.dev/versions/latest/sdk/system-ui
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
+expo-task-manager@14.0.9
+License: MIT
+Source: https://docs.expo.dev/versions/latest/sdk/task-manager/
 
 (The package ships no licence file; its package.json declares "MIT".)
 
@@ -22150,6 +22175,13 @@ Source: https://github.com/mathiasbynens/unicode-match-property-value-ecmascript
 unicode-property-aliases-ecmascript@2.2.0
 License: MIT
 Source: https://github.com/mathiasbynens/unicode-property-aliases-ecmascript
+
+(The package ships no licence file; its package.json declares "MIT".)
+
+==============================================================================
+unimodules-app-loader@6.0.8
+License: MIT
+Source: https://github.com/expo/expo/tree/main/packages/unimodules-app-loader
 
 (The package ships no licence file; its package.json declares "MIT".)
 

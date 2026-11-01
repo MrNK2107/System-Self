@@ -1,4 +1,5 @@
 // Quest list rows: the one meta line, the time left, and the plain-words Shadow line. No React Native imports.
+import { targetText } from "./today";
 import type { Quest } from "./types";
 
 /** Under this much time left, the due label is shown as urgent. */
@@ -30,10 +31,14 @@ const TYPE_WORD: Record<Quest["type"], string> = { daily: "Daily", weekly: "Week
  * One meta line under the quest title, e.g. "BODY · slot 18:00–19:00 · due 21:00".
  * Dailies drop the type word (the Today list is all dailies); bonus quests say they carry no rank effect.
  */
-export function questMeta(q: Pick<Quest, "type" | "domain" | "status" | "expiresAt" | "bonus" | "chainStep" | "chainTotal" | "slotStart" | "slotEnd">): string {
+export function questMeta(
+  q: Pick<Quest, "type" | "domain" | "status" | "expiresAt" | "bonus" | "chainStep" | "chainTotal" | "slotStart" | "slotEnd" | "difficulty" | "target">,
+): string {
   const parts: string[] = [];
   if (q.type !== "daily") parts.push(TYPE_WORD[q.type]);
   parts.push(q.domain);
+  if (q.target) parts.push(targetText(q.target).toLowerCase());
+  if (q.difficulty === "hard") parts.push("hard");
   if (q.bonus) parts.push("bonus, no rank effect");
   if (q.chainStep != null && q.chainTotal != null) parts.push(`step ${q.chainStep + 1} of ${q.chainTotal}`);
   if (q.status === "active") {

@@ -1,3 +1,4 @@
+import type { QuestDifficulty, QuestTarget } from "@workspace/engine";
 // The app-side game types. Shapes kept from the old local AppContext so screens keep working; values now
 // come from the server (see mappers.ts). No React Native imports.
 import type { RankedDomain, Rank as ContractRank } from "@workspace/contracts";
@@ -69,6 +70,10 @@ export interface Quest {
   shameMode?: boolean;
   /** PRO bonus daily: no rank effect (no score, not in the completion rate). */
   bonus?: boolean;
+  /** easy | normal | hard: what completing it is worth (engine QUEST_BASE). */
+  difficulty?: QuestDifficulty;
+  /** What the quest measures; absent when nothing is measurable. */
+  target?: QuestTarget;
 }
 
 export interface QuestChain {

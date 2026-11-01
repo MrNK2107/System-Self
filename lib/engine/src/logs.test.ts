@@ -34,7 +34,7 @@ test("workout scales base by intensity, with the streak bonus", () => {
   assert.deepEqual(one("BODY", "workout", { kind: "run", minutes: 30, intensity: 5 }), { domain: "BODY", delta: 2.8, bonus: true, activity: true });
   assert.equal(one("BODY", "workout", { kind: "run", minutes: 30, intensity: 4 }).delta, 2.5);
   assert.equal(one("BODY", "workout", { kind: "run", minutes: 30, intensity: 1 }).delta, 1.8);
-  const at0 = applyDelta({ domain: "BODY", score: 50, streak: 0, lastLogDate: null }, 2.8, { bonus: true, activity: true, date: "2026-10-19" });
+  const at0 = applyDelta({ domain: "BODY", score: 50, streak: 0, lastLogDate: null }, 2.8, { bonus: true, activity: true, date: "2026-10-19", headroom: false });
   assert.equal(at0.actualDelta, 2.8);
 });
 

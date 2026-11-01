@@ -9,3 +9,4 @@ export * from "./logs";
 export * from "./finance";
 export * from "./custom";
 export * from "./freeze";
+export * from "./proof";

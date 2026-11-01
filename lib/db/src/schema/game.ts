@@ -148,6 +148,10 @@ export const quests = pgTable(
     shameMode: boolean("shame_mode").notNull().default(false),
     /** PRO bonus daily: never a ranking input (no score events, not in completion rate, rank windows, adherence or clan/raid stats). */
     bonus: boolean("bonus").notNull().default(false),
+    /** easy | normal | hard: the base gain of completing it (engine QUEST_BASE). */
+    difficulty: text("difficulty").notNull().default("normal"),
+    /** What the quest measures (engine QuestTarget); null for quests with nothing measurable. */
+    target: jsonb("target"),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
   (t) => [

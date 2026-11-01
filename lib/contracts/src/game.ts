@@ -116,6 +116,16 @@ export const NoticeKindSchema = z.enum(NOTICE_KINDS);
 export type NoticeKind = z.infer<typeof NoticeKindSchema>;
 
 export const QuestTypeSchema = z.enum(["daily", "weekly", "arc"]);
+export const QuestDifficultySchema = z.enum(["easy", "normal", "hard"]);
+/** What a quest measures (engine QuestTarget). `sessions`: qualifying sessions needed for weekly/arc quests. */
+export const QuestTargetSchema = z.object({
+  kind: z.enum(["workout", "steps", "study", "money_save", "money_cap", "no_spend", "social_meet"]),
+  metric: z.enum(["active_minutes", "steps", "minutes", "amount", "count", "days"]),
+  value: z.number(),
+  unit: z.enum(["min", "steps", "INR", "times", "days"]),
+  sessions: z.number().int().optional(),
+});
+export type QuestTarget = z.infer<typeof QuestTargetSchema>;
 
 /** The payload the server writes for each notice kind. */
 export const NOTICE_PAYLOAD_SCHEMAS = {
@@ -390,6 +400,9 @@ export const QuestSchema = z.object({
   bonus: z.boolean(),
   /** Computed from the user's local now on GET /quests; "none" everywhere else. */
   slotState: z.enum(["none", "upcoming", "open", "missed"]),
+  /** Absent from servers before measurable quests; read a missing value as "normal" / no target. */
+  difficulty: QuestDifficultySchema.optional(),
+  target: QuestTargetSchema.nullish(),
   createdAt: z.string(),
 });
 export type GameQuest = z.infer<typeof QuestSchema>;

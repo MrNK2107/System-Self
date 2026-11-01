@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deadlineLine, formatReward, pickContextCard, pickNextQuest, questReward, rewardStatement } from "./today";
+import { deadlineLine, formatReward, pickContextCard, pickNextQuest, questReward, questTargetLabel, rewardStatement } from "./today";
 import type { Quest } from "./types";
 
 const q = (over: Partial<Quest> = {}): Quest => ({
@@ -43,8 +43,11 @@ test("next quest: only bonus quests left still gives one", () => {
 });
 
 test("reward: the server's quest-complete delta to DISCIPLINE; none for bonus quests", () => {
-  assert.deepEqual(questReward({}), { delta: 3, domain: "DISCIPLINE" });
-  assert.equal(questReward({ bonus: true }), null);
+  assert.deepEqual(questReward({ domain: "MIND" }), { delta: 3.5, domain: "MIND" });
+  assert.deepEqual(questReward({ domain: "BODY", difficulty: "hard" }, 0), { delta: 5.5, domain: "BODY" });
+  // At 80 only (0.2^1.8 = 0.055) of the base is left.
+  assert.deepEqual(questReward({ domain: "BODY", difficulty: "hard" }, 80), { delta: 0.3, domain: "BODY" });
+  assert.equal(questReward({ domain: "BODY", bonus: true }), null);
   assert.equal(formatReward(3), "+3");
   assert.equal(formatReward(2.5), "+2.5");
 });
@@ -82,6 +85,20 @@ test("'N more today' counts only what the Quests tab's Today segment lists (dail
 });
 
 test("reward statement: one honest sentence for every surface (DISCIPLINE whatever the quest's domain; streak scales it)", () => {
-  assert.equal(rewardStatement(q({ domain: "MIND" })), "+3 DISCIPLINE base. Your streak adds more.");
+  assert.equal(rewardStatement(q({ domain: "MIND" })), "+3.5 MIND base. Your streak adds more.");
   assert.equal(rewardStatement(q({ bonus: true })), "No rank effect. Bonus quests don't score.");
+});
+
+test("questTargetLabel: difficulty plus the measurable target", () => {
+  assert.equal(questTargetLabel({}), "NORMAL");
+  assert.equal(questTargetLabel({ difficulty: "hard", target: { kind: "study", metric: "minutes", value: 90, unit: "min" } }), "HARD · 90 MIN");
+  assert.equal(
+    questTargetLabel({ difficulty: "normal", target: { kind: "workout", metric: "active_minutes", value: 30, unit: "min", sessions: 4 } }),
+    "NORMAL · 4 × 30 MIN",
+  );
+  assert.equal(questTargetLabel({ difficulty: "easy", target: { kind: "steps", metric: "steps", value: 8000, unit: "steps" } }), "EASY · 8,000 STEPS");
+  assert.equal(questTargetLabel({ target: { kind: "money_save", metric: "amount", value: 500, unit: "INR" } }), "NORMAL · ₹500");
+  assert.equal(questTargetLabel({ target: { kind: "money_cap", metric: "amount", value: 0, unit: "INR" } }), "NORMAL · TRACK SPENDING");
+  assert.equal(questTargetLabel({ target: { kind: "social_meet", metric: "count", value: 3, unit: "times" } }), "NORMAL · 3×");
+  assert.equal(questTargetLabel({ target: { kind: "no_spend", metric: "days", value: 1, unit: "days" } }), "NORMAL · NO SPEND");
 });

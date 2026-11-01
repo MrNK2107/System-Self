@@ -1,6 +1,6 @@
-import { and, asc, eq, gt } from "drizzle-orm";
-import { localDate, localTimeToInstant } from "@workspace/engine";
-import { questChains, quests } from "@workspace/db";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { inferQuestSpec, localDate, localTimeToInstant, type QuestTarget } from "@workspace/engine";
+import { questChains, quests, scoreEvents } from "@workspace/db";
 import type { Tx } from "./user-lock";
 
 export interface NewQuest {
@@ -24,6 +24,7 @@ export async function createQuests(tx: Pick<Tx, "insert">, userId: string, items
     .insert(quests)
     .values(
       items.map((i) => ({
+        ...inferQuestSpec(i),
         userId,
         type: i.type,
         title: i.title,
@@ -77,6 +78,8 @@ export function toQuestDto(q: typeof quests.$inferSelect, slotState: SlotState =
     shameMode: q.shameMode,
     bonus: q.bonus,
     slotState,
+    difficulty: (q.difficulty ?? "normal") as "easy" | "normal" | "hard",
+    target: (q.target ?? null) as QuestTarget | null,
     createdAt: q.createdAt.toISOString(),
   };
 }
@@ -105,4 +108,30 @@ export async function hasActiveChain(tx: Pick<Tx, "select">, userId: string): Pr
     .where(and(eq(questChains.userId, userId), eq(questChains.status, "active")))
     .limit(1);
   return Boolean(row);
+}
+
+/**
+ * True when today just became a clean day: no non-bonus daily quest is still open or was failed/refused today, and the
+ * clean-day bonus has not been given yet today. Call after the completing quest is marked complete.
+ */
+export async function isCleanDay(tx: Pick<Tx, "select">, userId: string, today: string, now: Date): Promise<boolean> {
+  const dailies = and(eq(quests.userId, userId), eq(quests.type, "daily"), eq(quests.bonus, false));
+  const open = await tx
+    .select({ id: quests.id })
+    .from(quests)
+    .where(and(dailies, eq(quests.status, "active"), gt(quests.expiresAt, now)))
+    .limit(1);
+  if (open.length > 0) return false;
+  const missed = await tx
+    .select({ id: quests.id })
+    .from(quests)
+    .where(and(dailies, inArray(quests.status, ["failed", "refused"]), eq(quests.resolvedLocalDate, today)))
+    .limit(1);
+  if (missed.length > 0) return false;
+  const given = await tx
+    .select({ id: scoreEvents.id })
+    .from(scoreEvents)
+    .where(and(eq(scoreEvents.userId, userId), eq(scoreEvents.reason, "clean_day"), eq(scoreEvents.localDate, today)))
+    .limit(1);
+  return given.length === 0;
 }

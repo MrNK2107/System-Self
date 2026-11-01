@@ -19,7 +19,8 @@ export const CUSTOM_LOG_DELTA = 2.5;
  */
 export function applyCustomLog(s: StatState, date: string, today?: string): { next: StatState; actualDelta: number } {
   const lapsedBackfill = today !== undefined && date < today && s.lastLogDate !== null && s.lastLogDate < addDays(today, -1);
-  return applyDelta(s, CUSTOM_LOG_DELTA, { bonus: true, activity: !lapsedBackfill, date });
+  // Custom domains are personal baseline-to-target trackers outside rank: no headroom damping.
+  return applyDelta(s, CUSTOM_LOG_DELTA, { bonus: true, activity: !lapsedBackfill, date, headroom: false });
 }
 
 /** The streak to show on `today`: a streak last continued before yesterday has lapsed (it is stored until the next log resets it). */

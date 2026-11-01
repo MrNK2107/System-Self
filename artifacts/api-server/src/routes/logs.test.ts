@@ -18,7 +18,7 @@ beforeEach(async () => {
   if (db) await resetDb(db);
 });
 
-test("log BODY gives +2.5, streak 1 and a first_log achievement notice", { skip }, async () => {
+test("log BODY gives +0.5 (the daily log cap), streak 1 and a first_log achievement notice", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
   const before = (await score(id, "BODY")).score;
@@ -27,12 +27,13 @@ test("log BODY gives +2.5, streak 1 and a first_log achievement notice", { skip 
   assertContract(LogResponseSchema, res.body);
   assert.equal(res.body.log.domain, "BODY");
   assert.equal(res.body.log.isRetroactive, false);
-  assert.equal(res.body.results[0].actualDelta, 2.5);
+  // 2.5 * headroom(20)=0.669 = 1.67, clipped to the 0.5 log cap
+  assert.equal(res.body.results[0].actualDelta, 0.5);
   assert.equal(res.body.results[0].streak, 1);
   assert.ok(
     res.body.notices.some((n: { kind: string; payload: { id: string } }) => n.kind === "achievement" && n.payload.id === "first_log"),
   );
-  assert.equal((await score(id, "BODY")).score, before + 2.5);
+  assert.equal((await score(id, "BODY")).score, before + 0.5);
 });
 
 test("replayed clientId returns the same response and does not double-score", { skip }, async () => {
@@ -57,7 +58,8 @@ test("concurrent duplicate clientId applies once", { skip }, async () => {
   const send = () => request(a).post("/api/logs").set(auth(token)).send({ clientId: "race", domain: "MIND", logType: "reading", data: { pages: 10 } });
   const [r1, r2] = await Promise.all([send(), send()]);
   assert.deepEqual([r1.status, r2.status].sort(), [200, 201]);
-  assert.equal((await score(id, "MIND")).score, before + 2.5);
+  // 2.5 * headroom(24) = 1.5, clipped to the 0.5 log cap
+  assert.equal((await score(id, "MIND")).score, before + 0.5);
 });
 
 test("log 49h ago is 422 retroactive_limit", { skip }, async () => {
@@ -81,7 +83,7 @@ test("validation: bad domain, oversized data, oversized freeText -> 400; no toke
   assert.equal((await request(a).post("/api/logs").send({ clientId: "v4", domain: "BODY", logType: "generic" })).status, 401);
 });
 
-test("forbidden log gives +5 to its domain and -2 DISCIPLINE", { skip }, async () => {
+test("forbidden log gives +5 (clipped to the 0.5 log cap) to its domain and -2 DISCIPLINE", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
   const dBefore = (await score(id, "DISCIPLINE")).score;
@@ -91,7 +93,8 @@ test("forbidden log gives +5 to its domain and -2 DISCIPLINE", { skip }, async (
     .send({ clientId: "f1", domain: "SOCIAL", logType: "generic", forbidden: true });
   assert.equal(res.status, 201);
   const by = Object.fromEntries(res.body.results.map((r: { domain: string; actualDelta: number }) => [r.domain, r.actualDelta]));
-  assert.equal(by.SOCIAL, 5);
+  // 5 * headroom(28)=0.554 = 2.77, clipped to the 0.5 log cap; the penalty is not scaled
+  assert.equal(by.SOCIAL, 0.5);
   assert.equal(by.DISCIPLINE, -2);
   assert.equal((await score(id, "DISCIPLINE")).score, dBefore - 2);
 });
@@ -170,7 +173,8 @@ test("data limit counts UTF-8 bytes, not characters", { skip }, async () => {
 test("GET /state lists unlocked achievements and milestones", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
-  await db!.update(domainScores).set({ score: 59 }).where(and(eq(domainScores.userId, id), eq(domainScores.domain, "BODY")));
+  // 2.5 * headroom(59.6)=0.196 = 0.49 -> 0.5, so 59.6 -> 60.1 crosses 60
+  await db!.update(domainScores).set({ score: 59.6 }).where(and(eq(domainScores.userId, id), eq(domainScores.domain, "BODY")));
   const log = await request(a).post("/api/logs").set(auth(token)).send({ clientId: "m1", domain: "BODY", logType: "generic" });
   assert.equal(log.status, 201);
   const res = await request(a).get("/api/state").set(auth(token));
@@ -255,21 +259,30 @@ const post = (a: ReturnType<typeof app>, token: string, body: object) => request
 test("structured logs score by their PRD driver", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
-  const cases: { body: object; domain: string; delta: number }[] = [
-    { body: { domain: "BODY", logType: "workout", data: { kind: "Run", minutes: 30, intensity: 5 } }, domain: "BODY", delta: 2.8 },
-    { body: { domain: "MIND", logType: "focus", data: { minutes: 45, distraction: 4, subject: "Math" } }, domain: "MIND", delta: 1.1 },
-    { body: { domain: "BODY", logType: "meal", data: { description: "Oats", quality: 5 } }, domain: "BODY", delta: 1 },
-    { body: { domain: "WEALTH", logType: "expense", data: { amount: 120, category: "food" } }, domain: "WEALTH", delta: 0.5 },
-    { body: { domain: "SOCIAL", logType: "interaction", data: { kind: "casual" } }, domain: "SOCIAL", delta: 0.8 },
-    { body: { domain: "DISCIPLINE", logType: "routine", data: { label: "Morning" } }, domain: "DISCIPLINE", delta: 3 },
+  // `delta` is the PRD driver (stored on the score event); `actual` is what lands after headroom and the 0.5 log cap.
+  const cases: { body: object; domain: string; delta: number; actual: number }[] = [
+    // 2.8 * headroom(20)=0.669 = 1.87 -> cap 0.5
+    { body: { domain: "BODY", logType: "workout", data: { kind: "Run", minutes: 30, intensity: 5 } }, domain: "BODY", delta: 2.8, actual: 0.5 },
+    // 1.1 * headroom(24)=0.610 = 0.67 -> cap 0.5
+    { body: { domain: "MIND", logType: "focus", data: { minutes: 45, distraction: 4, subject: "Math" } }, domain: "MIND", delta: 1.1, actual: 0.5 },
+    // BODY's log cap is already used today
+    { body: { domain: "BODY", logType: "meal", data: { description: "Oats", quality: 5 } }, domain: "BODY", delta: 1, actual: 0 },
+    // 0.5 * headroom(16)=0.731 = 0.37 -> 0.4
+    { body: { domain: "WEALTH", logType: "expense", data: { amount: 120, category: "food" } }, domain: "WEALTH", delta: 0.5, actual: 0.4 },
+    // 0.8 * headroom(28)=0.554 = 0.44 -> 0.4
+    { body: { domain: "SOCIAL", logType: "interaction", data: { kind: "casual" } }, domain: "SOCIAL", delta: 0.8, actual: 0.4 },
+    // 3 * headroom(12)=0.795 = 2.38 -> cap 0.5
+    { body: { domain: "DISCIPLINE", logType: "routine", data: { label: "Morning" } }, domain: "DISCIPLINE", delta: 3, actual: 0.5 },
   ];
   for (const [i, c] of cases.entries()) {
     const before = (await score(id, c.domain)).score;
     const res = await post(a, token, { clientId: `d${i}`, ...c.body });
     assert.equal(res.status, 201, JSON.stringify(res.body));
     assertContract(LogResponseSchema, res.body);
-    assert.equal(res.body.results[0].actualDelta, c.delta);
-    assert.equal((await score(id, c.domain)).score, Math.round((before + c.delta) * 10) / 10);
+    assert.equal(res.body.results[0].actualDelta, c.actual);
+    assert.equal((await score(id, c.domain)).score, Math.round((before + c.actual) * 10) / 10);
+    const [ev] = await db!.select().from(scoreEvents).where(and(eq(scoreEvents.userId, id), eq(scoreEvents.refId, res.body.log.id)));
+    assert.equal(ev!.delta, c.delta, "the driver's delta is what was requested");
   }
 });
 
@@ -350,10 +363,12 @@ test("generic and session logs still score the plain base", { skip }, async () =
     ["SOCIAL", "home_session", 2],
   ] as const;
   for (const [i, [domain, logType, delta]] of rows.entries()) {
-    const before = (await score(id, domain)).score;
     const res = await post(a, token, { clientId: `g${i}`, domain, logType });
     assert.equal(res.status, 201);
-    assert.equal(res.body.results[0].actualDelta, Math.round((Math.min(100, before + delta) - before) * 10) / 10);
+    // Every base * headroom at the onboarding scores (16-28) is over 1, so each lands as the 0.5 log cap.
+    assert.equal(res.body.results[0].actualDelta, 0.5);
+    const [ev] = await db!.select().from(scoreEvents).where(and(eq(scoreEvents.userId, id), eq(scoreEvents.refId, res.body.log.id)));
+    assert.equal(ev!.delta, delta, "the plain base is requested");
   }
 });
 
@@ -368,9 +383,12 @@ test("sleep 8h quality 2 at streak 5: base with bonus, then -0.5; streak +1 once
   const res = await post(a, token, { clientId: "s8", domain: "BODY", logType: "sleep", data: { hours: 8, quality: 2 } });
   assert.equal(res.status, 201, JSON.stringify(res.body));
   assertContract(LogResponseSchema, res.body);
-  assert.deepEqual(res.body.results.map((r: { actualDelta: number }) => r.actualDelta), [3.8, -0.5]);
+  // 2.5 * 1.25 streak(5) * headroom(50)=0.287 = 0.90, clipped to the 0.5 log cap; then -0.5
+  assert.deepEqual(res.body.results.map((r: { actualDelta: number }) => r.actualDelta), [0.5, -0.5]);
+  const evs = await db!.select().from(scoreEvents).where(and(eq(scoreEvents.userId, id), eq(scoreEvents.refId, res.body.log.id)));
+  assert.deepEqual(evs.map((e) => e.delta).sort(), [-0.5, 2.5], "the base was requested with the bonus");
   const row = await score(id, "BODY");
-  assert.equal(row.score, 53.3);
+  assert.equal(row.score, 50);
   assert.equal(row.streak, 6);
 });
 

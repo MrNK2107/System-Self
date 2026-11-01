@@ -1,8 +1,8 @@
 # Open-source licences
 
-SYSTEM // SELF is built with 806 open-source packages. Thank you to their authors.
+SYSTEM // SELF is built with 810 open-source packages. Thank you to their authors.
 
-Licences: MIT (690), ISC (42), BSD-2-Clause (17), BSD-3-Clause (17), Apache-2.0 (13), BlueOak-1.0.0 (9), MIT AND OFL-1.1 (2), UNKNOWN (2), Unlicense (2), 0BSD (2), MPL-2.0 (2), (MIT OR CC0-1.0) (2), Python-2.0 (1), CC-BY-4.0 (1), CC0-1.0 (1), (BSD-3-Clause OR GPL-2.0) (1), Apache 2.0 (1), (BSD-2-Clause OR MIT OR Apache-2.0) (1).
+Licences: MIT (694), ISC (42), BSD-2-Clause (17), BSD-3-Clause (17), Apache-2.0 (13), BlueOak-1.0.0 (9), MIT AND OFL-1.1 (2), UNKNOWN (2), Unlicense (2), 0BSD (2), MPL-2.0 (2), (MIT OR CC0-1.0) (2), Python-2.0 (1), CC-BY-4.0 (1), CC0-1.0 (1), (BSD-3-Clause OR GPL-2.0) (1), Apache 2.0 (1), (BSD-2-Clause OR MIT OR Apache-2.0) (1).
 
 The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped with the source.
 
@@ -400,18 +400,21 @@ The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped 
 - expo-keep-awake 15.0.8: MIT
 - expo-linear-gradient 15.0.8: MIT
 - expo-linking 8.0.12: MIT
+- expo-location 19.0.8: MIT
 - expo-manifests 1.0.11: MIT
 - expo-modules-autolinking 3.0.25: MIT
 - expo-modules-core 3.0.30: MIT
 - expo-notifications 0.32.17: MIT
 - expo-router 6.0.23: MIT
 - expo-secure-store 15.0.8: MIT
+- expo-sensors 15.0.8: MIT
 - expo-server 1.0.6: MIT
 - expo-sharing 14.0.8: MIT
 - expo-splash-screen 31.0.13: MIT
 - expo-status-bar 3.0.9: MIT
 - expo-symbols 1.0.8: MIT
 - expo-system-ui 6.0.9: MIT
+- expo-task-manager 14.0.9: MIT
 - expo-updates-interface 2.0.0: MIT
 - expo-web-browser 15.0.11: MIT
 - exponential-backoff 3.1.3: Apache-2.0
@@ -769,6 +772,7 @@ The full licence texts are in `docs/legal/THIRD_PARTY_NOTICES-app.txt`, shipped 
 - unicode-match-property-ecmascript 2.0.0: MIT
 - unicode-match-property-value-ecmascript 2.2.1: MIT
 - unicode-property-aliases-ecmascript 2.2.0: MIT
+- unimodules-app-loader 6.0.8: MIT
 - unpipe 1.0.0: MIT
 - update-browserslist-db 1.3.4: MIT
 - use-callback-ref 1.3.3: MIT

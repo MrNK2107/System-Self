@@ -295,6 +295,20 @@
       "when": 1792436380065,
       "tag": "0041_retention_prune_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793515389910,
+      "tag": "0042_quest_difficulty_target",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793516384919,
+      "tag": "0043_proof_places",
+      "breakpoints": true
     }
   ]
 }

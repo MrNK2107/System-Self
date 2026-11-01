@@ -35,6 +35,10 @@ test("questMeta is one short line", () => {
   assert.equal(questMeta(quest), "BODY · due 21:00");
   assert.equal(questMeta({ ...quest, slotStart: "18:00", slotEnd: "19:00" }), "BODY · slot 18:00–19:00 · due 21:00");
   assert.equal(questMeta({ ...quest, type: "weekly" }), "Weekly · BODY");
+  assert.equal(
+    questMeta({ ...quest, difficulty: "hard", target: { kind: "workout", metric: "active_minutes", value: 60, unit: "min" } }),
+    "BODY · 60 min · hard · due 21:00",
+  );
   assert.equal(questMeta({ ...quest, bonus: true }), "BODY · bonus, no rank effect · due 21:00");
   assert.equal(questMeta({ ...quest, type: "arc", chainStep: 1, chainTotal: 5 }), "Arc · BODY · step 2 of 5");
   assert.equal(questMeta({ ...quest, status: "complete" }), "BODY · done");

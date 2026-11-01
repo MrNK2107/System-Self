@@ -223,7 +223,8 @@ test("debrief: unavailable before nightlyTime, available after, verdict matches 
     const expected = (await score(id, dom)).score - start[dom];
     assert.ok(Math.abs(d.deltas[dom] - expected) < 0.051, `${dom} delta ${d.deltas[dom]} vs ${expected}`);
   }
-  assert.equal(d.deltas.BODY, 2.5);
+  // the workout log: 2.5 * headroom(20)=0.669 = 1.67, clipped to the 0.5 log cap
+  assert.equal(d.deltas.BODY, 0.5);
   assert.equal(d.verdict, debriefVerdict(d.deltas, 1));
   assert.ok(d.text.length > 0);
 

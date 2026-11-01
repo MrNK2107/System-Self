@@ -99,7 +99,7 @@ async function dailyQuest(userId: string, expiresAt: Date, extra: { chainId?: st
   return q!;
 }
 
-test("daily quest expired at rollover → failed, −0.8 DISCIPLINE, quest_failed notice", { skip }, async () => {
+test("daily quest expired at rollover → failed, −1.5 DISCIPLINE, quest_failed notice", { skip }, async () => {
   const { id } = await onboardAtD0();
   const q = await dailyQuest(id, at(D0, "20:00"));
   const later = await dailyQuest(id, at(addDays(D0, 3)));
@@ -110,10 +110,11 @@ test("daily quest expired at rollover → failed, −0.8 DISCIPLINE, quest_faile
   assert.equal(failed!.resolvedLocalDate, D0);
   const [still] = await db!.select().from(quests).where(eq(quests.id, later.id));
   assert.equal(still!.status, "active");
-  assert.equal((await score(id, "DISCIPLINE")).score, 11.2);
+  // 12 − 1.5 (daily fail) − 0.1 upkeep
+  assert.equal((await score(id, "DISCIPLINE")).score, 10.4);
   const ev = await eventsOf(id, "quest_failed");
   assert.equal(ev.length, 1);
-  assert.equal(ev[0]!.delta, -0.8);
+  assert.equal(ev[0]!.delta, -1.5);
   assert.equal(ev[0]!.refId, q.id);
   const n = await noticesOf(id, "quest_failed");
   assert.equal(n.length, 1);
@@ -147,7 +148,7 @@ test("streak break penalty includes DISCIPLINE when it broke", { skip }, async (
 
   assert.equal((await score(id, "BODY")).streak, 0);
   assert.equal((await score(id, "DISCIPLINE")).streak, 0);
-  assert.equal((await score(id, "DISCIPLINE")).score, 8); // 12 − min(6, 2·2)
+  assert.equal((await score(id, "DISCIPLINE")).score, 7.9); // 12 − min(6, 2·2) − 0.1 upkeep
   const ev = await eventsOf(id, "streak_break");
   assert.equal(ev.length, 1);
   assert.equal(ev[0]!.domain, "DISCIPLINE");
@@ -223,7 +224,7 @@ test("14 snapshots in tier D → promotion E→D with rank_change notice and ran
     .select()
     .from(dailySnapshots)
     .where(and(eq(dailySnapshots.userId, id), eq(dailySnapshots.localDate, D0)));
-  assert.equal(snap!.hidden, 30);
+  assert.equal(snap!.hidden, 29.9); // 30 − 0.1 upkeep on D0, still tier D
   assert.equal(snap!.rank, "E");
 });
 
@@ -249,6 +250,22 @@ test("rank freeze blocks demotion (and decay); without it the rank drops", { ski
   assert.equal((await eventsOf(id, "decay")).length, 0); // the ramp paused: D0+2 reads 1 inactive day, not 3
   const rc = await noticesOf(id, "rank_change");
   assert.deepEqual(rc[0]!.payload, { from: "C", to: "D", kind: "demotion", newCodename: p!.codename });
+});
+
+test("upkeep: every rolled day writes −0.1 to each ranked domain, none on a Rank Freeze day", { skip }, async () => {
+  const { id } = await onboardAtD0();
+  await db!.update(profiles).set({ rankFreezeUntil: D0 }).where(eq(profiles.userId, id));
+  await db!.insert(rankFreezes).values({ userId: id, startedOn: D0, untilOn: D0, month: D0.slice(0, 7), reason: "t" });
+  await addLog(id, D0); // active: no decay mixed in
+  await addLog(id, addDays(D0, 1));
+  await ensureRolledOver(db!, id, at(addDays(D0, 2))); // rolls D0 (frozen) and D0+1
+
+  const ev = await eventsOf(id, "upkeep");
+  assert.equal(ev.filter((e) => e.localDate === D0).length, 0, "paused by the freeze");
+  const d1 = ev.filter((e) => e.localDate === addDays(D0, 1));
+  assert.deepEqual(d1.map((e) => e.domain), [...RANKED_DOMAINS]);
+  assert.deepEqual(d1.map((e) => [e.delta, e.actualDelta]), RANKED_DOMAINS.map(() => [-0.1, -0.1]));
+  assert.equal((await score(id, "BODY")).score, 19.9);
 });
 
 test("a user frozen through 7 below-threshold days is not demoted; the window pauses, it does not reset", { skip }, async () => {
@@ -379,7 +396,8 @@ test("snapshot hidden score uses the 30-day completion multiplier", { skip }, as
     .select()
     .from(dailySnapshots)
     .where(and(eq(dailySnapshots.userId, id), eq(dailySnapshots.localDate, D0)));
-  const base = { BODY: 20, MIND: 24, WEALTH: 16, SOCIAL: 28, DISCIPLINE: 12 };
+  // the onboarding scores less D0's upkeep (−0.1 each)
+  const base = { BODY: 19.9, MIND: 23.9, WEALTH: 15.9, SOCIAL: 27.9, DISCIPLINE: 11.9 };
   assert.equal(snap!.hidden, hiddenScore(base, 1.1));
   assert.deepEqual(snap!.scores, base);
 });
@@ -403,7 +421,7 @@ test("completion multiplier 0.85 for 2 of 5 completed; a quest resolved on D-30 
     .select()
     .from(dailySnapshots)
     .where(and(eq(dailySnapshots.userId, id), eq(dailySnapshots.localDate, D0)));
-  const base = { BODY: 20, MIND: 24, WEALTH: 16, SOCIAL: 28, DISCIPLINE: 12 };
+  const base = { BODY: 19.9, MIND: 23.9, WEALTH: 15.9, SOCIAL: 27.9, DISCIPLINE: 11.9 }; // after D0's upkeep
   assert.equal(snap!.hidden, hiddenScore(base, 0.85));
 });
 
@@ -488,7 +506,8 @@ test("POST /logs catches up missed dates first: streak break applied, earlier sn
     range(addDays(d0, 1), 3),
   );
   const lastSnap = snaps.find((s) => s.localDate === addDays(today, -1))!.scores as Record<string, number>;
-  assert.equal(Math.round((lastSnap.BODY! + 2.5) * 10) / 10, (await score(id, "BODY")).score);
+  // today's log lands as the 0.5 log cap on top of yesterday's snapshot
+  assert.equal(Math.round((lastSnap.BODY! + 0.5) * 10) / 10, (await score(id, "BODY")).score);
 });
 
 test("catch-up after 10 days processes 10 dates in order", { skip }, async () => {
@@ -786,7 +805,8 @@ test("a log at 01:00 (inside the grace window) first rolls the missed day: strea
   const breaks = await eventsOf(id, "streak_break");
   assert.equal(breaks.length, 1);
   assert.equal(breaks[0]!.localDate, d1);
-  assert.equal((await score(id, "DISCIPLINE")).score, disciplineBefore - 2);
+  // −2 streak break and −0.1 upkeep, both on d1
+  assert.equal((await score(id, "DISCIPLINE")).score, Math.round((disciplineBefore - 2.1) * 10) / 10);
   const n = await noticesOf(id, "streak_break");
   assert.deepEqual(n[0]!.payload, { domains: [{ domain: "BODY", lostStreak: 5 }], penalty: 2 });
   assert.equal((await dayStateOf(id)).lastRolledDate, d1);
@@ -795,7 +815,7 @@ test("a log at 01:00 (inside the grace window) first rolls the missed day: strea
     .from(dailySnapshots)
     .where(and(eq(dailySnapshots.userId, id), eq(dailySnapshots.localDate, d1)));
   const body = (await score(id, "BODY")).score;
-  assert.equal(Math.round(((snap!.scores as Record<string, number>).BODY! + 2.5) * 10) / 10, body); // excludes the d2 log
+  assert.equal(Math.round(((snap!.scores as Record<string, number>).BODY! + 0.5) * 10) / 10, body); // excludes the d2 log (0.5 log cap)
 });
 
 test("a quest completed at 01:00 first rolls the missed day", { skip }, async (t) => {

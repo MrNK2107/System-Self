@@ -226,7 +226,8 @@ test("week close: (average - 3) via peer_rating, once, only with 4 or more ratin
   assert.ok(Math.abs(events[0]!.delta - 1.5) < 1e-4, String(events[0]!.delta));
 
   const [note] = await peerNotices(ratee.id);
-  assert.deepEqual(note!.payload, { weekKey: "2026-W02", average: 4.5, delta: 1.5 });
+  // The notice reports what landed: SOCIAL 28 - decay 0.6 - upkeep 0.1 = 27.3; 1.5 x headroom(27.3)=0.563 = 0.85 -> 0.8
+  assert.deepEqual(note!.payload, { weekKey: "2026-W02", average: 4.5, delta: 0.8 });
   const [week] = await db!.select().from(peerRatingWeeks).where(eq(peerRatingWeeks.userId, ratee.id));
   assert.equal(week!.ratingCount, 4);
   assert.equal(week!.evaluatedOn, SUN);
@@ -290,7 +291,8 @@ test("only the closing week counts, and a rater who left the clan mid-week still
 
   await roll(ratee.id, SUN);
   const [note] = await peerNotices(ratee.id);
-  assert.deepEqual(note!.payload, { weekKey: "2026-W02", average: 5, delta: 2 });
+  // +2 requested; SOCIAL 27.3 after decay and upkeep: 2 x headroom(27.3)=0.563 = 1.13 -> 1.1
+  assert.deepEqual(note!.payload, { weekKey: "2026-W02", average: 5, delta: 1.1 });
   assert.equal((await db!.select().from(peerRatings).where(eq(peerRatings.rateeId, ratee.id))).length, 5);
 });
 

@@ -45,6 +45,21 @@ export async function seedEverything(me: string, b: string, c: string) {
     .returning();
   await d.insert(s.generatedQuests).values({ batchId: batch!.id, userId: me, title: "t", description: "d", domain: "BODY", type: "daily" });
   await d.insert(s.questCompletionEvents).values({ userId: me, questId: quest!.id, status: "completed", domain: "BODY", questType: "daily" });
+  // Proof: a session verdict, a saved place (private to me), a coarse session spot. Shared OSM places are not mine.
+  await d.insert(s.questProofs).values({
+    questId: quest!.id,
+    userId: me,
+    method: "session",
+    status: "accepted",
+    summary: { kind: "workout", activeMinutes: 32 },
+    reason: "Movement confirmed.",
+    evidence: ["32 active min"],
+  });
+  await d.insert(s.places).values([
+    { source: "saved", kind: "gym", name: "My gym", lat: 12.97, lng: 77.59, radiusM: 100, userId: me },
+    { source: "osm", kind: "gym", name: "Public gym", lat: 12.98, lng: 77.6, radiusM: 80, osmId: "node/1" },
+  ]);
+  await d.insert(s.sessionSpots).values({ userId: me, kind: "gym", lat: 12.972, lng: 77.595 });
   await d.insert(s.aiUsageDaily).values({ userId: me, localDate: DAY, name: "messages", count: 2 });
   await d.insert(s.notificationPrefs).values({ userId: me });
   await d.insert(s.notificationLog).values({ userId: me, localDate: DAY, kind: "morning" });

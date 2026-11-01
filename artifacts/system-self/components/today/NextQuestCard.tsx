@@ -8,6 +8,7 @@ import { space, type } from "@/constants/type";
 import { useColors } from "@/hooks/useColors";
 import type { Quest } from "@/context/AppContext";
 import type { Domain } from "@/lib/game/types";
+import { questTargetLabel } from "@/lib/game/today";
 
 export interface QuestAction {
   label: string;
@@ -54,16 +55,19 @@ export function NextQuestCard({ quest, reward, status, primary, secondary, busy 
             {quest.description}
           </Text>
         ) : null}
+        <Text style={[type.label, { color: colors.subtle }]} accessibilityLabel={`Target: ${questTargetLabel(quest)}`}>
+          {questTargetLabel(quest)}
+        </Text>
       </View>
 
       {reward ? (
-        <View accessible accessibilityLabel={`Reward ${reward.delta} ${reward.domain}, base. Your streak adds more.`}>
+        <View accessible accessibilityLabel={`Reward ${reward.delta} ${reward.domain} at your current score. Your streak adds more.`}>
           <View style={s.reward}>
             <Text style={[type.display, { color: colors.foreground }]}>{reward.delta}</Text>
             <Text style={[type.label, s.rewardDomain, { color: DOMAIN_COLORS[reward.domain] }]}>{reward.domain}</Text>
           </View>
           {/* Same sentence as the quest sheet (lib/game/today rewardStatement); the completion window shows the exact amount. */}
-          <Text style={[type.meta, { color: colors.mutedForeground }]}>Base. Your streak adds more.</Text>
+          <Text style={[type.meta, { color: colors.mutedForeground }]}>At your current score. Your streak adds more.</Text>
         </View>
       ) : (
         <Text style={[type.bodyStrong, { color: colors.mutedForeground }]}>Bonus quest. No rank effect.</Text>

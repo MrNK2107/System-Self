@@ -72,6 +72,7 @@ async function rollRange(userId: string, from: string, to: string) {
 const setLastRolled = (userId: string, date: string) =>
   db!.update(userDayState).set({ lastRolledDate: date }).where(eq(userDayState.userId, userId));
 
+/** Requested finance_week deltas (the verdict), oldest first. Penalties are never scaled; gains are headroom-scaled. */
 async function financeDeltas(userId: string) {
   const rows = await db!
     .select({ delta: scoreEvents.delta, actual: scoreEvents.actualDelta, domain: scoreEvents.domain, refId: scoreEvents.refId })
@@ -80,10 +81,20 @@ async function financeDeltas(userId: string) {
     .orderBy(asc(scoreEvents.id));
   for (const r of rows) {
     assert.equal(r.domain, "WEALTH");
-    assert.equal(r.actual, r.delta, "never clamped in these fixtures");
+    if (r.delta < 0) assert.equal(r.actual, r.delta, "penalties are never clamped in these fixtures");
     assert.match(r.refId ?? "", /^\d{4}-W\d{2}$/);
   }
   return rows.map((r) => r.delta);
+}
+
+/** What the finance_week events actually moved WEALTH by, oldest first. */
+async function financeActuals(userId: string) {
+  const rows = await db!
+    .select({ actual: scoreEvents.actualDelta })
+    .from(scoreEvents)
+    .where(and(eq(scoreEvents.userId, userId), eq(scoreEvents.reason, "finance_week")))
+    .orderBy(asc(scoreEvents.id));
+  return rows.map((r) => r.actual);
 }
 
 async function putBudgets(token: string, items: { category: string; monthlyLimit: number }[], a = app()) {
@@ -111,6 +122,8 @@ test("week close: savings at target +2.0, one category over budget -0.5, applied
   assert.deepEqual(await financeDeltas(id), [], "Saturday does not close the ISO week");
   await roll(id, SUN);
   assert.deepEqual(await financeDeltas(id), [2, -0.5]);
+  // WEALTH 16 - (decay 0.3 + upkeep 0.1) x 2 days = 15.2; 2 x headroom(15.2)=0.743 = 1.49 -> 1.5
+  assert.deepEqual(await financeActuals(id), [1.5, -0.5]);
   const [week] = await db!.select().from(financeWeeks).where(eq(financeWeeks.userId, id));
   assert.equal(week!.weekKey, "2026-W02");
   assert.equal(week!.evaluatedOn, SUN);
@@ -118,7 +131,7 @@ test("week close: savings at target +2.0, one category over budget -0.5, applied
   assert.equal(week!.expenses, 300);
   assert.equal(week!.discretionary, 250);
   assert.equal(week!.discretionaryBudget, 45.16); // 200 x 7 / 31
-  assert.equal(week!.delta, 1.5);
+  assert.equal(week!.delta, 1); // what landed: +1.5 (headroom-scaled +2.0) - 0.5
 
   // Re-rolling the same Sunday never evaluates the week twice.
   await setLastRolled(id, SAT);
@@ -137,6 +150,8 @@ test("budget penalties are capped at -2.0 and use month-to-date spend through th
   await setLastRolled(id, SAT);
   await roll(id, SUN);
   assert.deepEqual(await financeDeltas(id), [2, -2], "savings 100% this week +2.0; five categories over: -2.0, not -2.5");
+  // WEALTH 16 - decay 0.6 - upkeep 0.1 = 15.3; 2 x headroom(15.3)=0.742 = 1.48 -> 1.5
+  assert.deepEqual(await financeActuals(id), [1.5, -2]);
 });
 
 test("no income in the 28-day window: the savings component is skipped (0), not -1.0; no budgets: no budget change", { skip }, async () => {
@@ -174,6 +189,9 @@ test("a monthly salary in week 1 carries weeks 2-4: the savings rate is over the
   }
   // 28-day rates: 90%, 80%, 70%, 60%: all at or over the 20% target.
   assert.deepEqual(await financeDeltas(id), [2, 2, 2, 2]);
+  // Each Sunday: decay 0.6 + upkeep 0.1 first, then 2 x headroom(WEALTH):
+  // 15.3 -> +1.5; 16.1 (h 0.729) -> +1.5; 16.9 (h 0.717) -> +1.4; 17.6 (h 0.706) -> +1.4
+  assert.deepEqual(await financeActuals(id), [1.5, 1.5, 1.4, 1.4]);
   const weeks = await db!.select().from(financeWeeks).where(eq(financeWeeks.userId, id)).orderBy(asc(financeWeeks.weekKey));
   assert.deepEqual(
     weeks.map((w) => [w.weekKey, w.income, w.expenses]),
@@ -369,8 +387,9 @@ test("goals: contribute records a scored saving log; saved >= target achieves th
   assert.equal(c1.log.domain, "WEALTH");
   assert.equal(c1.log.logType, "saving");
   assert.equal((c1.log.data as { amount: number }).amount, 300);
-  assert.deepEqual(c1.results.map((r) => [r.domain, r.actualDelta]), [["WEALTH", 0.5]]);
-  assert.equal((await score(id, "WEALTH")).score, before + 0.5);
+  // the saving driver 0.5 x headroom(16)=0.731 = 0.37 -> 0.4
+  assert.deepEqual(c1.results.map((r) => [r.domain, r.actualDelta]), [["WEALTH", 0.4]]);
+  assert.equal((await score(id, "WEALTH")).score, before + 0.4);
   // A retry with the same key replays; nothing is applied twice.
   const replay = await request(a).post(`/api/finance/goals/${goal.id}/contribute`).set(auth(token)).set("Idempotency-Key", "k1").send({ amount: 300 });
   assert.equal(replay.status, 200);
@@ -428,12 +447,14 @@ test("nightly debrief on week close carries the finance verdict line; the AI pro
   await wealthLog(id, MON, "income", { amount: 1000, category: "salary" });
   await wealthLog(id, "2026-01-06", "expense", { amount: 900, category: "food" });
   // The Monday debrief rolls the closed week: 28-day savings 10% is exactly target/2 (0); food 900 <= 3100 (+1.0).
+  // The line quotes what landed: WEALTH 16 - upkeep 0.1 x 11 days - decay (0.3 x 6 + 0.6) = 12.5;
+  // 1.0 x headroom(12.5)=0.786 = 0.8.
   const out = await getOrBuildDebrief(db!, id, at("2026-01-12", "22:00"), {});
   assert.equal(out.kind, "ready");
   const text = out.kind === "ready" ? out.row.text! : "";
   assert.ok(
     text.endsWith(
-      "You logged ₹900 in discretionary spending this week against a stated budget of ₹700. Your 28-day savings rate was 10%. Your WEALTH score rose 1.0 points. The math is not complicated.",
+      "You logged ₹900 in discretionary spending this week against a stated budget of ₹700. Your 28-day savings rate was 10%. Your WEALTH score rose 0.8 points. The math is not complicated.",
     ),
     text,
   );
@@ -522,7 +543,8 @@ test("an early nightly debrief does not lose the week's verdict: the next debrie
   };
   // Monday 01:00: Sunday is still inside its rollover grace window, so the week has not been evaluated.
   assert.ok(!(await text("2026-01-12")).includes("discretionary"));
-  assert.ok((await text("2026-01-13")).endsWith("Your WEALTH score rose 1.0 points. The math is not complicated."));
+  // +1.0 requested, 0.8 landed after headroom (as in the test above)
+  assert.ok((await text("2026-01-13")).endsWith("Your WEALTH score rose 0.8 points. The math is not complicated."));
   assert.ok(!(await text("2026-01-14")).includes("discretionary"), "quoted once");
   const [week] = await db!.select().from(financeWeeks).where(eq(financeWeeks.userId, id));
   assert.ok(week!.quotedAt);

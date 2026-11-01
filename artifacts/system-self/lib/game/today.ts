@@ -1,5 +1,6 @@
 // Today tab: which quest is "next", what it pays, how close its deadline is, and which one contextual card shows.
-import { QUEST_COMPLETE_DELTA } from "@workspace/engine";
+import { QUEST_BASE, headroom } from "@workspace/engine";
+import type { QuestTarget } from "@workspace/engine";
 import type { Domain, Quest } from "./types";
 
 /** Under this many hours left, the deadline line turns to the warning colour. */
@@ -26,12 +27,35 @@ export function pickNextQuest(quests: readonly Quest[], missed: Quest | null): {
 }
 
 /**
- * What completing the quest pays, as the server applies it (routes/quests.ts: QUEST_COMPLETE_DELTA to DISCIPLINE,
- * before any streak bonus). A bonus quest has no rank effect, so it pays nothing that can be shown.
+ * What completing the quest pays, as the server applies it (routes/quests.ts): the difficulty's base to the quest's own
+ * domain, shrunk by the headroom left at the user's current `score` in that domain (before any streak bonus or daily
+ * cap). Without a score the raw base is shown. A bonus quest has no rank effect, so it pays nothing that can be shown.
  */
-export function questReward(q: Pick<Quest, "bonus">): { delta: number; domain: Domain } | null {
+export function questReward(q: Pick<Quest, "bonus" | "domain" | "difficulty">, score?: number): { delta: number; domain: Domain } | null {
   if (q.bonus) return null;
-  return { delta: QUEST_COMPLETE_DELTA, domain: "DISCIPLINE" };
+  const base = QUEST_BASE[q.difficulty ?? "normal"];
+  const delta = Math.round(base * (score === undefined ? 1 : headroom(score)) * 10) / 10;
+  return { delta, domain: q.domain };
+}
+
+const UNIT: Record<QuestTarget["unit"], string> = { min: "MIN", steps: "STEPS", INR: "", times: "×", days: "DAY" };
+
+/** The target alone, e.g. "4 × 30 MIN", "8,000 STEPS", "₹500", "3×", "NO SPEND". */
+export function targetText(t: QuestTarget): string {
+  const n = t.value.toLocaleString("en-IN");
+  let what: string;
+  if (t.unit === "INR") what = t.value > 0 ? `₹${n}` : t.kind === "money_save" ? "SAVE" : "TRACK SPENDING";
+  else if (t.unit === "times") what = `${n}×`;
+  else if (t.kind === "no_spend") what = "NO SPEND";
+  else what = `${n} ${UNIT[t.unit]}`;
+  return t.sessions ? `${t.sessions} × ${what}` : what;
+}
+
+/** Difficulty and target as one caps line, e.g. "HARD · 4 × 30 MIN", "EASY · 8,000 STEPS", "NORMAL". */
+export function questTargetLabel(q: Pick<Quest, "difficulty" | "target">): string {
+  const parts = [(q.difficulty ?? "normal").toUpperCase()];
+  if (q.target) parts.push(targetText(q.target));
+  return parts.join(" · ");
 }
 
 /** "+3" for whole numbers, "+2.5" otherwise. */
@@ -77,7 +101,7 @@ export function pickContextCard(s: { shadow: boolean; comeback: boolean; duo: bo
  * (whatever the quest's domain) and the streak multiplier scales it, so the base is stated as a base; the
  * [ QUEST COMPLETE ] window then reports the exact amount applied.
  */
-export function rewardStatement(q: Pick<Quest, "bonus">): string {
-  const r = questReward(q);
+export function rewardStatement(q: Pick<Quest, "bonus" | "domain" | "difficulty">, score?: number): string {
+  const r = questReward(q, score);
   return r ? `${formatReward(r.delta)} ${r.domain} base. Your streak adds more.` : "No rank effect. Bonus quests don't score.";
 }

@@ -1,4 +1,4 @@
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, sql } from "drizzle-orm";
 import {
   achievements as achievementsTable,
   domainScores,
@@ -13,6 +13,8 @@ import {
 } from "@workspace/db";
 import {
   ACHIEVEMENT_DEFS,
+  DAILY_GAIN_CAP,
+  LOG_DAILY_GAIN_CAP,
   MILESTONE_TITLES,
   RANKED_DOMAINS,
   applyDelta,
@@ -41,9 +43,40 @@ export type ScoreReason =
   | "decay"
   | "challenge"
   | "finance_week"
-  | "peer_rating";
+  | "peer_rating"
+  | "clean_day"
+  | "upkeep";
 
 export type ScoreChange = ChangeSpec & { reason: ScoreReason; refId?: string };
+
+/** Reasons whose gains count against the per-domain daily cap (spec 6.6). Weekly evaluations are not capped. */
+const DAILY_CAPPED: ScoreReason[] = ["log", "forbidden", "quest_complete", "gym", "clean_day"];
+/** Unverified self-reported reasons, which also share the smaller log cap. */
+const LOG_CAPPED: ScoreReason[] = ["log", "forbidden"];
+
+/** Positive gains already taken today per domain: all capped reasons, and the self-reported share. */
+async function gainsToday(tx: Tx, userId: string, localDate: string) {
+  const rows = await tx
+    .select({ domain: scoreEvents.domain, reason: scoreEvents.reason, total: sql<number>`sum(${scoreEvents.actualDelta})` })
+    .from(scoreEvents)
+    .where(
+      and(
+        eq(scoreEvents.userId, userId),
+        eq(scoreEvents.localDate, localDate),
+        gt(scoreEvents.actualDelta, 0),
+        inArray(scoreEvents.reason, DAILY_CAPPED),
+      ),
+    )
+    .groupBy(scoreEvents.domain, scoreEvents.reason);
+  const all = new Map<string, number>();
+  const logs = new Map<string, number>();
+  for (const r of rows) {
+    const t = Number(r.total) || 0;
+    all.set(r.domain, (all.get(r.domain) ?? 0) + t);
+    if (LOG_CAPPED.includes(r.reason as ScoreReason)) logs.set(r.domain, (logs.get(r.domain) ?? 0) + t);
+  }
+  return { all, logs };
+}
 
 export interface ApplyResult {
   results: { domain: RankedDomain; actualDelta: number; score: number; streak: number }[];
@@ -103,14 +136,27 @@ export async function applyChanges(
   const results: ApplyResult["results"] = [];
   let anyActivity = false;
 
+  const capped = changes.some((c) => c.delta > 0 && DAILY_CAPPED.includes(c.reason));
+  const taken = capped ? await gainsToday(tx, userId, ctx.localDate) : { all: new Map<string, number>(), logs: new Map<string, number>() };
+
   for (const c of changes) {
     const cur = states.get(c.domain);
     if (!cur) throw new Error(`No domain_scores row for ${c.domain}`);
+    let capRemaining: number | undefined;
+    if (DAILY_CAPPED.includes(c.reason)) {
+      capRemaining = DAILY_GAIN_CAP - (taken.all.get(c.domain) ?? 0);
+      if (LOG_CAPPED.includes(c.reason)) capRemaining = Math.min(capRemaining, LOG_DAILY_GAIN_CAP - (taken.logs.get(c.domain) ?? 0));
+    }
     const { next, actualDelta } = applyDelta(cur, c.delta, {
       bonus: c.bonus,
       activity: c.activity,
       date: ctx.localDate,
+      capRemaining,
     });
+    if (actualDelta > 0 && DAILY_CAPPED.includes(c.reason)) {
+      taken.all.set(c.domain, (taken.all.get(c.domain) ?? 0) + actualDelta);
+      if (LOG_CAPPED.includes(c.reason)) taken.logs.set(c.domain, (taken.logs.get(c.domain) ?? 0) + actualDelta);
+    }
     states.set(c.domain, next);
     touched.add(c.domain);
     if (c.activity) anyActivity = true;

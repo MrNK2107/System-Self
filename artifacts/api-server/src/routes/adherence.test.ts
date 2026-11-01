@@ -147,7 +147,7 @@ test("shadow-takeovers lists refused BODY quests", { skip }, async () => {
   assert.equal(res.body.items[0].questTitle, "Push Day");
 });
 
-test("floor_session log scores the normal BODY delta (2.5 at streak 0) and tracks floor_completed", { skip }, async () => {
+test("floor_session log scores like a normal BODY log (0.5 log cap) and tracks floor_completed", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
   const refusedQuestId = (await mkQuest(id, "BODY", "Push Day")).id;
@@ -159,9 +159,10 @@ test("floor_session log scores the normal BODY delta (2.5 at streak 0) and track
     .send({ clientId: "f1", domain: "BODY", logType: "floor_session", data: { routineId: "push_floor", minutes: 13, refusedQuestId } });
   assert.equal(res.status, 201);
   assertContract(LogResponseSchema, res.body);
-  assert.equal(res.body.results[0].actualDelta, 2.5);
+  // 2.5 at streak 0 * headroom(20)=0.669 = 1.67, clipped to the 0.5 log cap
+  assert.equal(res.body.results[0].actualDelta, 0.5);
   assert.equal(res.body.results[0].streak, 1);
-  assert.equal((await score(id, "BODY")).score, before + 2.5);
+  assert.equal((await score(id, "BODY")).score, before + 0.5);
   const done = await db!.select().from(analyticsEvents).where(eq(analyticsEvents.name, "floor_completed"));
   assert.equal(done.length, 1);
   assert.equal((done[0]!.props as { questId?: string }).questId, refusedQuestId);

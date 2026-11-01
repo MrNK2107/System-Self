@@ -22,13 +22,14 @@ test("custom constants", () => {
 test("a custom log is +2.5 with the domain's own streak multiplier", () => {
   const first = applyCustomLog(fresh, "2026-01-01");
   assert.deepEqual(first.next, { score: 52.5, streak: 1, lastLogDate: "2026-01-01" });
-  // streak 1 -> x1.1: 2.75 rounds to 2.8
+  // streak 1 -> x1.05: 2.625 rounds to 2.6
   const second = applyCustomLog(first.next, "2026-01-02");
-  assert.deepEqual(second.next, { score: 55.3, streak: 2, lastLogDate: "2026-01-02" });
+  assert.deepEqual(second.next, { score: 55.1, streak: 2, lastLogDate: "2026-01-02" });
   // the same day again: streak unchanged, multiplier of the current streak
   const same = applyCustomLog(second.next, "2026-01-02");
   assert.equal(same.next.streak, 2);
-  assert.equal(same.next.score, 58.3);
+  // streak 2 -> x1.1: 2.75 rounds to 2.8
+  assert.equal(same.next.score, 57.9);
 });
 
 test("a gap resets the streak, a retroactive older date scores without moving the streak", () => {

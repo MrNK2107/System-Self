@@ -3,6 +3,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
+import { needsSessionProof } from "@workspace/engine";
 import { useQuery } from "@tanstack/react-query";
 import { Screen } from "@/components/ui/Screen";
 import { SystemWindow } from "@/components/ui/SystemWindow";
@@ -51,7 +52,8 @@ export default function Today() {
   const { user, quests, shadowSelf, loading, loadError, refresh, refuseQuest, completeQuest, questsUpdatedAt } = useApp();
   const { pendingDebrief, acknowledgeDebrief, debriefText } = useNightlyDebrief();
   const comeback = useComebackQuery().data?.active ?? null;
-  const season = useGameStateQuery().data?.profile.season ?? null;
+  const gameState = useGameStateQuery().data;
+  const season = gameState?.profile.season ?? null;
   const duoActive = hasDuoActivity(useDuoQuery().data);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -166,7 +168,14 @@ export default function Today() {
     const toBriefing = () => router.push("/dungeon/briefing");
     let primary: QuestAction;
     const secondary: QuestAction[] = [];
-    if (isMissed) {
+    const proofOnly = needsSessionProof(next.target);
+    const toSession = () => router.push({ pathname: "/session/[questId]", params: { questId: next.id } });
+    if (proofOnly) {
+      // Proven by a live session only (spec 8.2): no tap-to-complete.
+      primary = { label: "Start session", onPress: toSession, accessibilityLabel: "Start a live session to prove this quest" };
+      if (next.domain === "BODY") secondary.push({ label: "Briefing", onPress: toBriefing });
+      if (isMissed) secondary.push({ label: "Not today", onPress: () => setRefusing(next) });
+    } else if (isMissed) {
       primary = { label: "Go now", onPress: toBriefing };
       secondary.push(complete, { label: "Not today", onPress: () => setRefusing(next) });
     } else if (next.domain === "BODY") {
@@ -176,7 +185,7 @@ export default function Today() {
       primary = { label: "Complete", onPress: complete.onPress, accessibilityLabel: "Mark complete" };
       secondary.push({ label: "Details", onPress: openQuests, accessibilityLabel: "Open on the Quests tab" });
     }
-    const reward = questReward(next);
+    const reward = questReward(next, gameState?.scores.find((sc) => sc.domain === next.domain)?.score);
     card = (
       <NextQuestCard
         quest={next}

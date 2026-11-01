@@ -356,7 +356,8 @@ test("rival challenge: one open per rival, resolves at the rollover after endDat
   assert.equal(row!.outcome, "win");
   assert.ok(row!.userEnd !== null && row!.rivalEnd !== null);
   const newEvents = (await db!.select().from(scoreEvents).where(eq(scoreEvents.userId, u.id))).filter((e) => !eventsBefore.includes(e.id));
-  for (const e of newEvents) assert.ok(["decay", "streak_break", "quest_failed"].includes(e.reason), `unexpected score event ${e.reason}`);
+  // Only the rollover's own events (upkeep runs every rolled day); the challenge itself writes none.
+  for (const e of newEvents) assert.ok(["decay", "upkeep", "streak_break", "quest_failed"].includes(e.reason), `unexpected score event ${e.reason}`);
 
   const results = await db!.select().from(notices).where(and(eq(notices.userId, u.id), eq(notices.kind, "rival_challenge_result")));
   assert.equal(results.length, 2);

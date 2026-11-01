@@ -210,16 +210,16 @@ test("a custom log is +2.5 with the domain's own streak multiplier and answers {
 
   clock = at("2026-03-11T08:00:00Z");
   const second = await logTo(u, d.id, { value: 20 });
-  assert.deepEqual(second.body, { score: 55.3, streak: 2 }); // 2.5 x 1.1 = 2.75, rounded to 2.8
+  assert.deepEqual(second.body, { score: 55.1, streak: 2 }); // 2.5 x 1.05 = 2.625, rounded to 2.6 (no headroom on custom domains)
   clock = at("2026-03-11T09:00:00Z");
   const sameDay = await logTo(u, d.id, { value: 30 });
-  assert.deepEqual(sameDay.body, { score: 58.3, streak: 2 }); // x 1.2 = 3.0, the streak does not advance twice a day
+  assert.deepEqual(sameDay.body, { score: 57.9, streak: 2 }); // x 1.1 = 2.75 -> 2.8, the streak does not advance twice a day
 
   clock = at("2026-03-14T08:00:00Z"); // two days skipped
-  assert.deepEqual((await logTo(u, d.id, { value: 5 })).body, { score: 61.3, streak: 1 }); // the bonus uses the streak before the reset (2): +3.0
+  assert.deepEqual((await logTo(u, d.id, { value: 5 })).body, { score: 60.7, streak: 1 }); // the bonus uses the streak before the reset (2): +2.8
 
   const view = assertContract(CustomDomainDetailSchema, (await detail(u, d.id)).body);
-  assert.equal(view.domain.score, 61.3);
+  assert.equal(view.domain.score, 60.7);
   assert.equal(view.domain.streak, 1);
   assert.equal(view.domain.latestValue, 5);
   assert.equal(view.domain.lastLogDate, "2026-03-14");
@@ -314,7 +314,7 @@ test("a retroactive custom log scores on its own date and never moves the streak
   const retro = await logTo(u, d.id, { occurredAt: new Date(clock.getTime() - 30 * 3600_000).toISOString() });
   assert.equal(retro.status, 201);
   assert.equal(retro.body.streak, 1, "the earlier date does not extend or reset the streak");
-  assert.equal(retro.body.score, 55.3);
+  assert.equal(retro.body.score, 55.1); // 2.5 x 1.05 (streak 1) = 2.625 -> 2.6
   const [row] = await db!.select().from(customDomains).where(eq(customDomains.id, d.id));
   assert.equal(row!.lastLogDate, "2026-03-10");
 });

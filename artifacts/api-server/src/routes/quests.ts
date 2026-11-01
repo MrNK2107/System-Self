@@ -1,9 +1,16 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, gt, gte, ne } from "drizzle-orm";
-import { generatedQuestBatches, generatedQuests, questChains, quests, shadowTakeovers, users, type Db } from "@workspace/db";
+import { and, asc, count, desc, eq, gt, gte, ne } from "drizzle-orm";
+import { generatedQuestBatches, generatedQuests, questChains, questProofs, quests, shadowTakeovers, users, type Db } from "@workspace/db";
 import {
-  QUEST_COMPLETE_DELTA,
+  RANKED_DOMAINS,
   addDays,
+  cleanDayChange,
+  needsSessionProof,
+  questCompletionChanges,
+  verifyWorkout,
+  type QuestDifficulty,
+  type QuestTarget,
+  type RankedDomain,
   chainStepQuest,
   endOfLocalDay,
   isoWeekKey,
@@ -17,6 +24,7 @@ import {
   QuestRefuseRequestSchema,
   QuestShameRequestSchema,
   QuestSlotRequestSchema,
+  SessionProofRequestSchema,
 } from "@workspace/contracts";
 import type { AiDeps } from "../lib/ai";
 import { generateQuestsRequestSchema } from "../lib/schemas";
@@ -25,9 +33,10 @@ import { rollOverBeforeToday } from "../services/rollover";
 import { proRequiredUnlessPro } from "../services/entitlements";
 import { templateBonusQuest } from "../lib/ai-fallback";
 import { membershipOf } from "../services/clans";
-import { abandonChain, activeBoard, createQuests, hasActiveChain, slotStateOf, toQuestDto } from "../services/quests";
+import { placeForUser, recordSpotAndLearn } from "../services/places";
+import { abandonChain, activeBoard, createQuests, hasActiveChain, isCleanDay, slotStateOf, toQuestDto } from "../services/quests";
 import { track } from "../services/analytics";
-import { applyChanges, insertNotice } from "../services/scoring";
+import { applyChanges, insertNotice, type ScoreChange } from "../services/scoring";
 import { applyActivityChanges } from "../services/activity";
 import { withUserLock, type Tx } from "../services/user-lock";
 import {
@@ -250,6 +259,72 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
     });
   });
 
+  /**
+   * Marks an active quest complete and scores it: the base to its own domain plus DISCIPLINE, the clean-day bonus,
+   * and the chain's next step. Shared by tap-to-complete and a proven live session. Must run inside withUserLock.
+   */
+  async function finishQuest(
+    tx: Tx,
+    userId: string,
+    quest: typeof quests.$inferSelect,
+    now: Date,
+    today: string,
+  ): Promise<HandlerResult> {
+    const [done] = await tx
+      .update(quests)
+      .set({ status: "complete", resolvedAt: now, resolvedLocalDate: today })
+      .where(and(eq(quests.id, quest.id), eq(quests.status, "active")))
+      .returning();
+    if (!done) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+    // A bonus quest has no rank effect: no score event, no streak or activity credit. The result is still shown.
+    if (done.bonus) return { status: 200, body: { quest: toQuestDto(done), results: [], notices: [] } };
+
+    /** Advances the quest's chain: the next step, or the chain's completion notice. */
+    const advanceChain = async () => {
+      if (!quest.chainId) return [];
+      const [chain] = await tx.select().from(questChains).where(eq(questChains.id, quest.chainId)).limit(1);
+      if (!chain || chain.status !== "active") return [];
+      const nextStep = (quest.chainStep ?? chain.currentStep) + 1;
+      if (nextStep < chain.totalSteps) {
+        await tx.update(questChains).set({ currentStep: nextStep }).where(eq(questChains.id, chain.id));
+        await createQuests(tx, userId, [
+          {
+            ...chainStepQuest(chain.templateKey, nextStep),
+            expiresAt: new Date(now.getTime() + CHAIN_STEP_EXPIRY_MS),
+            chainId: chain.id,
+            chainStep: nextStep,
+            chainTotal: chain.totalSteps,
+          },
+        ]);
+        return [];
+      }
+      await tx
+        .update(questChains)
+        .set({ currentStep: chain.totalSteps, status: "complete", completedAt: now })
+        .where(eq(questChains.id, chain.id));
+      return [await insertNotice(tx, userId, "chain_complete", { name: chain.name, templateKey: chain.templateKey }, now)];
+    };
+
+    // The base goes to the quest's own domain (spec 6.2), plus DISCIPLINE for keeping the commitment.
+    const domain: RankedDomain = (RANKED_DOMAINS as readonly string[]).includes(quest.domain)
+      ? (quest.domain as RankedDomain)
+      : "DISCIPLINE";
+    const changes: ScoreChange[] = questCompletionChanges(domain, (quest.difficulty ?? "normal") as QuestDifficulty).map(
+      (c) => ({ ...c, reason: "quest_complete" as const, refId: quest.id }),
+    );
+    if (quest.type === "daily" && (await isCleanDay(tx, userId, today, now))) {
+      changes.push({ ...cleanDayChange(), reason: "clean_day" });
+    }
+    const applied = await applyActivityChanges(
+      tx,
+      userId,
+      changes,
+      { localDate: today, now },
+      { afterApply: advanceChain },
+    );
+    return { status: 200, body: { quest: toQuestDto(done), results: applied.results, notices: applied.notices } };
+  }
+
   router.post("/quests/:id/complete", async (req, res) => {
     const questId = String(req.params.id);
     const userId = req.user!.id;
@@ -271,58 +346,96 @@ export function questsRoutes(db: Db, ai: AiDeps = {}, clock: () => Date = () => 
       }
       const tz = (await userTimezone(tx, userId))!;
       const today = localDate(now, tz);
-      const [done] = await tx
-        .update(quests)
-        .set({ status: "complete", resolvedAt: now, resolvedLocalDate: today })
-        .where(and(eq(quests.id, quest.id), eq(quests.status, "active")))
+      if (!quest.bonus && needsSessionProof(quest.target as QuestTarget | null)) {
+        return { status: 409, body: { error: "This quest is proven by a live session.", code: "proof_required" } };
+      }
+      return finishQuest(tx, userId, quest, now, today);
+    });
+  });
+
+  /**
+   * A finished live session as proof (spec 8.2). The server re-judges the summary (engine verifyWorkout) and records
+   * the proof either way. When accepted and the quest has all the sessions it needs, the quest completes here.
+   */
+  router.post("/quests/:id/session", async (req, res) => {
+    const questId = String(req.params.id);
+    const userId = req.user!.id;
+    if (!UUID.test(questId)) {
+      res.status(404).json({ error: "Quest not found" });
+      return;
+    }
+    const parsed = SessionProofRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid session summary", code: "invalid_session" });
+      return;
+    }
+    const { summary, clientId } = parsed.data;
+    await withIdempotency(db, req, res, `POST /quests/${questId}/session`, async (tx) => {
+      const now = clock();
+      await rollOverBeforeToday(tx, userId, now);
+      const [quest] = await tx
+        .select()
+        .from(quests)
+        .where(and(eq(quests.id, questId), eq(quests.userId, userId)))
+        .limit(1);
+      if (!quest) return { status: 404, body: { error: "Quest not found" } };
+      if (quest.status !== "active" || quest.expiresAt.getTime() <= now.getTime()) {
+        return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
+      }
+      const target = quest.target as QuestTarget | null;
+      if (!target || !needsSessionProof(target) || summary.kind !== "workout") {
+        return { status: 409, body: { error: "This quest is not proven by a workout session.", code: "not_session_quest" } };
+      }
+      const place = summary.placeId ? await placeForUser(tx, userId, summary.placeId) : null;
+      const verdict = verifyWorkout(summary, target, place);
+      const [proof] = await tx
+        .insert(questProofs)
+        .values({
+          questId: quest.id,
+          userId,
+          method: "session",
+          status: verdict.ok ? "accepted" : "rejected",
+          summary,
+          reason: verdict.reason,
+          evidence: verdict.evidence,
+          clientId: clientId ?? null,
+          createdAt: now,
+        })
         .returning();
-      if (!done) return { status: 409, body: { error: "Quest is not active", code: "not_active" } };
-      // A bonus quest has no rank effect: no score event, no streak or activity credit. The result is still shown.
-      if (done.bonus) return { status: 200, body: { quest: toQuestDto(done), results: [], notices: [] } };
-
-      /** Advances the quest's chain: the next step, or the chain's completion notice. */
-      const advanceChain = async () => {
-        if (!quest.chainId) return [];
-        const [chain] = await tx.select().from(questChains).where(eq(questChains.id, quest.chainId)).limit(1);
-        if (!chain || chain.status !== "active") return [];
-        const nextStep = (quest.chainStep ?? chain.currentStep) + 1;
-        if (nextStep < chain.totalSteps) {
-          await tx.update(questChains).set({ currentStep: nextStep }).where(eq(questChains.id, chain.id));
-          await createQuests(tx, userId, [
-            {
-              ...chainStepQuest(chain.templateKey, nextStep),
-              expiresAt: new Date(now.getTime() + CHAIN_STEP_EXPIRY_MS),
-              chainId: chain.id,
-              chainStep: nextStep,
-              chainTotal: chain.totalSteps,
-            },
-          ]);
-          return [];
-        }
-        await tx
-          .update(questChains)
-          .set({ currentStep: chain.totalSteps, status: "complete", completedAt: now })
-          .where(eq(questChains.id, chain.id));
-        return [await insertNotice(tx, userId, "chain_complete", { name: chain.name, templateKey: chain.templateKey }, now)];
+      // Teach the map: a session proven by movement marks its coarse spot (a still phone proves nothing about a place).
+      if (verdict.ok && summary.coarse && summary.activeMinutes >= target.value) {
+        await recordSpotAndLearn(tx, userId, "gym", summary.coarse, now);
+      }
+      const needed = target.sessions ?? 1;
+      const [accepted] = await tx
+        .select({ done: count() })
+        .from(questProofs)
+        .where(and(eq(questProofs.questId, quest.id), eq(questProofs.status, "accepted")));
+      const done = Number(accepted?.done ?? 0);
+      const proofDto = {
+        id: proof!.id,
+        questId: quest.id,
+        method: "session" as const,
+        status: proof!.status as "accepted" | "rejected",
+        reason: proof!.reason,
+        evidence: verdict.evidence,
+        createdAt: proof!.createdAt.toISOString(),
       };
-
-      const applied = await applyActivityChanges(
-        tx,
-        userId,
-        [
-          {
-            domain: "DISCIPLINE",
-            delta: QUEST_COMPLETE_DELTA,
-            bonus: true,
-            activity: true,
-            reason: "quest_complete",
-            refId: quest.id,
-          },
-        ],
-        { localDate: today, now },
-        { afterApply: advanceChain },
-      );
-      return { status: 200, body: { quest: toQuestDto(done), results: applied.results, notices: applied.notices } };
+      const progress = needed > 1 ? { done, needed } : null;
+      if (verdict.ok && done >= needed) {
+        const tz = (await userTimezone(tx, userId))!;
+        const finished = await finishQuest(tx, userId, quest, now, localDate(now, tz));
+        if (finished.status !== 200) return finished;
+        const b = finished.body as { quest: unknown; results: unknown[]; notices: unknown[] };
+        return {
+          status: 200,
+          body: { proof: proofDto, quest: b.quest, completed: true, progress, results: b.results, notices: b.notices },
+        };
+      }
+      return {
+        status: 200,
+        body: { proof: proofDto, quest: toQuestDto(quest), completed: false, progress, results: [], notices: [] },
+      };
     });
   });
 

@@ -22,6 +22,7 @@ import {
   completionMultiplier,
   daysBetween,
   decayPerDomain,
+  upkeepChanges,
   endOfLocalDay,
   evaluateRankTransition,
   generateCodename,
@@ -214,6 +215,11 @@ export async function rolloverDate(tx: Tx, userId: string, date: string, now: Da
   const k = await inactiveDays(tx, userId, date, localDate(profile.onboardedAt, tz), freezes);
   const decay = decayPerDomain(k);
   if (decay > 0 && !freezeActive) out.push(...(await applyChanges(tx, userId, decayChanges(decay), opts)).notices);
+  // 3a. Upkeep: every domain fades a little each day, active or not (spec 6). Paused by a Rank Freeze.
+  if (!freezeActive) {
+    const upkeep: ScoreChange[] = upkeepChanges().map((c) => ({ ...c, reason: "upkeep" as const }));
+    out.push(...(await applyChanges(tx, userId, upkeep, opts)).notices);
+  }
 
   // 3b. Weekly WEALTH evaluation on the last local date of the ISO week (once per week).
   out.push(...(await evaluateFinanceWeek(tx, userId, date, now)));

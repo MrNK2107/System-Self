@@ -186,7 +186,13 @@ test("toQuest maps server quests; chain fields only when present; unknown domain
     status: "active",
     expiresAt: "2026-10-19T23:59:59.000Z",
     generatedBySystem: true,
+    difficulty: "normal",
   });
+  const withTarget = toQuest(
+    quest({ difficulty: "hard", target: { kind: "workout", metric: "active_minutes", value: 60, unit: "min" } }),
+  );
+  assert.equal(withTarget.difficulty, "hard");
+  assert.deepEqual(withTarget.target, { kind: "workout", metric: "active_minutes", value: 60, unit: "min" });
   const chained = toQuest(quest({ type: "arc", chainId: "ch1", chainStep: 1, chainTotal: 3, domain: "weird" }));
   assert.equal(chained.chainId, "ch1");
   assert.equal(chained.chainStep, 1);

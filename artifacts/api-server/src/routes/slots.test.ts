@@ -69,7 +69,7 @@ test("invalid windows are 400", { skip }, async () => {
 test("resolved quest -> 409 not_active, slot stays unset", { skip }, async () => {
   const a = app();
   const { token, id } = await setup(a);
-  const q = await mkQuest(id);
+  const q = await mkQuest(id, "MIND"); // tap-completable (BODY workouts need a live session)
   const done = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
   assert.equal(done.status, 200);
   const r = await patchSlot(a, token, q.id, { slotStart: "17:30", slotEnd: "18:30" });
@@ -144,7 +144,8 @@ test("AI context: locked slot only for active BODY quests", { skip }, async () =
   const ctx = (await buildUserContext(db!, id, new Date()))!;
   assert.deepEqual(ctx.lockedSlots, ["17:30–18:30"]);
   assert.ok(buildMessagePrompt("morning_briefing", ctx).prompt.includes("Locked slot: 17:30–18:30"));
-  await request(a).post(`/api/quests/${body.id}/complete`).set(auth(token)).send({});
+  // Resolve the BODY quest (workouts complete through a live session; the route is not what this test is about).
+  await db!.update(quests).set({ status: "complete", resolvedAt: new Date() }).where(eq(quests.id, body.id));
   assert.deepEqual((await buildUserContext(db!, id, new Date()))!.lockedSlots, []);
 });
 

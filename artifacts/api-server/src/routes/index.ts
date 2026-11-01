@@ -26,6 +26,7 @@ import { logsRoutes } from "./logs";
 import { messagesRoutes } from "./messages";
 import { noticesRoutes } from "./notices";
 import { onboardingRoutes } from "./onboarding";
+import { placesRoutes } from "./places";
 import { profileRoutes } from "./profile";
 import { pushRoutes } from "./push";
 import { rankFreezeRoutes } from "./rank-freeze";
@@ -50,7 +51,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
   router.use(authRoutes({ db, mailer, requireAuth, timezoneKnown }));
 
   // Private surfaces. requireAuth is mounted per prefix so unknown /api paths fall through to 404.
-  router.use(["/system", "/admin", "/onboarding", "/profile", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym", "/adherence", "/comeback", "/seasons", "/progress", "/social", "/rivals", "/clans", "/challenges", "/duo", "/finance", "/custom-domains", "/push", "/notifications", "/history", "/rank-freeze", "/account"], requireAuth);
+  router.use(["/system", "/admin", "/onboarding", "/profile", "/state", "/logs", "/quests", "/chains", "/notices", "/messages", "/debrief", "/recap", "/gym", "/adherence", "/comeback", "/seasons", "/progress", "/social", "/rivals", "/clans", "/challenges", "/duo", "/finance", "/custom-domains", "/push", "/notifications", "/history", "/rank-freeze", "/account", "/places"], requireAuth);
   router.use(systemRoutes(db));
   router.use(historyRoutes(db, ai, deps.now));
   if (db) {
@@ -64,6 +65,7 @@ export function createRouter(deps: { db: Db | null; mailer: Mailer; ai?: AiDeps;
     router.use(logsRoutes(db, deps.now, ai));
     router.use(questsRoutes(db, ai, deps.now));
     router.use(chainsRoutes(db));
+    router.use(placesRoutes(db, deps.now));
     router.use(noticesRoutes(db));
     router.use(messagesRoutes(db, ai));
     router.use(debriefRoutes(db, ai));

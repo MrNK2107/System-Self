@@ -45,9 +45,9 @@ test("checkLogForm names the field that is wrong", () => {
 
 test("previewDelta matches the engine, with the streak bonus only where it applies", () => {
   assert.equal(previewDelta("BODY", "workout", { kind: "x", minutes: 10, intensity: 5 }, 0), 2.8);
-  assert.equal(previewDelta("BODY", "workout", { kind: "x", minutes: 10, intensity: 4 }, 5), 3.8); // 2.5 * 1.5
+  assert.equal(previewDelta("BODY", "workout", { kind: "x", minutes: 10, intensity: 4 }, 5), 3.1); // 2.5 * 1.25
   assert.equal(previewDelta("BODY", "sleep", { hours: 5, quality: 4 }, 9), -1);
-  assert.equal(previewDelta("BODY", "sleep", { hours: 8, quality: 2 }, 5), 3.3); // 2.5*1.5=3.75 -> 3.8, then -0.5
+  assert.equal(previewDelta("BODY", "sleep", { hours: 8, quality: 2 }, 5), 2.6); // 2.5*1.25=3.125 -> 3.1, then -0.5
   assert.equal(previewDelta("BODY", "sleep", { hours: 6.5, quality: 1 }, 5), 0.5);
   assert.equal(previewDelta("WEALTH", "expense", { amount: 5, category: "x" }, 9), 0.5);
 });

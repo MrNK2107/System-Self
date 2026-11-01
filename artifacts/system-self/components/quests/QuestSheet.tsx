@@ -1,7 +1,10 @@
 // Quest details: what the quest asks, when it is due, and what you can do with it. One primary action
 // (Mark complete); the slot, briefing and Shame Mode sit as rows; Refuse is a quiet text action.
 import { Feather } from "@expo/vector-icons";
-import { rewardStatement } from "@/lib/game/today";
+import { questTargetLabel, rewardStatement } from "@/lib/game/today";
+import { useGameStateQuery } from "@/hooks/useGameState";
+import { needsSessionProof } from "@workspace/engine";
+import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import React from "react";
 import { StyleSheet, Switch, Text, View } from "react-native";
@@ -60,6 +63,7 @@ export function QuestSheet({
   quest, busy, notice, onClose, onComplete, onSlot, onBriefing, onShame, shameLocked, onRefuse, refuseDisabled = false,
 }: QuestSheetProps) {
   const colors = useColors();
+  const gameScores = useGameStateQuery().data?.scores;
   if (!quest) return <Sheet visible={false} onClose={onClose}>{null}</Sheet>;
 
   const active = quest.status === "active";
@@ -91,7 +95,19 @@ export function QuestSheet({
       footer={
         active ? (
           <>
-            <Button label="Mark complete" onPress={complete} loading={busy} block />
+            {needsSessionProof(quest.target) ? (
+              <Button
+                label="Start session"
+                onPress={() => {
+                  onClose();
+                  router.push({ pathname: "/session/[questId]", params: { questId: quest.id } });
+                }}
+                block
+                accessibilityLabel="Start a live session to prove this quest"
+              />
+            ) : (
+              <Button label="Mark complete" onPress={complete} loading={busy} block />
+            )}
             {canRefuse ? (
               <Button
                 label="Refuse quest"
@@ -124,7 +140,8 @@ export function QuestSheet({
             tone={due?.urgent ? colors.warn : undefined}
           />
         ) : null}
-        <Fact label="Reward" value={rewardStatement(quest)} />
+        <Fact label="Target" value={questTargetLabel(quest)} />
+        <Fact label="Reward" value={rewardStatement(quest, gameScores?.find((sc) => sc.domain === quest.domain)?.score)} />
         {quest.status !== "active" ? <Fact label="Outcome" value={OUTCOME[quest.status]} tone={quest.status === "complete" ? colors.success : colors.mutedForeground} /> : null}
       </View>
 

@@ -23,6 +23,8 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { GymProvider } from "@/features/gym/context/GymContext";
 import { useNotificationSync } from "@/hooks/useNotifications";
 import { QueryProvider } from "@/lib/api/query";
+// Defines the live-session background location task at startup (it must exist before Android restarts it).
+import "@/lib/session/tracker";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -65,6 +67,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="floor/[routineId]" />
         <Stack.Screen name="dungeon/briefing" />
+        <Stack.Screen name="session/[questId]" options={{ gestureEnabled: false }} />
         <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
       </Stack>
       <NotificationPrompt />

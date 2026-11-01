@@ -32,3 +32,4 @@ export * from "./peer-ratings";
 export * from "./custom";
 export * from "./ai-usage";
 export * from "./push";
+export * from "./proof";

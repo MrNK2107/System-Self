@@ -78,7 +78,7 @@ test("first GET creates the default plan", { skip }, async () => {
   assert.equal(again.body.plans.length, 1);
 });
 
-test("complete MON session with all sets -> 17.3 BODY, gym_session log, PR for squat", { skip }, async () => {
+test("complete MON session with all sets -> 17.3 points (BODY +4, the daily cap), gym_session log, PR for squat", { skip }, async () => {
   const monday = nextWeekday(MON);
   const a = app({ now: () => monday });
   const { token, id } = await setup(a);
@@ -96,7 +96,8 @@ test("complete MON session with all sets -> 17.3 BODY, gym_session log, PR for s
   assert.deepEqual(res.body.byBodyPart, { quads: 5.1, chest: 5.1, back: 5.1 });
   assert.equal(res.body.results.length, 1);
   assert.equal(res.body.results[0].domain, "BODY");
-  assert.equal(res.body.results[0].actualDelta, 17.3);
+  // 17.3 * headroom(20)=0.669 = 11.6, clipped to the 4 daily cap
+  assert.equal(res.body.results[0].actualDelta, 4);
   assert.equal(res.body.results[0].streak, 1);
   const squat = res.body.newPrs.find((p: { exerciseId: string }) => p.exerciseId === "ex_squat");
   assert.ok(squat);

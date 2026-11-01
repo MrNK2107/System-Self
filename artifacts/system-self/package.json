@@ -68,9 +68,12 @@
     "expo-dev-client": "~6.0.21",
     "expo-device": "~8.0.10",
     "expo-file-system": "~19.0.24",
+    "expo-location": "~19.0.8",
     "expo-notifications": "~0.32.17",
     "expo-secure-store": "~15.0.8",
+    "expo-sensors": "~15.0.8",
     "expo-sharing": "~14.0.8",
+    "expo-task-manager": "~14.0.9",
     "react-native-purchases": "^10.14.0"
   }
 }

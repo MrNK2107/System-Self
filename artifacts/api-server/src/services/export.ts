@@ -91,6 +91,10 @@ export const EXPORT_TABLES: Record<string, Loader> = {
   logs: owned(s.logs, s.logs.userId),
   quests: owned(s.quests, s.quests.userId),
   quest_chains: owned(s.questChains, s.questChains.userId),
+  // Proof of quests (session summaries, verdicts), the user's own saved places, and the coarse (~100 m) session spots.
+  quest_proofs: owned(s.questProofs, s.questProofs.userId),
+  places: owned(s.places, s.places.userId),
+  session_spots: owned(s.sessionSpots, s.sessionSpots.userId),
   shadow_selves: owned(s.shadowSelves, s.shadowSelves.userId),
   achievements: owned(s.achievements, s.achievements.userId),
   milestones: owned(s.milestones, s.milestones.userId),

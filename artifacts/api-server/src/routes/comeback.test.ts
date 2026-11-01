@@ -126,7 +126,8 @@ test("log after 5 empty days -> comeback notice, no extra score events", { skip 
   // Exactly the one ordinary log event; the BODY score moved by the normal log delta only.
   const events = (await db!.select().from(scoreEvents).where(eq(scoreEvents.userId, id))).filter((e) => e.reason !== "onboarding");
   assert.deepEqual(events.map((e) => e.reason), ["log"]);
-  assert.equal((await score(id, "BODY")).score, bodyBefore + 2.5);
+  // 2.5 * headroom(20) = 1.67, clipped to the 0.5 log cap
+  assert.equal((await score(id, "BODY")).score, bodyBefore + 0.5);
   const rows = await db!.select().from(comebacks).where(eq(comebacks.userId, id));
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.startedOn, TODAY);
@@ -418,7 +419,7 @@ test("quest completion after 6 empty days -> comeback notice (first) and row", {
   const a = clockApp();
   const { token, id } = await setup(a);
   await seed(id, addDays(TODAY, -7));
-  const q = await mkDaily(id);
+  const q = await mkDaily(id, "Read", "MIND"); // tap-completable (BODY workouts need a live session)
   const done = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
   assert.equal(done.status, 200);
   assert.equal(done.body.notices[0].kind, "comeback");
@@ -511,7 +512,7 @@ test("quest completion that finishes the checklist returns the mark; refused dai
     .update(quests)
     .set({ status: "refused", resolvedAt: NOW, resolvedLocalDate: TODAY, refusalReason: "tired" })
     .where(eq(quests.id, refused.id));
-  const q = await mkDaily(id);
+  const q = await mkDaily(id, "Read", "MIND"); // tap-completable (BODY workouts need a live session)
   const done = await request(a).post(`/api/quests/${q.id}/complete`).set(auth(token)).send({});
   assert.equal(done.status, 200);
   assert.ok(kindsOf(done.body).includes("returner_mark"));
